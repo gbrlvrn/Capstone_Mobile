@@ -1,0 +1,65 @@
+        {/* ✅ Summary Grid */}
+        {loanLoading ? (
+          <View style={styles.summaryGrid}>
+            <SkeletonStatCard style={styles.summaryCardWide} />
+            <SkeletonStatCard style={styles.summaryCardHalf} />
+            <SkeletonStatCard style={styles.summaryCardHalf} />
+          </View>
+        ) : (
+        <View style={styles.summaryGrid}>
+          {summaryData.map((item, idx) => (
+            <Animated.View
+              key={idx}
+              style={[
+                styles.summaryCard,
+                idx === 0 ? styles.summaryCardWide : styles.summaryCardHalf,
+                { opacity: summaryAnims[idx].opacity, transform: [{ translateY: summaryAnims[idx].translateY }] },
+              ]}
+            >
+              <View style={styles.summaryLeft}>
+                <Text style={[styles.summaryLabel, { color: colors.textMuted }]}>{item.label}</Text>
+                <Text style={[styles.summaryValue, { color: colors.textDark }]}>{item.value}</Text>
+              </View>
+              <View
+                style={[styles.summaryIconBg, { backgroundColor: item.iconBg }]}
+              >
+                <Image
+                  source={item.icon}
+                  style={[styles.summaryIcon, { tintColor: item.iconColor }]}
+                  resizeMode="contain"
+                />
+              </View>
+            </Animated.View>
+          ))}
+        </View>
+        )}
+
+        {/* Loan Timeline Calendar */}
+        <LoanCalendar
+          loans={loansData}
+          notes={loanNotes}
+          onDatePress={(date) => {
+            setSelectedCalendarDate(date);
+            const dateKey = date.toISOString().split('T')[0];
+            setNewNoteText(loanNotes[dateKey] || "");
+            setNoteModalOpen(true);
+          }}
+          colors={colors}
+          currentMonth={currentCalendarMonth}
+          setCurrentMonth={setCurrentCalendarMonth}
+        />
+
+        {/* All Loans Section */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textDark }]}>All Loans</Text>
+
+          {loansData.length === 0 ? (
+            <EmptyState
+              icon="document-text-outline"
+              title="No Loans Yet"
+              subtitle="Your loan applications will appear here once you apply."
+            />
+          ) : (
+          loansData.map((loan, idx) => (
+            <View key={idx} style={[styles.loanCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+              {/* Section label for active loans */}
