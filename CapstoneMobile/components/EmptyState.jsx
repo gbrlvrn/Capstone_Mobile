@@ -15,7 +15,7 @@ import { useTheme } from "./ThemeContext";
  *   onCta       – optional button callback
  *   color       – accent color (default "#0D1F45")
  */
-export default function EmptyState({
+function EmptyState({
   icon = "folder-open-outline",
   image,
   title = "Nothing here yet",
@@ -26,7 +26,7 @@ export default function EmptyState({
 }) {
   const { colors } = useTheme();
   return (
-    <View style={styles.container}>
+    <View style={styles.container} accessibilityLabel={`Empty state: ${title}`} accessibilityRole="text">
       {image ? (
         <Image source={image} style={styles.illustration} resizeMode="contain" />
       ) : (
@@ -41,6 +41,8 @@ export default function EmptyState({
           style={[styles.ctaBtn, { backgroundColor: color }]}
           onPress={onCta}
           activeOpacity={0.85}
+          accessibilityLabel={ctaLabel}
+          accessibilityRole="button"
         >
           <Text style={styles.ctaText}>{ctaLabel}</Text>
         </TouchableOpacity>
@@ -48,6 +50,8 @@ export default function EmptyState({
     </View>
   );
 }
+
+export default React.memo(EmptyState);
 
 const styles = StyleSheet.create({
   container: {

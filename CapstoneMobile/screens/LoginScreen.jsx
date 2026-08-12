@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import {
   View,
   Text,
@@ -12,10 +12,16 @@ import {
   Image,
   Platform,
   ActivityIndicator,
+  Dimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { loginUser } from "../services/AuthService";
+import { loginUser, saveUserData } from "../services/AuthService";
 import { useTheme } from "../components/ThemeContext";
+
+const { width: _SW, height: _SH } = Dimensions.get("window");
+const _WR = Math.min(_SW / 375, 1.3);
+const s = (v) => Math.round(v * _WR);
+const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
 
 const LOGO = require("../assets/puac_logo.png");
 const EMAIL_ICON = require("../assets/icons/email.png");
@@ -49,6 +55,7 @@ export default function LoginScreen({ navigation, route }) {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(!!(route?.params?.passwordResetSuccess));
+  const [sessionExpired, setSessionExpired] = useState(!!(route?.params?.sessionExpired));
 
   // lockout
   const [attempts, setAttempts] = useState(0);
@@ -172,7 +179,7 @@ export default function LoginScreen({ navigation, route }) {
       try {
         await AsyncStorage.setItem(LOGIN_ATTEMPTS_KEY, "0");
         await AsyncStorage.setItem("@faithly_session", JSON.stringify({ email: cleanEmail }));
-        await AsyncStorage.setItem("faithly_user", JSON.stringify(result?.user || { email: cleanEmail }));
+        await saveUserData(result?.user || { email: cleanEmail });
       } catch {
         // ignore
       }
@@ -214,13 +221,23 @@ export default function LoginScreen({ navigation, route }) {
             </View>
           )}
 
+          {/* Session expired banner */}
+          {sessionExpired && (
+            <View style={[styles.successBanner, { backgroundColor: '#FEF3C7', borderColor: '#FCD34D' }]}>
+              <Text style={[styles.successBannerText, { color: '#92400E' }]}>Session expired — please sign in again.</Text>
+              <TouchableOpacity onPress={() => setSessionExpired(false)} style={{ marginLeft: 8 }}>
+                <Text style={{ color: '#92400E', fontWeight: '700', fontSize: 13 }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           <TouchableOpacity
             style={styles.backBtn}
             onPress={() => {
               if (navigation.canGoBack()) {
                 navigation.goBack();
               } else {
-                navigation.navigate("PUAC");
+                navigation.navigate("Start");
               }
             }}
             activeOpacity={0.6}
@@ -289,11 +306,38 @@ export default function LoginScreen({ navigation, route }) {
               <Text style={[styles.forgotText, { color: colors.blue || '#0D1F45' }]}>Forgot Password?</Text>
             </TouchableOpacity>
 
-            {(errorMessage || isLocked) && (
-              <Text style={styles.lockText}>
-                {isLocked ? `Locked. Try again in ${timeLeft}s` : errorMessage}
-              </Text>
-            )}
+            {isLocked ? (
+              <View style={{ alignItems: 'center', marginBottom: 10 }}>
+                <View style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: 36,
+                  borderWidth: 4,
+                  borderColor: 'rgba(231,76,60,0.15)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: 8,
+                }}>
+                  <View style={{
+                    position: 'absolute',
+                    width: 72,
+                    height: 72,
+                    borderRadius: 36,
+                    borderWidth: 4,
+                    borderColor: '#E74C3C',
+                    borderTopColor: 'transparent',
+                    borderRightColor: timeLeft <= 30 ? '#E74C3C' : 'transparent',
+                    borderBottomColor: timeLeft <= 15 ? '#E74C3C' : 'transparent',
+                    transform: [{ rotate: `${((60 - timeLeft) / 60) * 360}deg` }],
+                  }} />
+                  <Text style={{ fontSize: 22, fontWeight: '800', color: '#E74C3C' }}>{timeLeft}</Text>
+                </View>
+                <Text style={[styles.lockText, { marginBottom: 0 }]}>Account temporarily locked</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>Too many failed attempts</Text>
+              </View>
+            ) : errorMessage ? (
+              <Text style={styles.lockText}>{errorMessage}</Text>
+            ) : null}
 
             <TouchableOpacity
               style={[styles.otpBtn, (loading || isLocked) && { opacity: 0.8 }]}
@@ -341,17 +385,17 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.bg,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 24,
-    paddingTop: Platform.OS === "ios" ? 70 : 56,
-    paddingBottom: 32,
+    paddingHorizontal: s(24),
+    paddingTop: Platform.OS === "ios" ? s(70) : s(56),
+    paddingBottom: s(32),
   },
   circleTopRight: {
     position: 'absolute',
     top: -80,
     right: -80,
-    width: 300,
-    height: 300,
-    borderRadius: 150,
+    width: s(300),
+    height: s(300),
+    borderRadius: s(150),
     backgroundColor: '#0D1F45',
     opacity: 0.05,
   },
@@ -359,26 +403,26 @@ const getStyles = (C) => StyleSheet.create({
     position: 'absolute',
     bottom: -100,
     left: -100,
-    width: 350,
-    height: 350,
-    borderRadius: 175,
+    width: s(350),
+    height: s(350),
+    borderRadius: s(175),
     backgroundColor: '#00C3FF',
     opacity: 0.05,
   },
   backBtn: {
     alignSelf: "flex-start",
-    marginBottom: 24,
-    paddingVertical: 4,
+    marginBottom: s(24),
+    paddingVertical: s(4),
   },
-  backText: { fontSize: 16, fontWeight: '600', color: C.textMuted },
+  backText: { fontSize: fs(16), fontWeight: '600', color: C.textMuted },
 
   card: {
     width: "100%",
     backgroundColor: C.cardBg,
-    borderRadius: 28,
-    paddingHorizontal: 24,
-    paddingTop: 32,
-    paddingBottom: 28,
+    borderRadius: s(28),
+    paddingHorizontal: s(24),
+    paddingTop: s(32),
+    paddingBottom: s(28),
     alignItems: "center",
     shadowColor: '#64748B',
     shadowOffset: { width: 0, height: 8 },
@@ -389,22 +433,22 @@ const getStyles = (C) => StyleSheet.create({
     borderColor: '#F1F5F9',
   },
 
-  logo: { width: 60, height: 60, marginBottom: 14, borderRadius: 30 },
+  logo: { width: s(60), height: s(60), marginBottom: s(14), borderRadius: s(30) },
   title: {
-    fontSize: 24,
+    fontSize: fs(24),
     fontWeight: "800",
     color: C.textWhite,
-    marginBottom: 4,
+    marginBottom: s(4),
     letterSpacing: -0.5,
   },
-  subtitle: { fontSize: 14, color: C.textMuted, marginBottom: 24 },
+  subtitle: { fontSize: fs(14), color: C.textMuted, marginBottom: s(24) },
 
   label: {
     alignSelf: "flex-start",
-    fontSize: 13,
+    fontSize: fs(13),
     fontWeight: "600",
     color: C.textWhite,
-    marginBottom: 6,
+    marginBottom: s(6),
   },
 
   inputRow: {
@@ -414,19 +458,19 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: '#F8FAFC',
     borderWidth: 1.5,
     borderColor: '#E2E8F0',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    marginBottom: 16,
+    borderRadius: s(14),
+    paddingHorizontal: s(14),
+    paddingVertical: s(14),
+    marginBottom: s(16),
   },
-  inputIcon: { width: 20, height: 20, tintColor: '#64748B' },
-  input: { flex: 1, fontSize: 15, color: C.textWhite, marginLeft: 10 },
+  inputIcon: { width: s(20), height: s(20), tintColor: '#64748B' },
+  input: { flex: 1, fontSize: fs(15), color: C.textWhite, marginLeft: s(10) },
 
   lockText: {
     width: "100%",
     color: "#D00000",
-    fontSize: 12,
-    marginBottom: 8,
+    fontSize: fs(12),
+    marginBottom: s(8),
     marginTop: -4,
     textAlign: "left",
   },
@@ -434,47 +478,47 @@ const getStyles = (C) => StyleSheet.create({
   otpBtn: {
     width: "100%",
     backgroundColor: "#0D1F45",
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: s(14),
+    paddingVertical: s(16),
     alignItems: "center",
-    marginTop: 4,
-    marginBottom: 20,
+    marginTop: s(4),
+    marginBottom: s(20),
     shadowColor: "#0D1F45",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.25,
     shadowRadius: 10,
     elevation: 6,
   },
-  otpBtnText: { fontSize: 16, fontWeight: "700", color: "#ffffff", letterSpacing: 0.3 },
+  otpBtnText: { fontSize: fs(16), fontWeight: "700", color: "#ffffff", letterSpacing: 0.3 },
 
   dividerRow: {
     flexDirection: "row",
     alignItems: "center",
     width: "100%",
-    marginBottom: 16,
-    gap: 10,
+    marginBottom: s(16),
+    gap: s(10),
   },
   dividerLine: { flex: 1, height: 1, backgroundColor: '#E8EDF2' },
-  dividerText: { fontSize: 12, fontWeight: "500", color: C.textDimmed },
+  dividerText: { fontSize: fs(12), fontWeight: "500", color: C.textDimmed },
 
   createBtn: {
     width: "100%",
     borderWidth: 1.5,
     borderColor: '#E2E8F0',
     backgroundColor: '#F8FAFC',
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: s(14),
+    paddingVertical: s(16),
     alignItems: "center",
   },
-  createBtnText: { fontSize: 15, color: '#334155', fontWeight: "700" },
+  createBtnText: { fontSize: fs(15), color: '#334155', fontWeight: "700" },
 
   disclaimer: {
-    marginTop: 20,
-    fontSize: 11,
+    marginTop: s(20),
+    fontSize: fs(11),
     color: C.textDimmed,
     textAlign: "center",
-    lineHeight: 18,
-    paddingHorizontal: 8,
+    lineHeight: fs(18),
+    paddingHorizontal: s(8),
   },
   disclaimerLink: { color: C.linkBlue, fontWeight: "500" },
 
@@ -483,11 +527,11 @@ const getStyles = (C) => StyleSheet.create({
   forgotBtn: {
     alignSelf: 'flex-end',
     marginTop: -8,
-    marginBottom: 12,
-    paddingVertical: 4,
+    marginBottom: s(12),
+    paddingVertical: s(4),
   },
   forgotText: {
-    fontSize: 13,
+    fontSize: fs(13),
     fontWeight: '600',
   },
 
@@ -497,17 +541,17 @@ const getStyles = (C) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#DCFCE7',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 16,
+    borderRadius: s(12),
+    paddingHorizontal: s(14),
+    paddingVertical: s(12),
+    marginBottom: s(16),
     borderWidth: 1,
     borderColor: '#86EFAC',
   },
   successBannerText: {
     flex: 1,
     color: '#166534',
-    fontSize: 13,
+    fontSize: fs(13),
     fontWeight: '600',
   },
 });

@@ -6,16 +6,22 @@ import {
   Image,
   StyleSheet,
   Dimensions,
+  Platform,
 } from "react-native";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
-const BTN_SIZE = 52;
+
+// Responsive scale factor
+const W_RATIO = Math.min(SCREEN_W / 375, 1.3);
+const s = (v) => Math.round(v * W_RATIO);
+
+const BTN_SIZE = s(52);
 
 const ICONS = {
   chat: require("../assets/icons/chat.png"),
 };
 
-export default function DraggableChatButton({ onPress }) {
+function DraggableChatButton({ onPress }) {
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const lastOffset = useRef({ x: 0, y: 0 });
 
@@ -40,11 +46,11 @@ export default function DraggableChatButton({ onPress }) {
 
         // Clamp within screen bounds
         const newX = Math.min(
-          Math.max(lastOffset.current.x + gestureState.dx, -(SCREEN_W - BTN_SIZE - 20)),
+          Math.max(lastOffset.current.x + gestureState.dx, -(SCREEN_W - BTN_SIZE - s(20))),
           0
         );
         const newY = Math.min(
-          Math.max(lastOffset.current.y + gestureState.dy, -(SCREEN_H - BTN_SIZE - 200)),
+          Math.max(lastOffset.current.y + gestureState.dy, -(SCREEN_H - BTN_SIZE - s(200))),
           0
         );
 
@@ -73,6 +79,8 @@ export default function DraggableChatButton({ onPress }) {
         style={styles.btn}
         activeOpacity={0.7}
         onPress={onPress}
+        accessibilityLabel="Open AI chatbot assistant"
+        accessibilityRole="button"
       >
         <Image
           source={ICONS.chat}
@@ -84,12 +92,21 @@ export default function DraggableChatButton({ onPress }) {
   );
 }
 
+export default React.memo(DraggableChatButton);
+
+// Bottom offset accounts for FloatingNavBar height (~60) + spacing
+const CHAT_BTN_BOTTOM = Platform.select({
+  ios: SCREEN_H >= 812 ? s(100) : s(90),
+  android: s(96),
+  default: s(96),
+});
+
 const styles = StyleSheet.create({
   container: {
     position: "absolute",
-    bottom: 100,
-    right: 20,
-    zIndex: 10,
+    bottom: CHAT_BTN_BOTTOM,
+    right: s(18),
+    zIndex: 100,
   },
   btn: {
     width: BTN_SIZE,
@@ -105,8 +122,8 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   icon: {
-    width: 26,
-    height: 26,
+    width: s(26),
+    height: s(26),
     tintColor: "#FFFFFF",
   },
 });

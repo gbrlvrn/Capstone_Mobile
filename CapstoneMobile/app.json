@@ -6,12 +6,12 @@
     "orientation": "portrait",
     "scheme": "puac",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0D1F45"
     },
     "notification": {
       "icon": "./assets/splash-icon.png",
@@ -37,7 +37,8 @@
           "cameraPermission": "Allow PUAC to access your camera to scan attendance QR codes."
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-secure-store"
     ],
     "ios": {
       "supportsTablet": true,
@@ -45,7 +46,13 @@
         "NSPhotoLibraryUsageDescription": "This app needs access to your photos to upload your ID and selfie.",
         "NSCameraUsageDescription": "This app needs access to your camera to take a selfie.",
         "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true
+          "NSAllowsArbitraryLoads": false,
+          "NSExceptionDomains": {
+            "faithly-server.onrender.com": {
+              "NSExceptionAllowsInsecureHTTPLoads": false,
+              "NSIncludesSubdomains": true
+            }
+          }
         }
       }
     },
@@ -61,7 +68,6 @@
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
         "READ_MEDIA_IMAGES",
-        "RECORD_AUDIO",
         "READ_CALENDAR",
         "WRITE_CALENDAR",
         "ACCESS_FINE_LOCATION",
@@ -72,9 +78,14 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "puac" }
+            {
+              "scheme": "puac"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },

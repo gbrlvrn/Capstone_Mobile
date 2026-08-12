@@ -35,9 +35,10 @@ function getDevIP() {
   return null;
 }
 
-// Set to true when the APK should target your local backend (same WiFi)
-const USE_LOCAL_FOR_PRODUCTION = true;
-const LOCAL_IP = "192.168.1.110"; // Hardcoded fallback for APK builds
+// Set to true ONLY for local testing APKs (same WiFi as dev machine).
+// Must be FALSE for any public release / capstone defense APK.
+const USE_LOCAL_FOR_PRODUCTION = false;
+const LOCAL_IP = "192.168.1.110"; // Hardcoded fallback for local-only APK builds
 const PRODUCTION_URL = "https://faithly-server.onrender.com/api";
 
 function getBaseUrl() {

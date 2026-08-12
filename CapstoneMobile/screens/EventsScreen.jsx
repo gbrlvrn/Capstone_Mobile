@@ -21,8 +21,14 @@ import { getEvents, rsvpEvent, seedEvents } from "../services/AuthService";
 import * as Haptics from "expo-haptics";
 import * as Calendar from "expo-calendar";
 import { useToast } from "../components/ToastContext";
+import OfflineBanner from "../components/OfflineBanner";
+import { SkeletonBlock, SkeletonLine } from "../components/SkeletonLoader";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
+const s = (v) => Math.round(v * _WR);
+const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
+const SIDEBAR_WIDTH = s(260);
 
 const LOGO = require("../assets/puac_logo.png");
 
@@ -128,7 +134,7 @@ export default function EventsScreen({ navigation, route }) {
   const [rsvpedEvents, setRsvpedEvents] = useState({});
 
   const indicatorPosition = useRef(new Animated.Value(0)).current;
-  const slideX = useRef(new Animated.Value(-260)).current;
+  const slideX = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const tabAnimations = useRef(ALL_TAB_ITEMS.map(() => ({ scale: new Animated.Value(1), bgOpacity: new Animated.Value(0) }))).current;
 
   // Card entrance animations
@@ -204,7 +210,7 @@ export default function EventsScreen({ navigation, route }) {
   }, [slideX]);
 
   const closeSidebar = useCallback(() => {
-    Animated.timing(slideX, { toValue: -260, duration: 250, useNativeDriver: true }).start(() => setSidebarOpen(false));
+    Animated.timing(slideX, { toValue: -SIDEBAR_WIDTH, duration: 250, useNativeDriver: true }).start(() => setSidebarOpen(false));
   }, [slideX]);
 
   useEffect(() => {
@@ -279,15 +285,16 @@ export default function EventsScreen({ navigation, route }) {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <OfflineBanner />
       <View style={styles.circleTopRight} />
       <View style={styles.circleBottomLeft} />
 
       <View style={[styles.topBar, { backgroundColor: "transparent" }]}>
         <TouchableOpacity style={styles.menuBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home', { email: userEmail })} activeOpacity={0.6}>
-          <Text style={{color: '#FFF', fontSize: 28, paddingHorizontal: 4}}>â†</Text>
+          <Text style={{color: '#FFF', fontSize: fs(28), paddingHorizontal: 4}}>â†</Text>
         </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: 36, height: 36 }} resizeMode="contain" /></View>
-        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: 22, height: 22, tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
+        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: s(36), height: 36, borderRadius: 18 }} resizeMode="cover" /></View>
+        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: s(22), height: s(22), tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
       </View>
 
       <ScrollView
@@ -316,13 +323,26 @@ export default function EventsScreen({ navigation, route }) {
 
         {/* Events List */}
         {loading ? (
-          <View style={{ padding: 40, alignItems: "center" }}>
-            <ActivityIndicator size="large" color={C.blue} />
-            <Text style={[styles.loadingText, { color: colors.textMuted }]}>Loading events...</Text>
+          <View style={styles.eventsList}>
+            {[1, 2, 3].map((i) => (
+              <View key={i} style={[styles.eventCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+                <SkeletonBlock width={80} height={24} borderRadius={8} style={{ marginBottom: 12 }} />
+                <SkeletonLine width="70%" height={18} style={{ marginBottom: 8 }} />
+                <SkeletonLine width="95%" height={13} style={{ marginBottom: 4 }} />
+                <SkeletonLine width="60%" height={13} style={{ marginBottom: 16 }} />
+                <SkeletonLine width="50%" height={12} style={{ marginBottom: 6 }} />
+                <SkeletonLine width="45%" height={12} style={{ marginBottom: 6 }} />
+                <SkeletonLine width="55%" height={12} style={{ marginBottom: 16 }} />
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <SkeletonBlock width="48%" height={40} borderRadius={12} />
+                  <SkeletonBlock width="48%" height={40} borderRadius={12} />
+                </View>
+              </View>
+            ))}
           </View>
         ) : events.length === 0 ? (
           <View style={[styles.emptyCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-            <Image source={ICONS.calendar} style={{width: 48, height: 48, tintColor: colors.textMuted, marginBottom: 12, opacity: 0.5}} resizeMode="contain"/>
+            <Image source={ICONS.calendar} style={{width: s(48), height: s(48), tintColor: colors.textMuted, marginBottom: s(12), opacity: 0.5}} resizeMode="contain"/>
             <Text style={[styles.emptyTitle, { color: colors.textDark }]}>No Upcoming Events</Text>
             <Text style={[styles.emptySub, { color: colors.textMuted }]}>Check back later for new events.</Text>
           </View>
@@ -422,7 +442,7 @@ export default function EventsScreen({ navigation, route }) {
       <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideX }] }]}>
         <View style={styles.sidebarHeader}>
           <Image source={LOGO} style={styles.sidebarLogo} resizeMode="contain" />
-          <Image source={LOGO} style={{ width: 40, height: 40, tintColor: "#fff" }} resizeMode="contain" />
+          <Image source={LOGO} style={{ width: s(40), height: s(40), tintColor: "#fff" }} resizeMode="contain" />
         </View>
         <View style={styles.sidebarNav}>
           {SIDEBAR_ITEMS.map((item) => (
@@ -460,77 +480,83 @@ const getStyles = (C) => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg  },
   circleTopRight: { position: 'absolute', top: -120, right: -120, width: 350, height: 350, borderRadius: 175, backgroundColor: '#0D1F45', opacity: 0.04, zIndex: 0 },
   circleBottomLeft: { position: 'absolute', bottom: -150, left: -150, width: 450, height: 450, borderRadius: 225, backgroundColor: '#00C3FF', opacity: 0.04, zIndex: 0 },
-  topBar: { backgroundColor: C.navBg, flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingTop: Platform.OS === "ios" ? 56 : 42, paddingBottom: 14 },
+  topBar: { backgroundColor: C.navBg, flexDirection: "row", alignItems: "center", paddingHorizontal: s(18), paddingTop: Platform.OS === "ios" ? s(56) : s(42), paddingBottom: 14 },
   menuBtn: { padding: 4, justifyContent: "center", gap: 5 },
-  menuLine: { width: 22, height: 2.2, backgroundColor: C.textDark, borderRadius: 1.2 },
-  topTitle: { flex: 1, textAlign: "center", fontSize: 20, fontWeight: "600", color: C.textDark },
+  menuLine: { width: s(22), height: 2.2, backgroundColor: C.textDark, borderRadius: 1.2 },
+  topTitle: { flex: 1, textAlign: "center", fontSize: fs(20), fontWeight: "600", color: C.textDark },
   topSpacer: { width: 28 },
   scroll: { flex: 1 },
-  header: { paddingHorizontal: 18, paddingTop: 20, paddingBottom: 16 },
-  headerTitle: { fontSize: 26, fontWeight: "700", marginBottom: 4 },
-  headerSubtitle: { fontSize: 14, lineHeight: 20 },
+  header: { paddingHorizontal: s(18), paddingTop: s(20), paddingBottom: 16 },
+  headerTitle: { fontSize: fs(26), fontWeight: "700", marginBottom: 4 },
+  headerSubtitle: { fontSize: fs(14), lineHeight: 20 },
 
   // Stats
-  statsRow: { flexDirection: "row", paddingHorizontal: 18, gap: 12, marginBottom: 20 },
-  statCard: { flex: 1, borderRadius: 16, padding: 18, borderWidth: 1, alignItems: "center" },
-  statValue: { fontSize: 28, fontWeight: "700", marginBottom: 4 },
-  statLabel: { fontSize: 13, fontWeight: "600" },
+  statsRow: { flexDirection: "row", paddingHorizontal: s(18), gap: s(12), marginBottom: 20 },
+  statCard: { flex: 1, borderRadius: s(16), padding: s(18), borderWidth: 1, alignItems: "center" },
+  statValue: { fontSize: fs(28), fontWeight: "700", marginBottom: 4 },
+  statLabel: { fontSize: fs(13), fontWeight: "600" },
 
   // Events
-  eventsList: { paddingHorizontal: 18, gap: 16 },
-  eventCard: { borderRadius: 18, padding: 20, borderWidth: 1, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 12, elevation: 2 },
-  dateBadge: { alignSelf: "flex-start", paddingVertical: 5, paddingHorizontal: 12, borderRadius: 8, marginBottom: 12 },
-  dateBadgeText: { fontSize: 12, fontWeight: "700" },
-  eventTitle: { fontSize: 18, fontWeight: "700", marginBottom: 6 },
-  eventDesc: { fontSize: 14, lineHeight: 20, marginBottom: 14 },
+  eventsList: { paddingHorizontal: s(18), gap: 16 },
+  eventCard: { borderRadius: s(18), padding: s(20), borderWidth: 1, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 12, elevation: 2 },
+  dateBadge: { alignSelf: "flex-start", paddingVertical: 5, paddingHorizontal: s(12), borderRadius: s(8), marginBottom: 12 },
+  dateBadgeText: { fontSize: fs(12), fontWeight: "700" },
+  eventTitle: { fontSize: fs(18), fontWeight: "700", marginBottom: 6 },
+  eventDesc: { fontSize: fs(14), lineHeight: fs(20), marginBottom: 14 },
   eventDetails: { gap: 8, marginBottom: 14 },
   detailRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   detailIcon: { width: 16, height: 16 },
-  detailText: { fontSize: 13, fontWeight: "500" },
+  detailText: { fontSize: fs(13), fontWeight: "500" },
   rsvpRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
   attendeesInfo: { flexDirection: "row", alignItems: "center", gap: 6 },
   attendeesIcon: { width: 16, height: 16 },
-  attendeesText: { fontSize: 13, fontWeight: "600" },
+  attendeesText: { fontSize: fs(13), fontWeight: "600" },
   eventActions: { flexDirection: "row", gap: 12 },
-  rsvpBtn: { flex: 1, backgroundColor: C.blue, paddingVertical: 12, borderRadius: 12, alignItems: "center" },
+  rsvpBtn: { flex: 1, backgroundColor: C.blue, paddingVertical: s(12), borderRadius: s(12), alignItems: "center" },
   rsvpBtnDone: { backgroundColor: C.greenLight },
-  rsvpBtnText: { color: "#FFF", fontSize: 14, fontWeight: "700" },
+  rsvpBtnText: { color: "#FFF", fontSize: fs(14), fontWeight: "700" },
   rsvpBtnTextDone: { color: C.green },
-  calendarBtn: { flex: 1, backgroundColor: C.blueLight, paddingVertical: 12, borderRadius: 12, alignItems: "center" },
-  calendarBtnText: { color: C.blue, fontSize: 14, fontWeight: "700" },
-  loadingText: { marginTop: 12, fontSize: 14 },
-  emptyCard: { marginHorizontal: 18, borderRadius: 18, padding: 40, borderWidth: 1, alignItems: "center" },
-  emptyTitle: { fontSize: 16, fontWeight: "700", marginBottom: 4 },
-  emptySub: { fontSize: 14, textAlign: "center" },
-  bottomPad: { height: 100 },
+  calendarBtn: { flex: 1, backgroundColor: C.blueLight, paddingVertical: s(12), borderRadius: s(12), alignItems: "center" },
+  calendarBtnText: { color: C.blue, fontSize: fs(14), fontWeight: "700" },
+  loadingText: { marginTop: s(12), fontSize: 14 },
+  emptyCard: { marginHorizontal: s(18), borderRadius: s(18), padding: s(40), borderWidth: 1, alignItems: "center" },
+  emptyTitle: { fontSize: fs(16), fontWeight: "700", marginBottom: 4 },
+  emptySub: { fontSize: fs(14), textAlign: "center" },
+  bottomPad: { height: 110 },
 
   // Tab bar
-  tabBar: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", backgroundColor: C.tabBg, borderTopWidth: 1, borderTopColor: "rgba(100,140,200,0.2)", paddingVertical: 15, paddingBottom: Platform.OS === "ios" ? 30 : 10 },
-  tabIndicator: { position: "absolute", bottom: 0, width: SCREEN_WIDTH / 5, height: 3, backgroundColor: C.tabActive, borderRadius: 2 },
+  tabBar: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", backgroundColor: C.tabBg, borderTopWidth: 1, borderTopColor: "rgba(100,140,200,0.2)", paddingVertical: s(15), paddingBottom: Platform.OS === "ios" ? 30 : 10 },
+  tabIndicator: { position: "absolute", bottom: 0, width: SCREEN_WIDTH / 5, height: s(3), backgroundColor: C.tabActive, borderRadius: 2 },
   tabItem: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, position: "relative" },
   tabBgCircle: { position: "absolute", width: 75, height: 62, borderRadius: 15, backgroundColor: "rgba(46,107,240,0.15)", top: -14 },
-  tabIcon: { width: 26, height: 26 },
+  tabIcon: { width: s(26), height: 26 },
   tabLabel: { fontSize: 10 },
 
   // Sidebar
-  overlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.overlay, zIndex: 10 },
-  sidebar: { position: "absolute", top: 0, left: 0, bottom: 0, width: 260, backgroundColor: "#0D1F45", zIndex: 20, paddingTop: Platform.OS === "ios" ? 60 : 44, paddingHorizontal: 18, justifyContent: "space-between" },
-  sidebarHeader: { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 30 },
-  sidebarLogo: { width: 40, height: 40, borderRadius: 20 },
-  sidebarTitle: { fontSize: 20, fontWeight: "700", color: "#FFF" },
+  overlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.overlay, zIndex: 998, elevation: 998 },
+  sidebar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: SIDEBAR_WIDTH,
+    backgroundColor: C.sidebarBg, zIndex: 1000, elevation: 1000, paddingTop: Platform.OS === "ios" ? s(60) : s(44), paddingHorizontal: s(18), justifyContent: "space-between" },
+  sidebarHeader: { flexDirection: "row", alignItems: "center", gap: s(14), marginBottom: 30 },
+  sidebarLogo: { width: s(40), height: s(40), borderRadius: 20 },
+  sidebarTitle: { fontSize: fs(20), fontWeight: "700", color: "#FFF" },
   sidebarNav: { flex: 1, gap: 4 },
-  sidebarItem: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12 },
-  sidebarIcon: { width: 20, height: 20 },
-  sidebarItemText: { fontSize: 15, color: C.textMuted, fontWeight: "600" },
-  sidebarFooter: { paddingBottom: Platform.OS === "ios" ? 30 : 16, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.1)", paddingTop: 16 },
-  sidebarUserRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 },
-  sidebarAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" },
-  sidebarAvatarIcon: { width: 18, height: 18, tintColor: "#FFF" },
-  sidebarUserName: { fontSize: 14, fontWeight: "600", color: "#FFF" },
-  sidebarUserEmail: { fontSize: 12, color: "rgba(255,255,255,0.5)" },
-  signOutRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
-  signOutIcon: { width: 18, height: 18, tintColor: "#E74C3C" },
-  signOutText: { fontSize: 14, fontWeight: "500", color: "#E74C3C" },
+  sidebarItem: { flexDirection: "row", alignItems: "center", gap: s(14), paddingVertical: s(12), paddingHorizontal: s(12), borderRadius: 12 },
+  sidebarIcon: { width: s(20), height: 20 },
+  sidebarItemText: { fontSize: fs(15), color: C.textMuted, fontWeight: "600" },
+  sidebarFooter: { paddingBottom: Platform.OS === "ios" ? s(30) : s(16), borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.1)", paddingTop: 16 },
+  sidebarUserRow: { flexDirection: "row", alignItems: "center", gap: s(12), marginBottom: 16 },
+  sidebarAvatar: { width: s(36), height: s(36), borderRadius: s(18), backgroundColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" },
+  sidebarAvatarIcon: { width: s(18), height: s(18), tintColor: "#FFF" },
+  sidebarUserName: { fontSize: fs(14), fontWeight: "600", color: "#FFF" },
+  sidebarUserEmail: { fontSize: fs(12), color: "rgba(255,255,255,0.5)" },
+  signOutRow: { flexDirection: "row", alignItems: "center", gap: s(12), paddingVertical: 10 },
+  signOutIcon: { width: s(18), height: s(18), tintColor: "#E74C3C" },
+  signOutText: { fontSize: fs(14), fontWeight: "500", color: "#E74C3C" },
 });
 
 

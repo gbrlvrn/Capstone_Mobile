@@ -21,6 +21,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import ChatbotModal from "./ChatbotModal";
 import DraggableChatButton from "../components/DraggableChatButton";
+import FloatingNavBar from "../components/FloatingNavBar";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { getPublicSettings, getVerificationStatus, createLoan, getLoans, submitLoanPayment, getMyLoanPayments, cancelLoan, getLoanSchedule, verifyIdImage } from "../services/AuthService";
@@ -33,8 +34,13 @@ import { useAlert } from "../components/AlertContext";
 import ReceiptModal from "../components/ReceiptModal";
 import LoanCalendar from "../components/LoanCalendar";
 import NoteModal from "../components/NoteModal";
+import OfflineBanner from "../components/OfflineBanner";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
+const s = (v) => Math.round(v * _WR);
+const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
+const SIDEBAR_WIDTH = s(260);
 
 const LOGO = require("../assets/puac_logo.png");
 
@@ -297,6 +303,138 @@ export default function LoansScreen({ navigation, route }) {
   const [receiptData, setReceiptData] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
+
+  // Draft persistence helpers for loan application
+  const clearLoanDraft = useCallback(async () => {
+    if (!userEmail) return;
+    try {
+      await AsyncStorage.removeItem(`faithly_loan_draft_${userEmail}`);
+    } catch (e) {
+      console.log("Failed to clear loan draft:", e);
+    }
+  }, [userEmail]);
+
+  const saveLoanDraft = useCallback(async (data) => {
+    if (!userEmail) return;
+    try {
+      await AsyncStorage.setItem(`faithly_loan_draft_${userEmail}`, JSON.stringify(data));
+    } catch (e) {
+      console.log("Failed to save loan draft:", e);
+    }
+  }, [userEmail]);
+
+  const loadLoanDraft = useCallback(async () => {
+    if (!userEmail) return;
+    try {
+      const saved = await AsyncStorage.getItem(`faithly_loan_draft_${userEmail}`);
+      if (saved) {
+        const draft = JSON.parse(saved);
+        if (draft.loanType) setLoanType(draft.loanType);
+        if (draft.loanAmount) setLoanAmount(draft.loanAmount);
+        if (draft.phoneNumber) setPhoneNumber(draft.phoneNumber);
+        if (draft.purposeCategory) setPurposeCategory(draft.purposeCategory);
+        if (draft.purpose) setPurpose(draft.purpose);
+        if (draft.monthsToPay) setMonthsToPay(draft.monthsToPay);
+        if (draft.disbursementMethod) setDisbursementMethod(draft.disbursementMethod);
+        if (draft.accountNumber) setAccountNumber(draft.accountNumber);
+      }
+    } catch (e) {
+      console.log("Failed to load loan draft:", e);
+    }
+  }, [userEmail]);
+
+  // Auto-save draft whenever inputs change while apply modal is open
+  useEffect(() => {
+    if (!applyModalOpen) return;
+    const isDirty = Boolean(
+      loanType || loanAmount || (phoneNumber && phoneNumber !== "+63 ") || purposeCategory || purpose || monthsToPay || disbursementMethod || accountNumber
+    );
+    if (isDirty) {
+      saveLoanDraft({
+        loanType,
+        loanAmount,
+        phoneNumber,
+        purposeCategory,
+        purpose,
+        monthsToPay,
+        disbursementMethod,
+        accountNumber,
+      });
+    }
+  }, [applyModalOpen, loanType, loanAmount, phoneNumber, purposeCategory, purpose, monthsToPay, disbursementMethod, accountNumber, saveLoanDraft]);
+
+  const handleOpenApplyModal = useCallback(() => {
+    setFormError("");
+    loadLoanDraft();
+    setApplyModalOpen(true);
+  }, [loadLoanDraft]);
+
+  const handleCloseApplyModal = useCallback((force = false) => {
+    const isDirty = Boolean(
+      loanType || loanAmount || (phoneNumber && phoneNumber !== "+63 ") || purposeCategory || purpose || monthsToPay || disbursementMethod || accountNumber
+    );
+
+    if (!force && isDirty) {
+      Alert.alert(
+        "Unsaved Loan Application",
+        "You have unsaved changes in your loan form. Would you like to save your draft or discard?",
+        [
+          {
+            text: "Save Draft",
+            onPress: () => {
+              saveLoanDraft({
+                loanType,
+                loanAmount,
+                phoneNumber,
+                purposeCategory,
+                purpose,
+                monthsToPay,
+                disbursementMethod,
+                accountNumber,
+              });
+              setApplyModalOpen(false);
+            },
+          },
+          {
+            text: "Discard Draft",
+            style: "destructive",
+            onPress: () => {
+              clearLoanDraft();
+              setLoanType("");
+              setLoanAmount("");
+              setPhoneNumber("+63 ");
+              setPurposeCategory("");
+              setPurpose("");
+              setMonthsToPay("");
+              setSelfie(null);
+              setValidId(null);
+              setIdVerified(false);
+              setIdRejected(false);
+              setIdVerifying(false);
+              setIdVerifyResult(null);
+              setCoeDoc(null);
+              setItrDoc(null);
+              setPayslipDoc(null);
+              setActiveLoanDoc(null);
+              setHasExistingLoan(null);
+              setDisbursementMethod("");
+              setAccountNumber("");
+              setAgreedToTerms(false);
+              setFormError("");
+              setApplyModalOpen(false);
+            },
+          },
+          {
+            text: "Keep Editing",
+            style: "cancel",
+          },
+        ]
+      );
+    } else {
+      setFormError("");
+      setApplyModalOpen(false);
+    }
+  }, [loanType, loanAmount, phoneNumber, purposeCategory, purpose, monthsToPay, disbursementMethod, accountNumber, saveLoanDraft, clearLoanDraft]);
 
   // Pay Now modal state
   const [payNowModalOpen, setPayNowModalOpen] = useState(false);
@@ -767,7 +905,7 @@ export default function LoansScreen({ navigation, route }) {
   const TAB_WIDTH = SCREEN_WIDTH / TAB_ITEMS.length;
 
   const indicatorPosition = useRef(new Animated.Value(0)).current;
-  const slideX = useRef(new Animated.Value(-260)).current;
+  const slideX = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
 
   const tabAnimations = useRef(
     ALL_TAB_ITEMS.map(() => ({
@@ -787,7 +925,7 @@ export default function LoansScreen({ navigation, route }) {
 
   const closeSidebar = useCallback(() => {
     Animated.timing(slideX, {
-      toValue: -260,
+      toValue: -SIDEBAR_WIDTH,
       duration: 250,
       useNativeDriver: true,
     }).start(() => setSidebarOpen(false));
@@ -948,7 +1086,8 @@ export default function LoansScreen({ navigation, route }) {
         );
       }
 
-      // Reset form
+      // Reset form & clear saved draft
+      await clearLoanDraft();
       setLoanType("");
       setLoanAmount("");
       setPhoneNumber("+63 ");
@@ -1176,6 +1315,7 @@ export default function LoansScreen({ navigation, route }) {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <OfflineBanner />
       <View style={styles.circleTopRight} />
       <View style={styles.circleBottomLeft} />
 
@@ -1190,8 +1330,8 @@ export default function LoansScreen({ navigation, route }) {
           <View style={styles.menuLine} />
           <View style={styles.menuLine} />
         </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: 36, height: 36 }} resizeMode="contain" /></View>
-        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: 22, height: 22, tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
+        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: s(36), height: 36, borderRadius: 18 }} resizeMode="cover" /></View>
+        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: s(22), height: s(22), tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
       </View>
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}
@@ -1224,7 +1364,7 @@ export default function LoansScreen({ navigation, route }) {
               if (hasOngoingLoan) {
                 return showAlert("Wait just a moment", "You already have an active loan or an ongoing application. Please complete or settle it before applying for a new one.");
               }
-              setApplyModalOpen(true);
+              handleOpenApplyModal();
             }}
             disabled={!isEligibleForLoan}
           >
@@ -1240,29 +1380,29 @@ export default function LoansScreen({ navigation, route }) {
               backgroundColor: "rgba(231,76,60,0.06)",
               borderWidth: 1,
               borderColor: "rgba(231,76,60,0.3)",
-              borderRadius: 16,
-              paddingHorizontal: 16,
-              paddingTop: 16,
+              borderRadius: s(16),
+              paddingHorizontal: s(16),
+              paddingTop: s(16),
               paddingBottom: 5,
-              marginBottom: 16,
+              marginBottom: s(16),
             }}
             activeOpacity={0.8}
             onPress={() => navigation.replace("Savings", { email: userEmail })}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <View style={{
-                width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(231,76,60,0.15)',
+                width: s(44), height: s(44), borderRadius: s(12), backgroundColor: 'rgba(231,76,60,0.15)',
                 alignItems: 'center', justifyContent: 'center', marginRight: 14
               }}>
-                <Image source={ICONS.lock} style={{ width: 22, height: 22, tintColor: C.red }} resizeMode="contain" />
+                <Image source={ICONS.lock} style={{ width: s(22), height: s(22), tintColor: C.red }} resizeMode="contain" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 16, fontWeight: '800', color: C.red }}>Savings Required</Text>
+                <Text style={{ fontSize: fs(16), fontWeight: '800', color: C.red }}>Savings Required</Text>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 2 }}>
-                  <Text style={{ fontSize: 13, color: C.red, opacity: 0.85, lineHeight: 18 }}>
+                  <Text style={{ fontSize: fs(13), color: C.red, opacity: 0.85, lineHeight: 18 }}>
                     Requires ₱1,000 threshold.{"\n"}Current balances: ₱{totalSavings.toLocaleString()}
                   </Text>
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: C.red, marginBottom: 2 }}>
+                  <Text style={{ fontSize: fs(13), fontWeight: '700', color: C.red, marginBottom: 2 }}>
                     Go to Savings →
                   </Text>
                 </View>
@@ -1342,7 +1482,7 @@ export default function LoansScreen({ navigation, route }) {
             <View key={idx} style={[styles.loanCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
               {/* Section label for active loans */}
               {loan.status === "active" && (
-                <Text style={{ fontSize: 15, fontWeight: "800", color: colors.textDark, marginBottom: 14 }}>Active Loan</Text>
+                <Text style={{ fontSize: fs(15), fontWeight: "800", color: colors.textDark, marginBottom: 14 }}>Active Loan</Text>
               )}
 
               {/* Loan Header */}
@@ -1385,32 +1525,32 @@ export default function LoansScreen({ navigation, route }) {
                    ₱{((loan.adminModified && loan.originalAmount) ? loan.originalAmount : (loan.amountNum || loan.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                  </Text>
                  {loan.adminModified && loan.originalAmount && loan.originalAmount !== (loan.amountNum || loan.amount) ? (
-                   <Text style={{ fontSize: 11, color: C.orange, marginTop: 2 }}>Modified → ₱{(loan.amountNum || loan.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
+                   <Text style={{ fontSize: fs(11), color: C.orange, marginTop: 2 }}>Modified → ₱{(loan.amountNum || loan.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
                  ) : (
-                   <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>Applied amount</Text>
+                   <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 2 }}>Applied amount</Text>
                  )}
                 </View>
               </View>
 
               {/* Accept Button - only shown when admin modified the loan terms */}
               {loan.status === "approved" && loan.adminModified && (
-                <View style={{ marginBottom: 8, marginHorizontal: 4 }}>
-                  <View style={{ backgroundColor: "rgba(255,149,0,0.08)", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: "rgba(255,149,0,0.2)" }}>
-                    <Text style={{ color: C.orange, fontSize: 12, fontWeight: "700", marginBottom: 4 }}>š ï¸ Admin Modified Your Loan Terms:</Text>
+                <View style={{ marginBottom: s(8), marginHorizontal: 4 }}>
+                  <View style={{ backgroundColor: "rgba(255,149,0,0.08)", paddingVertical: s(10), paddingHorizontal: s(14), borderRadius: s(8), marginBottom: s(8), borderWidth: 1, borderColor: "rgba(255,149,0,0.2)" }}>
+                    <Text style={{ color: C.orange, fontSize: fs(12), fontWeight: "700", marginBottom: 4 }}>š ï¸ Admin Modified Your Loan Terms:</Text>
                     {loan.originalAmount != null && loan.originalAmount !== loan.amountNum && (
-                      <Text style={{ color: colors.textDark, fontSize: 12, marginBottom: 2 }}>
+                      <Text style={{ color: colors.textDark, fontSize: fs(12), marginBottom: 2 }}>
                         * Amount: ₱{loan.originalAmount.toLocaleString()} → ₱{(loan.amountNum || 0).toLocaleString()}
                       </Text>
                     )}
                     {loan.originalTermMonths != null && loan.originalTermMonths !== loan.termMonths && (
-                      <Text style={{ color: colors.textDark, fontSize: 12, marginBottom: 2 }}>
+                      <Text style={{ color: colors.textDark, fontSize: fs(12), marginBottom: 2 }}>
                         * Term: {loan.originalTermMonths} months → {loan.termMonths} months
                       </Text>
                     )}
-                    <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 4 }}>Please review and accept the updated terms below.</Text>
+                    <Text style={{ color: colors.textMuted, fontSize: fs(11), marginTop: 4 }}>Please review and accept the updated terms below.</Text>
                   </View>
                   <TouchableOpacity
-                    style={{ backgroundColor: "#0D1F45", paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, alignItems: "center" }}
+                    style={{ backgroundColor: "#0D1F45", paddingVertical: s(10), paddingHorizontal: s(20), borderRadius: s(8), alignItems: "center" }}
                     activeOpacity={0.8}
                     onPress={() => handleAcceptLoan(loan.id)}
                   >
@@ -1421,8 +1561,8 @@ export default function LoansScreen({ navigation, route }) {
 
               {/* Awaiting disbursement message */}
               {loan.status === "member_accepted" && (
-                <View style={{ backgroundColor: "rgba(46,107,240,0.08)", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, marginBottom: 8, marginHorizontal: 4 }}>
-                  <Text style={{ color: "#0D1F45", fontSize: 12, fontWeight: "600", textAlign: "center" }}>⌛ Awaiting fund disbursement by secretary</Text>
+                <View style={{ backgroundColor: "rgba(46,107,240,0.08)", paddingVertical: s(10), paddingHorizontal: s(14), borderRadius: s(8), marginBottom: s(8), marginHorizontal: 4 }}>
+                  <Text style={{ color: "#0D1F45", fontSize: fs(12), fontWeight: "600", textAlign: "center" }}>⌛ Awaiting fund disbursement by secretary</Text>
                 </View>
               )}
 
@@ -1432,8 +1572,8 @@ export default function LoansScreen({ navigation, route }) {
                   {/* Repayment Progress */}
                   <View style={{ marginTop: 4, marginBottom: 14 }}>
                     <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <Text style={{ fontSize: 12, color: "#0D1F45", fontWeight: "600" }}>Repayment progress</Text>
-                      <Text style={{ fontSize: 12, color: colors.textMuted }}>{loan.paidMonths || 0} of {loan.termMonths || 0} payments made</Text>
+                      <Text style={{ fontSize: fs(12), color: "#0D1F45", fontWeight: "600" }}>Repayment progress</Text>
+                      <Text style={{ fontSize: fs(12), color: colors.textMuted }}>{loan.paidMonths || 0} of {loan.termMonths || 0} payments made</Text>
                     </View>
                     <View style={{ height: 6, backgroundColor: colors.inputBg || "#E8ECF0", borderRadius: 3, overflow: "hidden" }}>
                       <View style={{ height: "100%", backgroundColor: "#0D1F45", borderRadius: 3, width: `${loan.termMonths ? Math.min(100, ((loan.paidMonths || 0) / loan.termMonths) * 100) : 0}%` }} />
@@ -1442,31 +1582,31 @@ export default function LoansScreen({ navigation, route }) {
 
                   {/* Stats Row - 3 cards */}
                   <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
-                    <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: 10, padding: 12 }}>
-                      <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4, fontWeight: "600" }}>Monthly payment</Text>
-                      <Text style={{ fontSize: 14, fontWeight: "700", color: colors.textDark }}>₱{(loan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
+                    <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
+                      <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Monthly payment</Text>
+                      <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>₱{(loan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
                     </View>
-                    <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: 10, padding: 12 }}>
-                      <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4, fontWeight: "600" }}>Remaining balance</Text>
-                      <Text style={{ fontSize: 14, fontWeight: "700", color: colors.textDark }}>₱{(loan.remainingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
+                    <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
+                      <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Remaining balance</Text>
+                      <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>₱{(loan.remainingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
                     </View>
-                    <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: 10, padding: 12 }}>
-                      <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 4, fontWeight: "600" }}>Next due date</Text>
-                      <Text style={{ fontSize: 14, fontWeight: "700", color: colors.textDark }}>{loan.nextPayment || "-"}</Text>
+                    <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
+                      <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Next due date</Text>
+                      <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>{loan.nextPayment || "-"}</Text>
                     </View>
                   </View>
 
                   {/* 3 Action Buttons: View schedule, Loan details, Pay now */}
                   <View style={{ flexDirection: "row", gap: 8 }}>
                     <TouchableOpacity
-                      style={{ flex: 1, borderWidth: 1, borderColor: colors.cardBorder || "#E0E5EC", borderRadius: 8, paddingVertical: 10, alignItems: "center", backgroundColor: colors.cardBg }}
+                      style={{ flex: 1, borderWidth: 1, borderColor: colors.cardBorder || "#E0E5EC", borderRadius: s(8), paddingVertical: s(10), alignItems: "center", backgroundColor: colors.cardBg }}
                       activeOpacity={0.7}
                       onPress={() => handleOpenSchedule(loan)}
                     >
                       <Text style={{ fontSize: 12.5, fontWeight: "700", color: colors.textDark }}>View schedule</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={{ flex: 1, borderWidth: 1, borderColor: colors.cardBorder || "#E0E5EC", borderRadius: 8, paddingVertical: 10, alignItems: "center", backgroundColor: colors.cardBg }}
+                      style={{ flex: 1, borderWidth: 1, borderColor: colors.cardBorder || "#E0E5EC", borderRadius: s(8), paddingVertical: s(10), alignItems: "center", backgroundColor: colors.cardBg }}
                       activeOpacity={0.7}
                       onPress={() => {
                         setSelectedLoan(loan);
@@ -1477,7 +1617,7 @@ export default function LoansScreen({ navigation, route }) {
                     </TouchableOpacity>
                     {loan.status === "active" && (
                       <TouchableOpacity
-                        style={{ flex: 1, backgroundColor: C.blue, borderRadius: 8, paddingVertical: 10, alignItems: "center" }}
+                        style={{ flex: 1, backgroundColor: C.blue, borderRadius: s(8), paddingVertical: s(10), alignItems: "center" }}
                         activeOpacity={0.8}
                         onPress={() => handleOpenPayNow(loan)}
                       >
@@ -1485,7 +1625,7 @@ export default function LoansScreen({ navigation, route }) {
                       </TouchableOpacity>
                     )}
                     {loan.status === "completed" && (
-                      <View style={{ flex: 1, backgroundColor: "rgba(52,199,89,0.1)", borderRadius: 8, paddingVertical: 10, alignItems: "center" }}>
+                      <View style={{ flex: 1, backgroundColor: "rgba(52,199,89,0.1)", borderRadius: s(8), paddingVertical: s(10), alignItems: "center" }}>
                         <Text style={{ fontSize: 12.5, fontWeight: "700", color: C.green }}>Fully Paid</Text>
                       </View>
                     )}
@@ -1497,17 +1637,17 @@ export default function LoansScreen({ navigation, route }) {
               {loan.status !== "active" && loan.status !== "completed" && (
                 <>
                   {loan.status === "approved" && (
-                    <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 12, marginTop: -4 }}>
+                    <Text style={{ fontSize: fs(12), color: colors.textMuted, marginBottom: s(12), marginTop: -4 }}>
                       Review and accept the terms above to proceed.
                     </Text>
                   )}
                   {loan.status === "member_accepted" && (
-                    <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 12, marginTop: -4, textAlign: "center" }}>
+                    <Text style={{ fontSize: fs(12), color: colors.textMuted, marginBottom: s(12), marginTop: -4, textAlign: "center" }}>
                       Your loan will become active once funds are disbursed.
                     </Text>
                   )}
                   {loan.status === "pending" && (
-                    <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 12, marginTop: -4 }}>
+                    <Text style={{ fontSize: fs(12), color: colors.textMuted, marginBottom: s(12), marginTop: -4 }}>
                       Your application is under review by the administration.
                     </Text>
                   )}
@@ -1568,10 +1708,10 @@ export default function LoansScreen({ navigation, route }) {
                 }}
                 style={{ padding: 10, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20 }}
               >
-                <Text style={{ color: "#fff", fontSize: 16, fontWeight: "700" }}>✕ Close</Text>
+                <Text style={{ color: "#fff", fontSize: fs(16), fontWeight: "700" }}>✕ Close</Text>
               </TouchableOpacity>
-              <View style={{ backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 15 }}>
-                <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}>
+              <View style={{ backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: s(12), paddingVertical: 6, borderRadius: 15 }}>
+                <Text style={{ color: "#fff", fontSize: fs(13), fontWeight: "700" }}>
                   {cameraMode === "selfie" ? "SELFIE VERIFICATION" : "ID CAPTURE"}
                 </Text>
               </View>
@@ -1594,7 +1734,7 @@ export default function LoansScreen({ navigation, route }) {
                   {cameraCountdown > 0 ? (
                     <Text style={{ color: "#34C759", fontSize: 72, fontWeight: "900", textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: {width: 0, height: 2}, textShadowRadius: 4 }}>{cameraCountdown}</Text>
                   ) : (
-                    <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600", textAlign: "center", textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 3 }}>
+                    <Text style={{ color: "#fff", fontSize: fs(16), fontWeight: "600", textAlign: "center", textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 3 }}>
                       Position your face{"\n"}within the oval
                     </Text>
                   )}
@@ -1603,7 +1743,7 @@ export default function LoansScreen({ navigation, route }) {
                 /* Rectangle document guide for ID */
                 <View style={{
                   width: '85%', height: 240,
-                  borderRadius: 16,
+                  borderRadius: s(16),
                   borderWidth: 3,
                   borderColor: cameraCountdown > 0 ? "#34C759" : "rgba(255,255,255,0.8)",
                   borderStyle: "dashed",
@@ -1614,7 +1754,7 @@ export default function LoansScreen({ navigation, route }) {
                   {cameraCountdown > 0 ? (
                     <Text style={{ color: "#34C759", fontSize: 72, fontWeight: "900", textShadowColor: 'rgba(0,0,0,0.5)', textShadowOffset: {width: 0, height: 2}, textShadowRadius: 4 }}>{cameraCountdown}</Text>
                   ) : (
-                    <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600", textAlign: "center", textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 3 }}>
+                    <Text style={{ color: "#fff", fontSize: fs(16), fontWeight: "600", textAlign: "center", textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 3 }}>
                       Align your ID{"\n"}within the frame
                     </Text>
                   )}
@@ -1626,7 +1766,7 @@ export default function LoansScreen({ navigation, route }) {
             <View style={{ paddingBottom: 40, alignItems: "center" }}>
               {/* Instruction text */}
               <View style={{ alignItems: "center", paddingHorizontal: 40, marginBottom: 20 }}>
-                <Text style={{ color: "#fff", fontSize: 14, fontWeight: "500", textAlign: "center", textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 3 }}>
+                <Text style={{ color: "#fff", fontSize: fs(14), fontWeight: "500", textAlign: "center", textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: {width: 0, height: 1}, textShadowRadius: 3 }}>
                   {cameraMode === "selfie"
                     ? "Hold your ID next to your face with today's date visible"
                     : "Place your government ID flat and well-lit"}
@@ -1640,7 +1780,7 @@ export default function LoansScreen({ navigation, route }) {
                   borderWidth: 5, borderColor: "#fff",
                   backgroundColor: cameraCountdown > 0 ? "#34C759" : "rgba(255,255,255,0.3)",
                   justifyContent: "center", alignItems: "center",
-                  marginBottom: 10,
+                  marginBottom: s(10),
                   shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.5, shadowRadius: 4, elevation: 5
                 }}
                 onPress={() => {
@@ -1651,13 +1791,13 @@ export default function LoansScreen({ navigation, route }) {
                 activeOpacity={0.7}
               >
                 <View style={{
-                  width: 60, height: 60, borderRadius: 30,
+                  width: s(60), height: s(60), borderRadius: s(30),
                   backgroundColor: cameraCountdown > 0 ? "#34C759" : "#fff",
                 }} />
               </TouchableOpacity>
 
               {/* Hint */}
-              <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600", opacity: 0.8 }}>
+              <Text style={{ color: "#fff", fontSize: fs(13), fontWeight: "600", opacity: 0.8 }}>
                 {cameraCountdown > 0 ? "Hold still..." : "Tap to start 3-second capture"}
               </Text>
             </View>
@@ -1670,7 +1810,7 @@ export default function LoansScreen({ navigation, route }) {
         visible={applyModalOpen}
         transparent={true}
         animationType="slide"
-        onRequestClose={() => setApplyModalOpen(false)}
+        onRequestClose={() => handleCloseApplyModal(false)}
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -1679,10 +1819,7 @@ export default function LoansScreen({ navigation, route }) {
           <TouchableOpacity
             style={{ flex: 1, backgroundColor: C.overlay }}
             activeOpacity={1}
-            onPress={() => {
-              setApplyModalOpen(false);
-              setFormError("");
-            }}
+            onPress={() => handleCloseApplyModal(false)}
           />
 
           <View style={[styles.modalContent, { backgroundColor: colors.cardBg }]}>
@@ -1690,10 +1827,7 @@ export default function LoansScreen({ navigation, route }) {
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: colors.textDark }]}>Apply for Loan</Text>
               <TouchableOpacity
-                onPress={() => {
-                  setApplyModalOpen(false);
-                  setFormError("");
-                }}
+                onPress={() => handleCloseApplyModal(false)}
                 style={styles.closeBtn}
               >
                 <Text style={styles.closeBtnText}>✕</Text>
@@ -1710,7 +1844,7 @@ export default function LoansScreen({ navigation, route }) {
               {/* Loan Type Selection */}
               <View style={styles.formGroup}>
                 <Text style={[styles.formLabel, { color: colors.textDark }]}>Select Loan Type *</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 10 }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: s(10), paddingBottom: 10 }}>
                   {LOAN_TYPES.map((type) => {
                     const isSelected = loanType === type.value;
                     const isExpanded = expandedLoanType === type.value;
@@ -1763,7 +1897,7 @@ export default function LoansScreen({ navigation, route }) {
                   })}
                 </ScrollView>
               </View>
-              {fieldErrors.loanType && <Text style={{ color: "#E74C3C", fontSize: 12, fontWeight: "600", marginTop: -6, marginBottom: 4 }}>{fieldErrors.loanType}</Text>}
+              {fieldErrors.loanType && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: -6, marginBottom: 4 }}>{fieldErrors.loanType}</Text>}
 
               {/* Loan Amount */}
               <View style={styles.formGroup}>
@@ -1796,7 +1930,7 @@ export default function LoansScreen({ navigation, route }) {
                     </Text>
                   );
                 })() : null}
-                {fieldErrors.amount && <Text style={{ color: "#E74C3C", fontSize: 12, fontWeight: "600", marginTop: 4 }}>{fieldErrors.amount}</Text>}
+                {fieldErrors.amount && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: 4 }}>{fieldErrors.amount}</Text>}
               </View>
 
               {/* Months to Pay */}
@@ -1825,7 +1959,7 @@ export default function LoansScreen({ navigation, route }) {
                     </TouchableOpacity>
                   ))}
                 </View>
-                {fieldErrors.months && <Text style={{ color: "#E74C3C", fontSize: 12, fontWeight: "600", marginTop: 4 }}>{fieldErrors.months}</Text>}
+                {fieldErrors.months && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: 4 }}>{fieldErrors.months}</Text>}
               </View>
 
               {/* Phone Number */}
@@ -1840,7 +1974,7 @@ export default function LoansScreen({ navigation, route }) {
                   onChangeText={handlePhone}
                   maxLength={14}
                 />
-                {fieldErrors.phone && <Text style={{ color: "#E74C3C", fontSize: 12, fontWeight: "600", marginTop: 4 }}>{fieldErrors.phone}</Text>}
+                {fieldErrors.phone && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: 4 }}>{fieldErrors.phone}</Text>}
               </View>
 
               {/* Purpose */}
@@ -1884,7 +2018,7 @@ export default function LoansScreen({ navigation, route }) {
                     onChangeText={setPurpose}
                   />
                 )}
-                {fieldErrors.purpose && <Text style={{ color: "#E74C3C", fontSize: 12, fontWeight: "600", marginTop: 4 }}>{fieldErrors.purpose}</Text>}
+                {fieldErrors.purpose && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: 4 }}>{fieldErrors.purpose}</Text>}
               </View>
 
               {/* ****** Capture Documents ****** */}
@@ -1934,8 +2068,8 @@ export default function LoansScreen({ navigation, route }) {
                     {idVerifying && (
                       <View style={[styles.captureBox, { backgroundColor: "rgba(13,31,69,0.04)", borderColor: C.blue, borderStyle: "solid" }]}>
                         <ActivityIndicator color={C.blue} size="large" style={{ marginBottom: 10 }} />
-                        <Text style={{ fontSize: 13, fontWeight: "700", color: C.blue, textAlign: "center" }}>🔍 Verifying your ID...</Text>
-                        <Text style={{ fontSize: 11, color: colors.textMuted, textAlign: "center", marginTop: 4 }}>Gemini AI is checking your document</Text>
+                        <Text style={{ fontSize: fs(13), fontWeight: "700", color: C.blue, textAlign: "center" }}>🔍 Verifying your ID...</Text>
+                        <Text style={{ fontSize: fs(11), color: colors.textMuted, textAlign: "center", marginTop: 4 }}>Gemini AI is checking your document</Text>
                       </View>
                     )}
 
@@ -1949,12 +2083,12 @@ export default function LoansScreen({ navigation, route }) {
                         <Image source={{ uri: validId.uri }} style={[styles.docPreviewImg, { borderRadius: 10 }]} resizeMode="cover" />
                         <View style={{
                           position: "absolute", bottom: 8, left: 8, right: 8,
-                          backgroundColor: "rgba(52,199,89,0.92)", borderRadius: 8,
+                          backgroundColor: "rgba(52,199,89,0.92)", borderRadius: s(8),
                           paddingHorizontal: 8, paddingVertical: 5,
                           flexDirection: "row", alignItems: "center", gap: 5,
                         }}>
-                          <Text style={{ fontSize: 13, fontWeight: "800", color: "#fff" }}>✅</Text>
-                          <Text style={{ fontSize: 11, fontWeight: "700", color: "#fff", flex: 1 }} numberOfLines={1}>
+                          <Text style={{ fontSize: fs(13), fontWeight: "800", color: "#fff" }}>✅</Text>
+                          <Text style={{ fontSize: fs(11), fontWeight: "700", color: "#fff", flex: 1 }} numberOfLines={1}>
                             {idVerifyResult?.idType || "ID Verified"}
                           </Text>
                         </View>
@@ -1963,7 +2097,7 @@ export default function LoansScreen({ navigation, route }) {
                           backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 6,
                           paddingHorizontal: 7, paddingVertical: 3,
                         }}>
-                          <Text style={{ fontSize: 10, color: "#fff", fontWeight: "600" }}>Tap to retake</Text>
+                          <Text style={{ fontSize: fs(10), color: "#fff", fontWeight: "600" }}>Tap to retake</Text>
                         </View>
                       </TouchableOpacity>
                     )}
@@ -1975,12 +2109,12 @@ export default function LoansScreen({ navigation, route }) {
                         activeOpacity={0.7}
                         onPress={() => openVerificationCamera("id")}
                       >
-                        <Text style={{ fontSize: 28, marginBottom: 6 }}>❌</Text>
-                        <Text style={{ fontSize: 13, fontWeight: "800", color: C.red, textAlign: "center" }}>Not a Valid ID</Text>
-                        <Text style={{ fontSize: 11, color: colors.textMuted, textAlign: "center", marginTop: 4, paddingHorizontal: 8 }} numberOfLines={3}>
+                        <Text style={{ fontSize: fs(28), marginBottom: 6 }}>❌</Text>
+                        <Text style={{ fontSize: fs(13), fontWeight: "800", color: C.red, textAlign: "center" }}>Not a Valid ID</Text>
+                        <Text style={{ fontSize: fs(11), color: colors.textMuted, textAlign: "center", marginTop: 4, paddingHorizontal: 8 }} numberOfLines={3}>
                           {idVerifyResult?.reason || "No government ID detected in the photo."}
                         </Text>
-                        <View style={{ marginTop: 10, backgroundColor: C.red, borderRadius: 8, paddingHorizontal: 16, paddingVertical: 7 }}>
+                        <View style={{ marginTop: 10, backgroundColor: C.red, borderRadius: s(8), paddingHorizontal: s(16), paddingVertical: 7 }}>
                           <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>📷 Retake Photo</Text>
                         </View>
                       </TouchableOpacity>
@@ -2060,7 +2194,7 @@ export default function LoansScreen({ navigation, route }) {
               {/* ****** Existing Loan Question ****** */}
               <View style={styles.formGroup}>
                 <Text style={[styles.formLabel, { color: colors.textDark }]}>Do you have an existing/active loan with another entity?</Text>
-                <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
+                <View style={{ flexDirection: "row", gap: s(12), marginTop: 8 }}>
                   {["Yes", "No"].map((option) => (
                     <TouchableOpacity
                       key={option}
@@ -2090,7 +2224,7 @@ export default function LoansScreen({ navigation, route }) {
 
                 {/* Conditional upload if Yes is selected */}
                 {hasExistingLoan === "Yes" && (
-                  <View style={{ marginTop: 14, padding: 14, backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1.5, borderColor: C.blue + '44' }}>
+                  <View style={{ marginTop: 14, padding: s(14), backgroundColor: colors.inputBg, borderRadius: s(12), borderWidth: 1.5, borderColor: C.blue + '44' }}>
                     <Text style={[styles.docLabel, { color: colors.textDark, marginBottom: 6 }]}>
                       📎 Upload Active Loan Screenshot
                     </Text>
@@ -2122,7 +2256,7 @@ export default function LoansScreen({ navigation, route }) {
                         style={{ alignSelf: 'flex-end', marginTop: 6 }}
                         activeOpacity={0.7}
                       >
-                        <Text style={{ color: C.red, fontSize: 12, fontWeight: '600' }}>✕ Remove</Text>
+                        <Text style={{ color: C.red, fontSize: fs(12), fontWeight: '600' }}>✕ Remove</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -2143,8 +2277,8 @@ export default function LoansScreen({ navigation, route }) {
                         flexDirection: 'row', 
                         alignItems: 'center', 
                         justifyContent: 'flex-start',
-                        paddingHorizontal: 12,
-                        marginBottom: 8,
+                        paddingHorizontal: s(12),
+                        marginBottom: s(8),
                       },
                       disbursementMethod === "Cash (Pick up at office)" && styles.typeCardActive,
                     ]}
@@ -2152,12 +2286,12 @@ export default function LoansScreen({ navigation, route }) {
                     activeOpacity={0.7}
                   >
                     <View style={{
-                      width: 16, height: 16, borderRadius: 8, borderWidth: 1.5, 
+                      width: 16, height: 16, borderRadius: s(8), borderWidth: 1.5, 
                       borderColor: disbursementMethod === "Cash (Pick up at office)" ? C.blue : colors.textMuted,
                       marginRight: 8, alignItems: 'center', justifyContent: 'center'
                     }}>
                       {disbursementMethod === "Cash (Pick up at office)" && (
-                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.blue }} />
+                        <View style={{ width: 8, height: 8, borderRadius: s(4), backgroundColor: C.blue }} />
                       )}
                     </View>
                     <Text
@@ -2193,18 +2327,18 @@ export default function LoansScreen({ navigation, route }) {
                         activeOpacity={0.7}
                       >
                         <View style={{
-                          width: 16, height: 16, borderRadius: 8, borderWidth: 1.5, 
+                          width: 16, height: 16, borderRadius: s(8), borderWidth: 1.5, 
                           borderColor: disbursementMethod === method ? C.blue : colors.textMuted,
                           marginRight: 6, alignItems: 'center', justifyContent: 'center'
                         }}>
                           {disbursementMethod === method && (
-                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.blue }} />
+                            <View style={{ width: 8, height: 8, borderRadius: s(4), backgroundColor: C.blue }} />
                           )}
                         </View>
                         <Text
                           style={[
                             styles.typeCardText,
-                            { textAlign: 'left', fontSize: 12, flexShrink: 1 },
+                            { textAlign: 'left', fontSize: fs(12), flexShrink: 1 },
                             disbursementMethod === method && styles.typeCardTextActive,
                           ]}
                           numberOfLines={1}
@@ -2217,7 +2351,7 @@ export default function LoansScreen({ navigation, route }) {
                 </View>
                 {(disbursementMethod === "GCash" || disbursementMethod === "Bank Transfer") && (
                   <View style={{ marginTop: 12 }}>
-                    <Text style={[styles.formLabel, { color: colors.textDark, fontSize: 13, marginBottom: 4 }]}>
+                    <Text style={[styles.formLabel, { color: colors.textDark, fontSize: fs(13), marginBottom: 4 }]}>
                       {disbursementMethod} Account Number *
                     </Text>
                     <TextInput
@@ -2230,8 +2364,8 @@ export default function LoansScreen({ navigation, route }) {
                     />
                   </View>
                 )}
-                {fieldErrors.disbursement && <Text style={{ color: "#E74C3C", fontSize: 12, fontWeight: "600", marginTop: 4 }}>{fieldErrors.disbursement}</Text>}
-                {fieldErrors.accountNumber && <Text style={{ color: "#E74C3C", fontSize: 12, fontWeight: "600", marginTop: 4 }}>{fieldErrors.accountNumber}</Text>}
+                {fieldErrors.disbursement && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: 4 }}>{fieldErrors.disbursement}</Text>}
+                {fieldErrors.accountNumber && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: 4 }}>{fieldErrors.accountNumber}</Text>}
               </View>
 
               {/* Loan Terms & Conditions */}
@@ -2242,26 +2376,26 @@ export default function LoansScreen({ navigation, route }) {
                   backgroundColor: colors.inputBg || '#F0F2F5', 
                   borderColor: colors.inputBorder || '#E8ECF0', 
                   borderWidth: 1, 
-                  borderRadius: 12, 
+                  borderRadius: s(12), 
                   height: 180, 
                   marginTop: 8,
                   overflow: 'hidden'
                 }}>
                   <ScrollView nestedScrollEnabled={true} style={{ padding: 12 }}>
-                    <Text style={{ fontWeight: '700', fontSize: 14, color: colors.textDark, marginBottom: 4 }}>10. Repayment Terms</Text>
-                    <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 2 }}>• Payments are monthly based on the selected term.</Text>
-                    <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 2 }}>• Due dates are fixed upon approval.</Text>
-                    <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 12 }}>• Accepted payment methods: Cash, Bank transfer, GCash.</Text>
+                    <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>10. Repayment Terms</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Payments are monthly based on the selected term.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Due dates are fixed upon approval.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Accepted payment methods: Cash, Bank transfer, GCash.</Text>
 
-                    <Text style={{ fontWeight: '700', fontSize: 14, color: colors.textDark, marginBottom: 4 }}>11. Early Payment Policy</Text>
-                    <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 2 }}>• Members may repay early at any time.</Text>
-                    <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 2 }}>• Interest is charged only up to the payment date.</Text>
-                    <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 12 }}>• No penalties for early settlement.</Text>
+                    <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>11. Early Payment Policy</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Members may repay early at any time.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Interest is charged only up to the payment date.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• No penalties for early settlement.</Text>
 
-                    <Text style={{ fontWeight: '700', fontSize: 14, color: colors.textDark, marginBottom: 4 }}>12. Late Payment and Penalties</Text>
-                    <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 2 }}>• Late payments may incur an ongoing penalty fee.</Text>
-                    <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 2 }}>• Accounts past due beyond 60 days will be escalated.</Text>
-                    <Text style={{ fontSize: 13, color: colors.textMuted, marginBottom: 12 }}>• Reach out to administration to apply for extension.</Text>
+                    <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>12. Late Payment and Penalties</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Late payments may incur an ongoing penalty fee.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Accounts past due beyond 60 days will be escalated.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Reach out to administration to apply for extension.</Text>
                     <View style={{ height: 12 }} />
                   </ScrollView>
                 </View>
@@ -2273,18 +2407,18 @@ export default function LoansScreen({ navigation, route }) {
                   activeOpacity={0.7}
                 >
                   <View style={{
-                    width: 22, height: 22, borderRadius: 4, borderWidth: 2, 
+                    width: s(22), height: s(22), borderRadius: s(4), borderWidth: 2, 
                     borderColor: agreedToTerms ? C.blue : colors.textMuted,
                     alignItems: 'center', justifyContent: 'center', marginRight: 10,
                     backgroundColor: agreedToTerms ? C.blue : 'transparent'
                   }}>
-                    {agreedToTerms && <Text style={{ color: '#FFF', fontSize: 14, fontWeight: 'bold' }}>✓</Text>}
+                    {agreedToTerms && <Text style={{ color: '#FFF', fontSize: fs(14), fontWeight: 'bold' }}>✓</Text>}
                   </View>
-                  <Text style={{ fontSize: 14, color: colors.textDark, flex: 1, fontWeight: '500' }}>
+                  <Text style={{ fontSize: fs(14), color: colors.textDark, flex: 1, fontWeight: '500' }}>
                     I have read and agree to the Loan Terms & Conditions and policies above.
                   </Text>
                 </TouchableOpacity>
-                {fieldErrors.terms && <Text style={{ color: "#E74C3C", fontSize: 12, fontWeight: "600", marginTop: 4 }}>{fieldErrors.terms}</Text>}
+                {fieldErrors.terms && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: 4 }}>{fieldErrors.terms}</Text>}
               </View>
 
               {/* Predictive Approval Score */}
@@ -2350,7 +2484,7 @@ export default function LoansScreen({ navigation, route }) {
             </ScrollView>
 
             {/* Fixed Footer - Error + Submit Button */}
-            <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 30 : 16, borderTopWidth: 1, borderTopColor: colors.cardBorder || '#E8ECF0' }}>
+            <View style={{ paddingHorizontal: s(20), paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 30 : 16, borderTopWidth: 1, borderTopColor: colors.cardBorder || '#E8ECF0' }}>
               {formError ? (
                 <View style={[styles.errorBox, { marginBottom: 12 }]}>
                   <Text style={styles.errorText}>{formError}</Text>
@@ -2484,8 +2618,8 @@ export default function LoansScreen({ navigation, route }) {
                   </View>
 
                   {selectedLoan.status === "awaiting_member_approval" ? (
-                    <View style={{ marginBottom: 16, backgroundColor: C.cardBg, borderColor: C.blue, borderWidth: 1, padding: 16, borderRadius: 12 }}>
-                      <Text style={{ fontSize: 14, fontWeight: "700", color: C.textDark, marginBottom: 12, textAlign: "center" }}>
+                    <View style={{ marginBottom: s(16), backgroundColor: C.cardBg, borderColor: C.blue, borderWidth: 1, padding: s(16), borderRadius: 12 }}>
+                      <Text style={{ fontSize: fs(14), fontWeight: "700", color: C.textDark, marginBottom: s(12), textAlign: "center" }}>
                         Admin response is ready. Please review and accept the approved terms to finalize your loan.
                       </Text>
                       <View style={{ flexDirection: "row", gap: 12 }}>
@@ -2561,7 +2695,7 @@ export default function LoansScreen({ navigation, route }) {
               <View style={{ flex: 1 }}>
                 <Text style={[styles.modalTitle, { color: colors.textDark }]}>Pay now</Text>
                 {payNowLoan && (
-                  <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                  <Text style={{ fontSize: fs(12), color: colors.textMuted, marginTop: 2 }}>
                     {payNowLoan.id} · Payment due {payNowLoan.nextPayment || "-"}
                   </Text>
                 )}
@@ -2571,53 +2705,53 @@ export default function LoansScreen({ navigation, route }) {
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ paddingHorizontal: 20, paddingTop: 14 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView style={{ paddingHorizontal: s(20), paddingTop: 14 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {payNowLoan && (
                 <>
                   {/* SELECT PAYMENT TYPE */}
-                  <Text style={{ fontSize: 10, fontWeight: "800", color: colors.textMuted, letterSpacing: 0.8, marginBottom: 8, textTransform: "uppercase" }}>Select Payment Type</Text>
+                  <Text style={{ fontSize: fs(10), fontWeight: "800", color: colors.textMuted, letterSpacing: 0.8, marginBottom: s(8), textTransform: "uppercase" }}>Select Payment Type</Text>
 
                   {/* Regular Payment */}
                   <TouchableOpacity
-                    style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 10, borderWidth: 1.5, borderColor: payType === "regular" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payType === "regular" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 8 }}
+                    style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: s(10), borderWidth: 1.5, borderColor: payType === "regular" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payType === "regular" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 8 }}
                     activeOpacity={0.7}
                     onPress={() => setPayType("regular")}
                   >
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: "700", color: colors.textDark }}>Regular Payment</Text>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Pay the current monthly installment</Text>
+                      <Text style={{ fontSize: fs(13), fontWeight: "700", color: colors.textDark }}>Regular Payment</Text>
+                      <Text style={{ fontSize: fs(11), color: colors.textMuted }}>Pay the current monthly installment</Text>
                     </View>
-                    <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: payType === "regular" ? C.blue : (colors.textMuted || "#AAB4C8"), alignItems: "center", justifyContent: "center" }}>
+                    <View style={{ width: s(20), height: s(20), borderRadius: s(10), borderWidth: 2, borderColor: payType === "regular" ? C.blue : (colors.textMuted || "#AAB4C8"), alignItems: "center", justifyContent: "center" }}>
                       {payType === "regular" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: C.blue }} />}
                     </View>
                   </TouchableOpacity>
 
                   {/* Custom Payment */}
                   <TouchableOpacity
-                    style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 10, borderWidth: 1.5, borderColor: payType === "custom" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payType === "custom" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 8 }}
+                    style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: s(10), borderWidth: 1.5, borderColor: payType === "custom" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payType === "custom" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 8 }}
                     activeOpacity={0.7}
                     onPress={() => setPayType("custom")}
                   >
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: "700", color: colors.textDark }}>Custom Payment</Text>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Enter any amount - months covered are computed automatically</Text>
+                      <Text style={{ fontSize: fs(13), fontWeight: "700", color: colors.textDark }}>Custom Payment</Text>
+                      <Text style={{ fontSize: fs(11), color: colors.textMuted }}>Enter any amount - months covered are computed automatically</Text>
                     </View>
-                    <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: payType === "custom" ? C.blue : (colors.textMuted || "#AAB4C8"), alignItems: "center", justifyContent: "center" }}>
+                    <View style={{ width: s(20), height: s(20), borderRadius: s(10), borderWidth: 2, borderColor: payType === "custom" ? C.blue : (colors.textMuted || "#AAB4C8"), alignItems: "center", justifyContent: "center" }}>
                       {payType === "custom" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: C.blue }} />}
                     </View>
                   </TouchableOpacity>
 
                   {/* Full Payment */}
                   <TouchableOpacity
-                    style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 10, borderWidth: 1.5, borderColor: payType === "full" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payType === "full" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 16 }}
+                    style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: s(10), borderWidth: 1.5, borderColor: payType === "full" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payType === "full" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 16 }}
                     activeOpacity={0.7}
                     onPress={() => setPayType("full")}
                   >
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: "700", color: colors.textDark }}>Full Payment</Text>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Settle the entire remaining balance at once</Text>
+                      <Text style={{ fontSize: fs(13), fontWeight: "700", color: colors.textDark }}>Full Payment</Text>
+                      <Text style={{ fontSize: fs(11), color: colors.textMuted }}>Settle the entire remaining balance at once</Text>
                     </View>
-                    <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: payType === "full" ? C.blue : (colors.textMuted || "#AAB4C8"), alignItems: "center", justifyContent: "center" }}>
+                    <View style={{ width: s(20), height: s(20), borderRadius: s(10), borderWidth: 2, borderColor: payType === "full" ? C.blue : (colors.textMuted || "#AAB4C8"), alignItems: "center", justifyContent: "center" }}>
                       {payType === "full" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: C.blue }} />}
                     </View>
                   </TouchableOpacity>
@@ -2625,13 +2759,13 @@ export default function LoansScreen({ navigation, route }) {
                   {/* Custom Payment Details */}
                   {payType === "custom" && (
                     <View style={{ marginBottom: 16 }}>
-                      <Text style={{ fontSize: 10, fontWeight: "800", color: colors.textMuted, letterSpacing: 0.8, marginBottom: 8, textTransform: "uppercase" }}>How many months do you want to pay?</Text>
+                      <Text style={{ fontSize: fs(10), fontWeight: "800", color: colors.textMuted, letterSpacing: 0.8, marginBottom: s(8), textTransform: "uppercase" }}>How many months do you want to pay?</Text>
                       <TouchableOpacity
-                        style={{ backgroundColor: colors.inputBg, borderColor: customPayMonths > 0 ? C.blue : (colors.inputBorder || "#E8ECF0"), borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}
+                        style={{ backgroundColor: colors.inputBg, borderColor: customPayMonths > 0 ? C.blue : (colors.inputBorder || "#E8ECF0"), borderWidth: 1, borderRadius: s(8), paddingHorizontal: s(12), paddingVertical: s(12), flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}
                         activeOpacity={0.7}
                         onPress={() => setShowMonthPicker(!showMonthPicker)}
                       >
-                        <Text style={{ color: customPayMonths > 0 ? colors.textDark : colors.textMuted, fontSize: 14, fontWeight: customPayMonths > 0 ? "700" : "600" }}>
+                        <Text style={{ color: customPayMonths > 0 ? colors.textDark : colors.textMuted, fontSize: fs(14), fontWeight: customPayMonths > 0 ? "700" : "600" }}>
                           {customPayMonths > 0 ? `${customPayMonths} month${customPayMonths > 1 ? "s" : ""} — ₱${(customPayMonths * (payNowLoan?.monthlyPayment || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "- Select months -"}
                         </Text>
                         <Text style={{ color: colors.textMuted, fontSize: 14 }}>{showMonthPicker ? "▲" : "▼"}</Text>
@@ -2639,7 +2773,7 @@ export default function LoansScreen({ navigation, route }) {
 
                       {/* Month picker grid */}
                       {showMonthPicker && (
-                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6, marginBottom: 8 }}>
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: s(6), marginTop: 6, marginBottom: 8 }}>
                           {(() => {
                             const remaining = (payNowLoan?.termMonths || 12) - (payNowLoan?.paidMonths || 0);
                             const maxMonths = Math.max(1, remaining);
@@ -2653,14 +2787,14 @@ export default function LoansScreen({ navigation, route }) {
                                   setShowMonthPicker(false);
                                 }}
                                 style={{
-                                  paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8,
+                                  paddingHorizontal: s(14), paddingVertical: s(8), borderRadius: s(8),
                                   borderWidth: 1.5,
                                   borderColor: customPayMonths === m ? C.blue : (colors.cardBorder || "#E8ECF0"),
                                   backgroundColor: customPayMonths === m ? "rgba(46,107,240,0.08)" : colors.cardBg,
                                   minWidth: 52, alignItems: "center",
                                 }}
                               >
-                                <Text style={{ fontSize: 13, fontWeight: "700", color: customPayMonths === m ? C.blue : colors.textDark }}>{m}mo</Text>
+                                <Text style={{ fontSize: fs(13), fontWeight: "700", color: customPayMonths === m ? C.blue : colors.textDark }}>{m}mo</Text>
                                 <Text style={{ fontSize: 9, color: colors.textMuted, marginTop: 1 }}>₱{Math.round(m * (payNowLoan?.monthlyPayment || 0)).toLocaleString()}</Text>
                               </TouchableOpacity>
                             ));
@@ -2668,11 +2802,11 @@ export default function LoansScreen({ navigation, route }) {
                         </View>
                       )}
 
-                      <Text style={{ fontSize: 10, fontWeight: "800", color: colors.textMuted, letterSpacing: 0.8, marginBottom: 8, marginTop: 12, textTransform: "uppercase" }}>Or enter a custom amount (Min ₱500)</Text>
-                      <View style={{ backgroundColor: colors.inputBg, borderColor: colors.inputBorder || "#E8ECF0", borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
-                        <Text style={{ color: colors.textDark, fontSize: 16, fontWeight: "700", marginRight: 8 }}>₱</Text>
+                      <Text style={{ fontSize: fs(10), fontWeight: "800", color: colors.textMuted, letterSpacing: 0.8, marginBottom: s(8), marginTop: s(12), textTransform: "uppercase" }}>Or enter a custom amount (Min ₱500)</Text>
+                      <View style={{ backgroundColor: colors.inputBg, borderColor: colors.inputBorder || "#E8ECF0", borderWidth: 1, borderRadius: s(8), paddingHorizontal: s(12), paddingVertical: s(10), flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+                        <Text style={{ color: colors.textDark, fontSize: fs(16), fontWeight: "700", marginRight: 8 }}>₱</Text>
                         <TextInput
-                          style={{ flex: 1, color: colors.textDark, fontSize: 16, fontWeight: "600" }}
+                          style={{ flex: 1, color: colors.textDark, fontSize: fs(16), fontWeight: "600" }}
                           placeholder="e.g. 5,000"
                           placeholderTextColor={colors.textMuted}
                           keyboardType="numeric"
@@ -2689,74 +2823,74 @@ export default function LoansScreen({ navigation, route }) {
                   )}
 
                   {/* Amount Due Card */}
-                  <View style={{ backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: 12, padding: 14, marginBottom: 20 }}>
+                  <View style={{ backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(12), padding: s(14), marginBottom: 20 }}>
                     <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                      <Text style={{ fontSize: 12, color: colors.textMuted, fontWeight: "600" }}>Payment amount</Text>
+                      <Text style={{ fontSize: fs(12), color: colors.textMuted, fontWeight: "600" }}>Payment amount</Text>
                       {payType === "regular" && (
                         <View style={{ backgroundColor: "rgba(255,149,0,0.12)", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 }}>
-                          <Text style={{ fontSize: 13, fontWeight: "700", color: C.orange }}>Due soon</Text>
+                          <Text style={{ fontSize: fs(13), fontWeight: "700", color: C.orange }}>Due soon</Text>
                         </View>
                       )}
                     </View>
-                    <Text style={{ fontSize: 26, fontWeight: "800", color: colors.textDark, marginBottom: 2 }}>
+                    <Text style={{ fontSize: fs(26), fontWeight: "800", color: colors.textDark, marginBottom: 2 }}>
                       ₱{payType === "regular" ? (payNowLoan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }) : payType === "full" ? (payNowLoan.remainingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }) : customPayAmount ? customPayAmount : "0.00"}
                     </Text>
-                    <Text style={{ fontSize: 11, color: colors.textMuted }}>{payType === "full" ? "Full Remaining Balance" : payType === "custom" ? "Custom Amount" : `Due ${payNowLoan.nextPayment || "-"}`}</Text>
+                    <Text style={{ fontSize: fs(11), color: colors.textMuted }}>{payType === "full" ? "Full Remaining Balance" : payType === "custom" ? "Custom Amount" : `Due ${payNowLoan.nextPayment || "-"}`}</Text>
                   </View>
 
                   {/* SELECT PAYMENT METHOD */}
-                  <Text style={{ fontSize: 10, fontWeight: "800", color: colors.textMuted, letterSpacing: 0.8, marginBottom: 8, textTransform: "uppercase" }}>Select Payment Method</Text>
+                  <Text style={{ fontSize: fs(10), fontWeight: "800", color: colors.textMuted, letterSpacing: 0.8, marginBottom: s(8), textTransform: "uppercase" }}>Select Payment Method</Text>
 
                   {/* Cash Option */}
                   <TouchableOpacity
-                    style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 10, borderWidth: 1.5, borderColor: payMethod === "cash" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payMethod === "cash" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 8 }}
+                    style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: s(10), borderWidth: 1.5, borderColor: payMethod === "cash" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payMethod === "cash" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 8 }}
                     activeOpacity={0.7}
                     onPress={() => { setPayMethod("cash"); setPayProof(null); }}
                   >
-                    <View style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: payMethod === "cash" ? "rgba(46,107,240,0.1)" : (colors.inputBg || "#F0F2F5"), alignItems: "center", justifyContent: "center", marginRight: 10 }}>
-                      <Image source={ICONS.wallet} style={{ width: 20, height: 20, tintColor: payMethod === "cash" ? C.blue : colors.textMuted }} resizeMode="contain" />
+                    <View style={{ width: 38, height: 38, borderRadius: s(10), backgroundColor: payMethod === "cash" ? "rgba(46,107,240,0.1)" : (colors.inputBg || "#F0F2F5"), alignItems: "center", justifyContent: "center", marginRight: 10 }}>
+                      <Image source={ICONS.wallet} style={{ width: s(20), height: s(20), tintColor: payMethod === "cash" ? C.blue : colors.textMuted }} resizeMode="contain" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: "700", color: colors.textDark }}>Cash</Text>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Pay in person at the office or cashier</Text>
+                      <Text style={{ fontSize: fs(13), fontWeight: "700", color: colors.textDark }}>Cash</Text>
+                      <Text style={{ fontSize: fs(11), color: colors.textMuted }}>Pay in person at the office or cashier</Text>
                     </View>
-                    <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: payMethod === "cash" ? C.blue : (colors.textMuted || "#AAB4C8"), alignItems: "center", justifyContent: "center" }}>
+                    <View style={{ width: s(20), height: s(20), borderRadius: s(10), borderWidth: 2, borderColor: payMethod === "cash" ? C.blue : (colors.textMuted || "#AAB4C8"), alignItems: "center", justifyContent: "center" }}>
                       {payMethod === "cash" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: C.blue }} />}
                     </View>
                   </TouchableOpacity>
 
                   {/* Bank Transfer Option */}
                   <TouchableOpacity
-                    style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 10, borderWidth: 1.5, borderColor: payMethod === "bank" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payMethod === "bank" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 8 }}
+                    style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: s(10), borderWidth: 1.5, borderColor: payMethod === "bank" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payMethod === "bank" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 8 }}
                     activeOpacity={0.7}
                     onPress={() => { setPayMethod("bank"); setPayProof(null); }}
                   >
-                    <View style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: payMethod === "bank" ? "rgba(46,107,240,0.1)" : (colors.inputBg || "#F0F2F5"), alignItems: "center", justifyContent: "center", marginRight: 10 }}>
-                      <Image source={ICONS.bank} style={{ width: 20, height: 20, tintColor: payMethod === "bank" ? C.blue : colors.textMuted }} resizeMode="contain" />
+                    <View style={{ width: 38, height: 38, borderRadius: s(10), backgroundColor: payMethod === "bank" ? "rgba(46,107,240,0.1)" : (colors.inputBg || "#F0F2F5"), alignItems: "center", justifyContent: "center", marginRight: 10 }}>
+                      <Image source={ICONS.bank} style={{ width: s(20), height: s(20), tintColor: payMethod === "bank" ? C.blue : colors.textMuted }} resizeMode="contain" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: "700", color: colors.textDark }}>Bank transfer</Text>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Transfer via online banking or over-the-counter</Text>
+                      <Text style={{ fontSize: fs(13), fontWeight: "700", color: colors.textDark }}>Bank transfer</Text>
+                      <Text style={{ fontSize: fs(11), color: colors.textMuted }}>Transfer via online banking or over-the-counter</Text>
                     </View>
-                    <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: payMethod === "bank" ? C.blue : (colors.textMuted || "#AAB4C8"), alignItems: "center", justifyContent: "center" }}>
+                    <View style={{ width: s(20), height: s(20), borderRadius: s(10), borderWidth: 2, borderColor: payMethod === "bank" ? C.blue : (colors.textMuted || "#AAB4C8"), alignItems: "center", justifyContent: "center" }}>
                       {payMethod === "bank" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: C.blue }} />}
                     </View>
                   </TouchableOpacity>
 
                   {/* GCash Option */}
                   <TouchableOpacity
-                    style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: 10, borderWidth: 1.5, borderColor: payMethod === "gcash" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payMethod === "gcash" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 14 }}
+                    style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: s(10), borderWidth: 1.5, borderColor: payMethod === "gcash" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payMethod === "gcash" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 14 }}
                     activeOpacity={0.7}
                     onPress={() => { setPayMethod("gcash"); setPayProof(null); }}
                   >
-                    <View style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: payMethod === "gcash" ? "rgba(0,126,51,0.08)" : (colors.inputBg || "#F0F2F5"), alignItems: "center", justifyContent: "center", marginRight: 10 }}>
-                      <Image source={ICONS.gcash} style={{ width: 22, height: 22 }} resizeMode="contain" />
+                    <View style={{ width: 38, height: 38, borderRadius: s(10), backgroundColor: payMethod === "gcash" ? "rgba(0,126,51,0.08)" : (colors.inputBg || "#F0F2F5"), alignItems: "center", justifyContent: "center", marginRight: 10 }}>
+                      <Image source={ICONS.gcash} style={{ width: s(22), height: 22 }} resizeMode="contain" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: "700", color: colors.textDark }}>GCash</Text>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>Send via GCash wallet instantly</Text>
+                      <Text style={{ fontSize: fs(13), fontWeight: "700", color: colors.textDark }}>GCash</Text>
+                      <Text style={{ fontSize: fs(11), color: colors.textMuted }}>Send via GCash wallet instantly</Text>
                     </View>
-                    <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: payMethod === "gcash" ? C.blue : (colors.textMuted || "#AAB4C8"), alignItems: "center", justifyContent: "center" }}>
+                    <View style={{ width: s(20), height: s(20), borderRadius: s(10), borderWidth: 2, borderColor: payMethod === "gcash" ? C.blue : (colors.textMuted || "#AAB4C8"), alignItems: "center", justifyContent: "center" }}>
                       {payMethod === "gcash" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: C.blue }} />}
                     </View>
                   </TouchableOpacity>
@@ -2764,10 +2898,10 @@ export default function LoansScreen({ navigation, route }) {
                   {/* Proof of Payment -  only for GCash and Bank in manual mode */}
                   {paymentApprovalMethod === "manual" && (payMethod === "gcash" || payMethod === "bank") && (
                     <View style={{ marginBottom: 14 }}>
-                      <Text style={{ fontSize: 12, fontWeight: "800", color: colors.textDark, marginBottom: 6 }}>
+                      <Text style={{ fontSize: fs(12), fontWeight: "800", color: colors.textDark, marginBottom: 6 }}>
                         Proof of Payment *
                       </Text>
-                      <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 8 }}>
+                      <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: 8 }}>
                         Upload a screenshot or photo of your {payMethod === "gcash" ? "GCash" : "bank transfer"} receipt
                       </Text>
                       <TouchableOpacity
@@ -2780,7 +2914,7 @@ export default function LoansScreen({ navigation, route }) {
                         ) : (
                           <>
                             <Image source={ICONS.camera} style={[styles.uploadIconImg, { marginBottom: 4 }]} resizeMode="contain" />
-                            <Text style={{ fontSize: 12, color: colors.textMuted }}>Tap to upload proof</Text>
+                            <Text style={{ fontSize: fs(12), color: colors.textMuted }}>Tap to upload proof</Text>
                           </>
                         )}
                       </TouchableOpacity>
@@ -2789,63 +2923,63 @@ export default function LoansScreen({ navigation, route }) {
 
                   {/* How to pay instructions */}
                   <View style={{ borderTopWidth: 1, borderTopColor: colors.cardBorder || "#E8ECF0", paddingTop: 14, marginBottom: 10 }}>
-                    <Text style={{ fontSize: 13, fontWeight: "800", color: colors.textDark, marginBottom: 10 }}>
+                    <Text style={{ fontSize: fs(13), fontWeight: "800", color: colors.textDark, marginBottom: 10 }}>
                       How to pay via {payMethod === "cash" ? "Cash" : payMethod === "bank" ? "Bank Transfer" : "GCash"}
                     </Text>
 
                     {payMethod === "cash" && (
                       <>
-                        <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: 8, gap: 10 }}>
-                          <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: 11, fontWeight: "800", color: colors.textMuted }}>1</Text>
+                        <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: s(8), gap: 10 }}>
+                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>1</Text>
                           </View>
-                          <Text style={{ flex: 1, fontSize: 12, color: colors.textMuted, lineHeight: 17 }}>Visit the office or authorized cashier during business hours.</Text>
+                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Visit the office or authorized cashier during business hours.</Text>
                         </View>
                         <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-                          <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: 11, fontWeight: "800", color: colors.textMuted }}>2</Text>
+                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>2</Text>
                           </View>
-                          <Text style={{ flex: 1, fontSize: 12, color: colors.textMuted, lineHeight: 17 }}>Present your Loan ID: {payNowLoan.id} to the cashier.</Text>
+                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Present your Loan ID: {payNowLoan.id} to the cashier.</Text>
                         </View>
                       </>
                     )}
 
                     {payMethod === "bank" && (
                       <>
-                        <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: 8, gap: 10 }}>
-                          <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: 11, fontWeight: "800", color: colors.textMuted }}>1</Text>
+                        <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: s(8), gap: 10 }}>
+                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>1</Text>
                           </View>
-                          <Text style={{ flex: 1, fontSize: 12, color: colors.textMuted, lineHeight: 17 }}>Transfer ₱{(payNowLoan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} to the church bank account.</Text>
+                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Transfer ₱{(payNowLoan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} to the church bank account.</Text>
                         </View>
-                        <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: 8, gap: 10 }}>
-                          <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: 11, fontWeight: "800", color: colors.textMuted }}>2</Text>
+                        <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: s(8), gap: 10 }}>
+                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>2</Text>
                           </View>
-                          <Text style={{ flex: 1, fontSize: 12, color: colors.textMuted, lineHeight: 17 }}>Use Loan ID ({payNowLoan.id}) as the reference number.</Text>
+                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Use Loan ID ({payNowLoan.id}) as the reference number.</Text>
                         </View>
                         <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-                          <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: 11, fontWeight: "800", color: colors.textMuted }}>3</Text>
+                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>3</Text>
                           </View>
-                          <Text style={{ flex: 1, fontSize: 12, color: colors.textMuted, lineHeight: 17 }}>Upload your receipt above - admin will verify.</Text>
+                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Upload your receipt above - admin will verify.</Text>
                         </View>
                       </>
                     )}
 
                     {payMethod === "gcash" && (
                       <>
-                        <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: 8, gap: 10 }}>
-                          <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: 11, fontWeight: "800", color: colors.textMuted }}>1</Text>
+                        <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: s(8), gap: 10 }}>
+                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>1</Text>
                           </View>
-                          <Text style={{ flex: 1, fontSize: 12, color: colors.textMuted, lineHeight: 17 }}>Send ₱{(payNowLoan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} via GCash to 09608326569</Text>
+                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Send ₱{(payNowLoan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} via GCash to 09608326569</Text>
                         </View>
                         <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-                          <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: 11, fontWeight: "800", color: colors.textMuted }}>2</Text>
+                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>2</Text>
                           </View>
-                          <Text style={{ flex: 1, fontSize: 12, color: colors.textMuted, lineHeight: 17 }}>Upload your GCash receipt above for verification.</Text>
+                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Upload your GCash receipt above for verification.</Text>
                         </View>
                       </>
                     )}
@@ -2857,16 +2991,16 @@ export default function LoansScreen({ navigation, route }) {
             </ScrollView>
 
             {/* Fixed Footer - Cancel + Submit */}
-            <View style={{ flexDirection: "row", gap: 12, paddingHorizontal: 20, paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 30 : 16, borderTopWidth: 1, borderTopColor: colors.cardBorder || '#E8ECF0' }}>
+            <View style={{ flexDirection: "row", gap: s(12), paddingHorizontal: s(20), paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 30 : 16, borderTopWidth: 1, borderTopColor: colors.cardBorder || '#E8ECF0' }}>
               <TouchableOpacity
-                style={{ flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: "center", borderWidth: 1.5, borderColor: colors.cardBorder || "#E0E5EC", backgroundColor: colors.cardBg }}
+                style={{ flex: 1, paddingVertical: s(14), borderRadius: s(12), alignItems: "center", borderWidth: 1.5, borderColor: colors.cardBorder || "#E0E5EC", backgroundColor: colors.cardBg }}
                 activeOpacity={0.7}
                 onPress={() => setPayNowModalOpen(false)}
               >
-                <Text style={{ fontSize: 14, fontWeight: "700", color: colors.textDark }}>Cancel</Text>
+                <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[{ flex: 2, paddingVertical: 14, borderRadius: 12, alignItems: "center", backgroundColor: C.blue }, paySubmitting && { opacity: 0.6 }]}
+                style={[{ flex: 2, paddingVertical: s(14), borderRadius: s(12), alignItems: "center", backgroundColor: C.blue }, paySubmitting && { opacity: 0.6 }]}
                 activeOpacity={0.8}
                 onPress={handleSubmitPayment}
                 disabled={paySubmitting}
@@ -2874,7 +3008,7 @@ export default function LoansScreen({ navigation, route }) {
                 {paySubmitting ? (
                   <ActivityIndicator color="#FFFFFF" size="small" />
                 ) : (
-                  <Text style={{ fontSize: 14, fontWeight: "700", color: "#FFF" }}>{paymentApprovalMethod === "gateway" && payMethod !== "cash" ? "Proceed to Payment" : "Submit Payment"}</Text>
+                  <Text style={{ fontSize: fs(14), fontWeight: "700", color: "#FFF" }}>{paymentApprovalMethod === "gateway" && payMethod !== "cash" ? "Proceed to Payment" : "Submit Payment"}</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -2910,19 +3044,19 @@ export default function LoansScreen({ navigation, route }) {
               {scheduleLoan && (
                 <>
                   {/* Loan summary */}
-                  <View style={{ backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: 12, padding: 14, marginBottom: 18 }}>
-                    <Text style={{ fontSize: 14, fontWeight: "700", color: colors.textDark }}>{scheduleLoan.id}</Text>
-                    <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                  <View style={{ backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(12), padding: s(14), marginBottom: 18 }}>
+                    <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>{scheduleLoan.id}</Text>
+                    <Text style={{ fontSize: fs(12), color: colors.textMuted, marginTop: 2 }}>
                       {scheduleLoan.type} Loan  •  ₱{(scheduleLoan.amountNum || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}  •  {scheduleLoan.termMonths} months
                     </Text>
                   </View>
 
                   {/* Schedule Table Header */}
-                  <View style={{ flexDirection: "row", paddingVertical: 10, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: colors.cardBorder || "#E8ECF0" }}>
-                    <Text style={{ flex: 0.8, fontSize: 11, fontWeight: "800", color: colors.textMuted }}>Month</Text>
-                    <Text style={{ flex: 1.5, fontSize: 11, fontWeight: "800", color: colors.textMuted }}>Due Date</Text>
-                    <Text style={{ flex: 1.2, fontSize: 11, fontWeight: "800", color: colors.textMuted, textAlign: "right" }}>Amount</Text>
-                    <Text style={{ flex: 1, fontSize: 11, fontWeight: "800", color: colors.textMuted, textAlign: "right" }}>Status</Text>
+                  <View style={{ flexDirection: "row", paddingVertical: s(10), paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: colors.cardBorder || "#E8ECF0" }}>
+                    <Text style={{ flex: 0.8, fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>Month</Text>
+                    <Text style={{ flex: 1.5, fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>Due Date</Text>
+                    <Text style={{ flex: 1.2, fontSize: fs(11), fontWeight: "800", color: colors.textMuted, textAlign: "right" }}>Amount</Text>
+                    <Text style={{ flex: 1, fontSize: fs(11), fontWeight: "800", color: colors.textMuted, textAlign: "right" }}>Status</Text>
                   </View>
 
                   {/* Schedule Rows */}
@@ -2958,15 +3092,15 @@ export default function LoansScreen({ navigation, route }) {
                     }
 
                     return (
-                      <View key={monthNum} style={{ flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: colors.cardBorder || "#F0F2F5" }}>
-                        <Text style={{ flex: 0.8, fontSize: 13, fontWeight: "700", color: colors.textDark }}>{monthNum}</Text>
-                        <Text style={{ flex: 1.5, fontSize: 12, color: colors.textMuted }}>{dueDate}</Text>
-                        <Text style={{ flex: 1.2, fontSize: 13, fontWeight: "700", color: colors.textDark, textAlign: "right" }}>
+                      <View key={monthNum} style={{ flexDirection: "row", alignItems: "center", paddingVertical: s(12), paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: colors.cardBorder || "#F0F2F5" }}>
+                        <Text style={{ flex: 0.8, fontSize: fs(13), fontWeight: "700", color: colors.textDark }}>{monthNum}</Text>
+                        <Text style={{ flex: 1.5, fontSize: fs(12), color: colors.textMuted }}>{dueDate}</Text>
+                        <Text style={{ flex: 1.2, fontSize: fs(13), fontWeight: "700", color: colors.textDark, textAlign: "right" }}>
                           ₱{(scheduleLoan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </Text>
                         <View style={{ flex: 1, alignItems: "flex-end" }}>
                           <View style={{ backgroundColor: statusBg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
-                            <Text style={{ fontSize: 11, fontWeight: "700", color: statusColor }}>{statusLabel}</Text>
+                            <Text style={{ fontSize: fs(11), fontWeight: "700", color: statusColor }}>{statusLabel}</Text>
                           </View>
                         </View>
                       </View>
@@ -2974,9 +3108,9 @@ export default function LoansScreen({ navigation, route }) {
                   })}
 
                   {/* Total row */}
-                  <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 14, paddingHorizontal: 4, marginTop: 4 }}>
-                    <Text style={{ flex: 2.3, fontSize: 13, fontWeight: "800", color: colors.textDark }}>Total Repayment</Text>
-                    <Text style={{ flex: 1.2, fontSize: 14, fontWeight: "800", color: C.blue, textAlign: "right" }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: s(14), paddingHorizontal: 4, marginTop: 4 }}>
+                    <Text style={{ flex: 2.3, fontSize: fs(13), fontWeight: "800", color: colors.textDark }}>Total Repayment</Text>
+                    <Text style={{ flex: 1.2, fontSize: fs(14), fontWeight: "800", color: C.blue, textAlign: "right" }}>
                       ₱{(scheduleLoan.totalRepayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </Text>
                     <View style={{ flex: 1 }} />
@@ -2998,78 +3132,13 @@ export default function LoansScreen({ navigation, route }) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Bottom tab bar */}
-      <View style={[styles.tabBar, { backgroundColor: colors.tabBg }]}>
-        <Animated.View
-          style={[
-            styles.tabIndicator,
-            { transform: [{ translateX: indicatorPosition }] },
-          ]}
-        />
-
-        {TAB_ITEMS.map((tab) => {
-          const isActive = activeTab === tab.key;
-          const allIndex = ALL_TAB_ITEMS.findIndex(t => t.key === tab.key);
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={styles.tabItem}
-              onPress={() => {
-                setActiveTab(tab.key);
-                if (tab.key === "Loans") return;
-                navWithEmail(tab.key);
-              }}
-              activeOpacity={0.7}
-            >
-              <Animated.View
-                style={[
-                  styles.tabBgCircle,
-                  { opacity: tabAnimations[allIndex].bgOpacity },
-                ]}
-              />
-
-              <Animated.View
-                style={{ transform: [{ scale: tabAnimations[allIndex].scale }] }}
-              >
-                <Image
-                  source={tab.icon}
-                  style={[
-                    styles.tabIcon,
-                    {
-                      tintColor: isActive ? C.tabActive : colors.tabInactive,
-                      opacity: isActive ? 1 : 0.6,
-                    },
-                  ]}
-                  resizeMode="contain"
-                />
-              </Animated.View>
-
-              {tab.key === "Notifications" && hasUnreadNotifs && (
-                <View style={{
-                  position: 'absolute', top: 8, right: 28,
-                  width: 8, height: 8, borderRadius: 4,
-                  backgroundColor: C.red, borderWidth: 1.5,
-                  borderColor: C.navBg, zIndex: 20,
-                }} />
-              )}
-
-              <Text
-                style={[
-                  styles.tabLabel,
-                  {
-                    color: isActive ? C.tabActive : colors.tabInactive,
-                    fontWeight: isActive ? "700" : "500",
-                    fontSize: isActive ? 11 : 10,
-                    opacity: isActive ? 1 : 0.7,
-                  },
-                ]}
-              >
-                {tab.key}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+            {/* Floating Bottom Tab Bar */}
+      <FloatingNavBar
+        activeTab="Loans"
+        navigation={navigation}
+        userEmail={userEmail}
+        userRole={userRole}
+      />
 
       {/* Sidebar overlay */}
       {sidebarOpen ? (
@@ -3158,7 +3227,7 @@ export default function LoansScreen({ navigation, route }) {
             onPress={async () => {
               closeSidebar();
               await AsyncStorage.removeItem("faithly_user");
-              setTimeout(() => navigation.navigate("PUAC"), 300);
+              setTimeout(() => navigation.navigate("Start"), 300);
             }}
           >
             <Image
@@ -3202,13 +3271,13 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.navBg,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 18,
-    paddingTop: Platform.OS === "ios" ? 56 : 42,
+    paddingHorizontal: s(18),
+    paddingTop: Platform.OS === "ios" ? s(56) : s(42),
     paddingBottom: 14,
   },
   menuBtn: { padding: 4, justifyContent: "center", gap: 5 },
   menuLine: {
-    width: 22,
+    width: s(22),
     height: 2.2,
     backgroundColor: C.textDark,
     borderRadius: 1.2,
@@ -3216,14 +3285,14 @@ const getStyles = (C) => StyleSheet.create({
   topTitle: {
     flex: 1,
     textAlign: "center",
-    fontSize: 20,
+    fontSize: fs(20),
     fontWeight: "600",
     color: C.textDark,
   },
   topSpacer: { width: 28 },
 
   // Scroll Content
-  scroll: { flex: 1, paddingHorizontal: 18, paddingTop: 14 },
+  scroll: { flex: 1, paddingHorizontal: s(18), paddingTop: 14 },
 
   // Header Section
   header: {
@@ -3232,18 +3301,18 @@ const getStyles = (C) => StyleSheet.create({
     alignItems: "flex-start",
     paddingTop: 8,
     paddingBottom: 12,
-    gap: 10,
+    gap: s(10),
   },
   pageTitle: {
-    fontSize: 24,
+    fontSize: fs(24),
     fontWeight: "800",
     color: C.textDark,
-    marginBottom: 4,
+    marginBottom: s(4),
   },
   pageSubtitle: {
-    fontSize: 13,
+    fontSize: fs(13),
     color: C.textMuted,
-    lineHeight: 18,
+    lineHeight: fs(18),
   },
 
   // Apply button (UI only fix)
@@ -3251,9 +3320,9 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.blue,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingHorizontal: s(12),
+    paddingVertical: s(10),
+    borderRadius: s(12),
     gap: 8,
     shadowColor: C.blue,
     shadowOffset: { width: 0, height: 2 },
@@ -3262,19 +3331,19 @@ const getStyles = (C) => StyleSheet.create({
     elevation: 2,
   },
   applyBtnPlus: {
-    fontSize: 18,
+    fontSize: fs(18),
     color: "#FFF",
     fontWeight: "900",
     marginTop: -1,
   },
-  applyBtnText: { fontSize: 12, color: "#FFF", fontWeight: "800" },
+  applyBtnText: { fontSize: fs(12), color: "#FFF", fontWeight: "800" },
 
   // Savings Eligibility Banner
   savingsBanner: {
     backgroundColor: C.cardBg,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
+    borderRadius: s(16),
+    padding: s(16),
+    marginBottom: s(16),
     borderWidth: 1,
     borderColor: C.cardBorder,
   },
@@ -3283,15 +3352,15 @@ const getStyles = (C) => StyleSheet.create({
     alignItems: "flex-start",
   },
   savingsBannerTitle: {
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "800",
     color: C.textDark,
   },
   savingsBannerText: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: C.textMuted,
     marginTop: 4,
-    lineHeight: 18,
+    lineHeight: fs(18),
   },
   savingsBannerProgressBg: {
     height: 6,
@@ -3306,7 +3375,7 @@ const getStyles = (C) => StyleSheet.create({
     borderRadius: 3,
   },
   savingsBannerLink: {
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "700",
     color: C.blue,
   },
@@ -3315,15 +3384,15 @@ const getStyles = (C) => StyleSheet.create({
   summaryGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
-    marginBottom: 10,
+    gap: s(12),
+    marginBottom: s(10),
   },
   summaryCard: {
     backgroundColor: C.cardBg,
     borderWidth: 1,
     borderColor: C.cardBorder,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: s(16),
+    padding: s(16),
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -3338,23 +3407,23 @@ const getStyles = (C) => StyleSheet.create({
 
   summaryLeft: { flex: 1, paddingRight: 10 },
   summaryLabel: { fontSize: 12.5, color: C.textMuted, marginBottom: 6 },
-  summaryValue: { fontSize: 20, fontWeight: "700", color: C.textDark },
+  summaryValue: { fontSize: fs(20), fontWeight: "700", color: C.textDark },
   summaryIconBg: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: s(44),
+    height: s(44),
+    borderRadius: s(14),
     alignItems: "center",
     justifyContent: "center",
   },
-  summaryIcon: { width: 22, height: 22 },
+  summaryIcon: { width: s(22), height: 22 },
 
   // Section
   section: { marginTop: 6, paddingBottom: 8 },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: fs(20),
     fontWeight: "800",
     color: C.textDark,
-    marginBottom: 12,
+    marginBottom: s(12),
   },
 
   // Loan Card
@@ -3362,9 +3431,9 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.cardBg,
     borderWidth: 1,
     borderColor: C.cardBorder,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: s(16),
+    padding: s(16),
+    marginBottom: s(12),
     shadowColor: "#000",
     shadowOpacity: 0.04,
     shadowRadius: 14,
@@ -3375,21 +3444,21 @@ const getStyles = (C) => StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 14,
-    gap: 10,
+    marginBottom: s(14),
+    gap: s(10),
   },
-  loanHeaderLeft: { flexDirection: "row", gap: 12, flex: 1 },
+  loanHeaderLeft: { flexDirection: "row", gap: s(12), flex: 1 },
   loanIconBg: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: s(44),
+    height: s(44),
+    borderRadius: s(14),
     backgroundColor: C.blueLight,
     alignItems: "center",
     justifyContent: "center",
   },
-  loanIcon: { width: 22, height: 22, tintColor: C.blue },
+  loanIcon: { width: s(22), height: s(22), tintColor: C.blue },
   loanId: {
-    fontSize: 14.5,
+    fontSize: fs(14),
     fontWeight: "700",
     color: C.textDark,
     marginBottom: 3,
@@ -3401,10 +3470,10 @@ const getStyles = (C) => StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 999,
-    marginBottom: 8,
+    marginBottom: s(8),
   },
-  statusText: { fontSize: 12, fontWeight: "800" },
-  loanAmount: { fontSize: 18, fontWeight: "700", color: C.textDark },
+  statusText: { fontSize: fs(12), fontWeight: "800" },
+  loanAmount: { fontSize: fs(18), fontWeight: "700", color: C.textDark },
 
   // Payment Details
   paymentDetails: {
@@ -3412,18 +3481,18 @@ const getStyles = (C) => StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: C.cardBorder,
     paddingTop: 12,
-    marginBottom: 12,
-    gap: 10,
+    marginBottom: s(12),
+    gap: s(10),
   },
   paymentItem: { flex: 1 },
   paymentLabel: {
-    fontSize: 11,
+    fontSize: fs(11),
     color: C.textMuted,
-    marginBottom: 4,
+    marginBottom: s(4),
     fontWeight: "600",
   },
   paymentValue: {
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: "700",
     color: C.textDark,
   },
@@ -3433,20 +3502,20 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: "transparent",
     borderWidth: 1,
     borderColor: C.blue,
-    borderRadius: 12,
+    borderRadius: s(12),
     paddingVertical: 11,
     alignItems: "center",
   },
-  detailsBtnText: { fontSize: 14, fontWeight: "700", color: C.blue },
+  detailsBtnText: { fontSize: fs(14), fontWeight: "700", color: C.blue },
 
-  bottomPad: { height: 24 },
+  bottomPad: { height: 110 },
 
   chatBtn: {
     position: "absolute",
     bottom: 100,
     right: 20,
-    width: 52,
-    height: 52,
+    width: s(52),
+    height: s(52),
     borderRadius: 26,
     backgroundColor: C.blue,
     alignItems: "center",
@@ -3458,7 +3527,7 @@ const getStyles = (C) => StyleSheet.create({
     elevation: 5,
     zIndex: 2,
   },
-  chatIcon: { width: 24, height: 24, tintColor: "#FFFFFF" },
+  chatIcon: { width: s(24), height: s(24), tintColor: "#FFFFFF" },
 
   // Modal Styles
   modalContainer: { flex: 1, justifyContent: "flex-end" },
@@ -3481,12 +3550,12 @@ const getStyles = (C) => StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: s(20),
     paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: C.cardBorder,
   },
-  modalTitle: { fontSize: 20, fontWeight: "800", color: C.textDark },
+  modalTitle: { fontSize: fs(20), fontWeight: "800", color: C.textDark },
   closeBtn: {
     width: 34,
     height: 34,
@@ -3495,27 +3564,27 @@ const getStyles = (C) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  closeBtnText: { fontSize: 18, color: C.textMuted, fontWeight: "600" },
-  modalScroll: { paddingHorizontal: 20, paddingTop: 18 },
+  closeBtnText: { fontSize: fs(18), color: C.textMuted, fontWeight: "600" },
+  modalScroll: { paddingHorizontal: s(20), paddingTop: 18 },
 
   formGroup: { marginBottom: 18 },
   formLabel: {
-    fontSize: 13.5,
+    fontSize: fs(13),
     fontWeight: "800",
     color: C.textDark,
-    marginBottom: 6,
+    marginBottom: s(6),
   },
   formHint: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: C.textMuted,
-    marginBottom: 8,
+    marginBottom: s(8),
   },
   
   uploadBox: {
     borderWidth: 1.5,
     borderColor: C.cardBorder,
     borderStyle: "dashed",
-    borderRadius: 14,
+    borderRadius: s(14),
     height: 160,
     alignItems: "center",
     justifyContent: "center",
@@ -3527,23 +3596,23 @@ const getStyles = (C) => StyleSheet.create({
     borderStyle: "solid",
   },
   uploadIconImg: {
-    width: 36,
-    height: 36,
+    width: s(36),
+    height: s(36),
     tintColor: "#9CA3AF",
-    marginBottom: 8,
+    marginBottom: s(8),
   },
-  uploadText: { fontSize: 13, color: C.textMuted },
+  uploadText: { fontSize: fs(13), color: C.textMuted },
   previewImg: {
     width: "100%",
     height: "100%",
-    borderRadius: 12,
+    borderRadius: s(12),
   },
 
   typeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   typeCard: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
+    paddingHorizontal: s(16),
+    paddingVertical: s(12),
+    borderRadius: s(12),
     borderWidth: 1.5,
     borderColor: C.cardBorder,
     backgroundColor: C.bg,
@@ -3551,15 +3620,15 @@ const getStyles = (C) => StyleSheet.create({
     alignItems: "center",
   },
   typeCardActive: { borderColor: C.blue, backgroundColor: C.blueLight },
-  typeCardText: { fontSize: 13, fontWeight: "700", color: C.textMuted },
+  typeCardText: { fontSize: fs(13), fontWeight: "700", color: C.textMuted },
   typeCardTextActive: { color: C.blue, fontWeight: "900" },
 
   loanTypeCard: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 12,
+    paddingHorizontal: s(16),
+    paddingVertical: s(14),
+    borderRadius: s(12),
     borderWidth: 1.5,
-    width: 260,
+    width: s(260),
   },
   loanTypeCardActive: {
     borderColor: C.blue,
@@ -3568,11 +3637,11 @@ const getStyles = (C) => StyleSheet.create({
   loanTypeHeader: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: s(10),
   },
   loanTypeIcon: {
-    width: 24,
-    height: 24,
+    width: s(24),
+    height: s(24),
     tintColor: C.textMuted,
     marginRight: 10,
   },
@@ -3582,27 +3651,27 @@ const getStyles = (C) => StyleSheet.create({
     gap: 4,
   },
   loanTypeTitle: {
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: "700",
     color: C.textDark,
   },
   loanTypeBadge: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: C.cardBg,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 20,
+    borderRadius: s(20),
     alignSelf: "flex-start",
   },
   loanTypeBadgeText: {
-    fontSize: 11,
+    fontSize: fs(11),
     color: C.textDark,
     fontWeight: "600",
   },
   moreInfoBtn: {
-    paddingVertical: 8,
+    paddingVertical: s(8),
   },
   moreInfoText: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: C.textMuted,
     fontWeight: "600",
   },
@@ -3614,65 +3683,65 @@ const getStyles = (C) => StyleSheet.create({
     paddingTop: 12,
   },
   expandedDesc: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: C.textMuted,
-    lineHeight: 18,
-    marginBottom: 10,
+    lineHeight: fs(18),
+    marginBottom: s(10),
   },
   expandedBadges: {
     flexDirection: "row",
     gap: 8,
-    marginBottom: 10,
+    marginBottom: s(10),
   },
   expandedBadge: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: C.cardBg,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 20,
+    borderRadius: s(20),
   },
   expandedBadgeText: {
-    fontSize: 11,
+    fontSize: fs(11),
     color: C.textDark,
     fontWeight: "700",
   },
   expandedMax: {
-    fontSize: 13,
+    fontSize: fs(13),
     fontWeight: "700",
     color: C.textDark,
   },
 
   sectionTitle: {
-    fontSize: 16,
+    fontSize: fs(16),
     fontWeight: "800",
     color: C.textDark,
-    marginBottom: 6,
+    marginBottom: s(6),
   },
   sectionSubtitle: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: C.textMuted,
-    lineHeight: 18,
-    marginBottom: 14,
+    lineHeight: fs(18),
+    marginBottom: s(14),
   },
   docRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: s(12),
   },
   docCol: {
     width: "40%",
     flexGrow: 1,
   },
   docLabel: {
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "600",
     color: C.textDark,
-    marginBottom: 8,
+    marginBottom: s(8),
     minHeight: 34,
   },
   captureBox: {
     borderWidth: 1.5,
     borderColor: C.cardBorder,
-    borderRadius: 12,
+    borderRadius: s(12),
     paddingVertical: 24,
     alignItems: "center",
     justifyContent: "center",
@@ -3689,35 +3758,35 @@ const getStyles = (C) => StyleSheet.create({
   docPreviewImg: {
     width: "100%",
     height: "100%",
-    borderRadius: 10,
+    borderRadius: s(10),
     resizeMode: "cover",
   },
   captureIcon: {
     width: 32,
     height: 32,
-    marginBottom: 8,
+    marginBottom: s(8),
   },
   captureText: {
-    fontSize: 12,
+    fontSize: fs(12),
     fontWeight: "600",
     color: C.textDark,
-    marginBottom: 4,
+    marginBottom: s(4),
   },
   captureHint: {
-    fontSize: 11,
+    fontSize: fs(11),
     color: C.textMuted,
   },
   uploadArrow: {
-    fontSize: 28,
+    fontSize: fs(28),
     fontWeight: "700",
-    marginBottom: 6,
+    marginBottom: s(6),
   },
   radioOption: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
+    paddingHorizontal: s(16),
+    paddingVertical: s(12),
+    borderRadius: s(12),
     borderWidth: 1.5,
     borderColor: C.cardBorder,
     gap: 8,
@@ -3727,8 +3796,8 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.blueLight,
   },
   radioCircle: {
-    width: 18,
-    height: 18,
+    width: s(18),
+    height: s(18),
     borderRadius: 9,
     borderWidth: 1.5,
     borderColor: C.textMuted,
@@ -3741,7 +3810,7 @@ const getStyles = (C) => StyleSheet.create({
     borderRadius: 5,
   },
   radioText: {
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: "600",
   },
 
@@ -3751,30 +3820,30 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.bg,
     borderWidth: 1,
     borderColor: C.cardBorder,
-    borderRadius: 12,
-    paddingHorizontal: 14,
+    borderRadius: s(12),
+    paddingHorizontal: s(14),
   },
   currencySymbol: {
-    fontSize: 16,
+    fontSize: fs(16),
     fontWeight: "900",
     color: C.textDark,
     marginRight: 8,
   },
   textInput: {
     flex: 1,
-    fontSize: 15,
+    fontSize: fs(15),
     color: C.textDark,
-    paddingVertical: 14,
+    paddingVertical: s(14),
     fontWeight: "700",
   },
   textInputFull: {
     backgroundColor: C.bg,
     borderWidth: 1,
     borderColor: C.cardBorder,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    fontSize: 15,
+    borderRadius: s(12),
+    paddingHorizontal: s(14),
+    paddingVertical: s(14),
+    fontSize: fs(15),
     color: C.textDark,
     fontWeight: "700",
   },
@@ -3784,39 +3853,39 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.blueLight,
     borderLeftWidth: 3,
     borderLeftColor: C.blue,
-    padding: 14,
-    borderRadius: 12,
+    padding: s(14),
+    borderRadius: s(12),
     marginBottom: 18,
   },
   infoText: {
-    fontSize: 13,
+    fontSize: fs(13),
     color: C.textDark,
-    lineHeight: 18,
+    lineHeight: fs(18),
     fontWeight: "600",
   },
   errorBox: {
     backgroundColor: "rgba(231,76,60,0.1)",
     borderLeftWidth: 3,
     borderLeftColor: C.red,
-    padding: 14,
-    borderRadius: 12,
+    padding: s(14),
+    borderRadius: s(12),
     marginBottom: 18,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: s(10),
   },
-  errorIcon: { width: 18, height: 18, tintColor: C.red },
+  errorIcon: { width: s(18), height: s(18), tintColor: C.red },
   errorText: {
     flex: 1,
-    fontSize: 13,
+    fontSize: fs(13),
     color: C.red,
-    lineHeight: 18,
+    lineHeight: fs(18),
     fontWeight: "600",
   },
   submitBtn: {
     backgroundColor: C.blue,
-    paddingVertical: 16,
-    borderRadius: 14,
+    paddingVertical: s(16),
+    borderRadius: s(14),
     alignItems: "center",
     shadowColor: C.blue,
     shadowOffset: { width: 0, height: 2 },
@@ -3828,63 +3897,63 @@ const getStyles = (C) => StyleSheet.create({
 
   // Predictive UI Styles
   scoreBox: {
-    padding: 16,
-    borderRadius: 14,
+    padding: s(16),
+    borderRadius: s(14),
     borderWidth: 1,
-    marginBottom: 6,
+    marginBottom: s(6),
   },
   scoreHigh: { backgroundColor: C.greenLight, borderColor: "rgba(52,199,89,0.3)" },
   scoreMed: { backgroundColor: C.orangeLight, borderColor: "rgba(255,149,0,0.3)" },
   scoreLow: { backgroundColor: "rgba(231,76,60,0.1)", borderColor: "rgba(231,76,60,0.3)" },
   scoreText: {
-    fontSize: 16,
+    fontSize: fs(16),
     fontWeight: "900",
-    marginBottom: 10,
+    marginBottom: s(10),
     textAlign: "center",
   },
   progressBarBg: {
     height: 8,
     backgroundColor: "rgba(0,0,0,0.06)",
-    borderRadius: 4,
+    borderRadius: s(4),
     overflow: "hidden",
   },
   progressBarFill: {
     height: "100%",
-    borderRadius: 4,
+    borderRadius: s(4),
   },
   breakdownBox: {
     backgroundColor: C.cardBg,
-    borderRadius: 14,
-    padding: 16,
+    borderRadius: s(14),
+    padding: s(16),
     borderWidth: 1,
     borderColor: C.cardBorder,
-    marginBottom: 20,
+    marginBottom: s(20),
     shadowColor: "#000",
     shadowOpacity: 0.02,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
   },
   breakdownTitle: {
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "800",
     color: C.textDark,
-    marginBottom: 12,
+    marginBottom: s(12),
   },
   breakdownRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 8,
+    marginBottom: s(8),
   },
-  breakdownLabel: { fontSize: 13, color: C.textMuted, fontWeight: "600" },
-  breakdownValue: { fontSize: 14, color: C.textDark, fontWeight: "700" },
+  breakdownLabel: { fontSize: fs(13), color: C.textMuted, fontWeight: "600" },
+  breakdownValue: { fontSize: fs(14), color: C.textDark, fontWeight: "700" },
   breakdownTotalRow: {
     borderTopWidth: 1,
     borderTopColor: C.cardBorder,
     paddingTop: 10,
     marginTop: 4,
   },
-  breakdownLabelTotal: { fontSize: 14, color: C.textDark, fontWeight: "800" },
-  breakdownValueTotal: { fontSize: 16, color: C.textDark, fontWeight: "900" },
+  breakdownLabelTotal: { fontSize: fs(14), color: C.textDark, fontWeight: "800" },
+  breakdownValueTotal: { fontSize: fs(16), color: C.textDark, fontWeight: "900" },
 
   // Success Modal
   successModalContent: {
@@ -3893,17 +3962,17 @@ const getStyles = (C) => StyleSheet.create({
     justifyContent: "center",
     marginTop: "auto",
     marginBottom: "auto",
-    marginHorizontal: 20,
-    borderRadius: 24,
+    marginHorizontal: s(20),
+    borderRadius: s(24),
   },
   successIconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: s(64),
+    height: s(64),
+    borderRadius: s(32),
     backgroundColor: C.greenLight,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 20,
+    marginBottom: s(20),
   },
   successCheck: {
     fontSize: 32,
@@ -3911,28 +3980,28 @@ const getStyles = (C) => StyleSheet.create({
     fontWeight: "900",
   },
   successTitle: {
-    fontSize: 22,
+    fontSize: fs(22),
     fontWeight: "800",
     color: C.textDark,
-    marginBottom: 10,
+    marginBottom: s(10),
     textAlign: "center",
   },
   successSub: {
-    fontSize: 14,
+    fontSize: fs(14),
     color: C.textMuted,
     textAlign: "center",
-    lineHeight: 20,
+    lineHeight: fs(20),
     marginBottom: 28,
   },
   successBtn: {
     backgroundColor: C.green,
     width: "100%",
-    paddingVertical: 16,
-    borderRadius: 14,
+    paddingVertical: s(16),
+    borderRadius: s(14),
     alignItems: "center",
   },
   successBtnText: {
-    fontSize: 16,
+    fontSize: fs(16),
     fontWeight: "800",
     color: "#FFFFFF",
   },
@@ -3941,44 +4010,44 @@ const getStyles = (C) => StyleSheet.create({
   detailsHeader: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
-    marginBottom: 20,
+    paddingVertical: s(10),
+    marginBottom: s(20),
   },
-  detailsId: { fontSize: 18, fontWeight: "800", color: C.textDark },
-  detailsType: { fontSize: 13, color: C.textMuted, marginTop: 2 },
+  detailsId: { fontSize: fs(18), fontWeight: "800", color: C.textDark },
+  detailsType: { fontSize: fs(13), color: C.textMuted, marginTop: 2 },
   detailsCard: {
     backgroundColor: C.cardBg,
     borderWidth: 1,
     borderColor: C.cardBorder,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
+    borderRadius: s(16),
+    padding: s(16),
+    marginBottom: s(16),
   },
   detailsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     paddingBottom: 12,
-    marginBottom: 12,
+    marginBottom: s(12),
     borderBottomWidth: 1,
     borderBottomColor: C.cardBorder,
   },
-  detailsLabel: { fontSize: 13, color: C.textMuted, fontWeight: "600" },
-  detailsValue: { fontSize: 14, color: C.textDark, fontWeight: "800" },
+  detailsLabel: { fontSize: fs(13), color: C.textMuted, fontWeight: "600" },
+  detailsValue: { fontSize: fs(14), color: C.textDark, fontWeight: "800" },
   purposeBox: {
     backgroundColor: C.blueLight,
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 24,
+    padding: s(16),
+    borderRadius: s(16),
+    marginBottom: s(24),
   },
-  purposeTitle: { fontSize: 14, fontWeight: "800", color: C.blue, marginBottom: 8 },
-  purposeText: { fontSize: 14, color: C.textDark, lineHeight: 20 },
+  purposeTitle: { fontSize: fs(14), fontWeight: "800", color: C.blue, marginBottom: 8 },
+  purposeText: { fontSize: fs(14), color: C.textDark, lineHeight: 20 },
 
   tabBar: {
     flexDirection: "row",
     backgroundColor: C.tabBg,
     borderTopWidth: 1,
     borderTopColor: "rgba(100,140,200,0.2)",
-    paddingVertical: 15,
+    paddingVertical: s(15),
     paddingBottom: Platform.OS === "ios" ? 20 : 8,
     position: "relative",
   },
@@ -3987,7 +4056,7 @@ const getStyles = (C) => StyleSheet.create({
     bottom: 0,
     left: 0,
     width: SCREEN_WIDTH / 5,
-    height: 3,
+    height: s(3),
     backgroundColor: C.tabActive,
   },
   tabItem: {
@@ -4005,7 +4074,7 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: "rgba(46,107,240,0.15)",
     top: -8,
   },
-  tabIcon: { width: 26, height: 26 },
+  tabIcon: { width: s(26), height: 26 },
   tabLabel: { fontSize: 10 },
 
   overlay: {
@@ -4015,7 +4084,8 @@ const getStyles = (C) => StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: C.overlay,
-    zIndex: 10,
+    zIndex: 998,
+    elevation: 998,
   },
 
   sidebar: {
@@ -4023,70 +4093,71 @@ const getStyles = (C) => StyleSheet.create({
     top: 0,
     left: 0,
     bottom: 0,
-    width: 260,
-    backgroundColor: "#0D1F45",
-    zIndex: 11,
+    width: SIDEBAR_WIDTH,
+    backgroundColor: C.sidebarBg,
+    zIndex: 1000,
+    elevation: 1000,
     flexDirection: "column",
   },
   sidebarHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingTop: Platform.OS === "ios" ? 58 : 44,
+    gap: s(12),
+    paddingTop: Platform.OS === "ios" ? s(58) : s(44),
     paddingBottom: 22,
-    paddingHorizontal: 20,
+    paddingHorizontal: s(20),
   },
-  sidebarLogo: { width: 46, height: 46, borderRadius: 45 },
-  sidebarTitle: { fontSize: 18, fontWeight: "800", color: "#FFF" },
-  sidebarRole: { fontSize: 12, color: "#FFF", marginTop: 1 },
+  sidebarLogo: { width: s(46), height: s(46), borderRadius: 45 },
+  sidebarTitle: { fontSize: fs(18), fontWeight: "800", color: "#FFF" },
+  sidebarRole: { fontSize: fs(12), color: "#FFF", marginTop: 1 },
 
   sidebarNav: { flex: 1, paddingHorizontal: 12 },
   sidebarItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
-    paddingVertical: 13,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    marginBottom: 6,
+    gap: s(14),
+    paddingVertical: s(13),
+    paddingHorizontal: s(14),
+    borderRadius: s(12),
+    marginBottom: s(6),
   },
   sidebarItemActive: { backgroundColor: "rgba(46,107,240,0.1)" },
-  sidebarIcon: { width: 20, height: 20 },
-  sidebarItemText: { fontSize: 15, color: C.textMuted, fontWeight: "600" },
+  sidebarIcon: { width: s(20), height: 20 },
+  sidebarItemText: { fontSize: fs(15), color: C.textMuted, fontWeight: "600" },
   sidebarItemTextActive: { color: C.blue },
 
   sidebarFooter: {
     borderTopWidth: 1,
     borderTopColor: C.cardBorder,
-    paddingHorizontal: 18,
-    paddingTop: 16,
-    paddingBottom: Platform.OS === "ios" ? 34 : 18,
+    paddingHorizontal: s(18),
+    paddingTop: s(16),
+    paddingBottom: Platform.OS === "ios" ? s(34) : s(18),
   },
   sidebarUserRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    marginBottom: 16,
+    gap: s(12),
+    marginBottom: s(16),
   },
   sidebarAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: s(36),
+    height: s(36),
+    borderRadius: s(18),
     backgroundColor: "rgba(31, 102, 255, 0.93)",
     alignItems: "center",
     justifyContent: "center",
   },
-  sidebarAvatarIcon: { width: 18, height: 18, tintColor: "#FFFFFF" },
-  sidebarUserName: { fontSize: 14, fontWeight: "700", color: "#FFF" },
+  sidebarAvatarIcon: { width: s(18), height: s(18), tintColor: "#FFFFFF" },
+  sidebarUserName: { fontSize: fs(14), fontWeight: "700", color: "#FFF" },
   sidebarUserEmail: {
-    fontSize: 11,
+    fontSize: fs(11),
     color: C.textMuted,
     marginTop: 1,
   },
 
-  signOutRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 },
-  signOutIcon: { width: 30, height: 40, tintColor: C.red },
-  signOutText: { fontSize: 14, color: C.red, fontWeight: "700" },
+  signOutRow: { flexDirection: "row", alignItems: "center", gap: s(10), paddingVertical: 6 },
+  signOutIcon: { width: 30, height: s(40), tintColor: C.red },
+  signOutText: { fontSize: fs(14), color: C.red, fontWeight: "700" },
 
   // Restricted overlay
   restrictedContainer: {
@@ -4098,8 +4169,8 @@ const getStyles = (C) => StyleSheet.create({
   },
   restrictedCard: {
     width: "100%",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
+    backgroundColor: C.cardBg,
+    borderRadius: s(20),
     padding: 32,
     alignItems: "center",
     borderWidth: 1,
@@ -4112,39 +4183,39 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: "rgba(46,107,240,0.08)",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 20,
+    marginBottom: s(20),
   },
   lockEmoji: { fontSize: 36 },
   lockIcon: {
-    width: 36,
-    height: 36,
-    tintColor: "#0D1F45",
+    width: s(36),
+    height: s(36),
+    tintColor: C.blue,
   },
   restrictedTitle: {
-    fontSize: 22,
+    fontSize: fs(22),
     fontWeight: "700",
     color: C.textDark,
-    marginBottom: 10,
+    marginBottom: s(10),
     textAlign: "center",
   },
   restrictedSub: {
-    fontSize: 14,
+    fontSize: fs(14),
     color: C.textMuted,
     textAlign: "center",
-    lineHeight: 20,
-    marginBottom: 24,
+    lineHeight: fs(20),
+    marginBottom: s(24),
   },
   restrictedBtn: {
     backgroundColor: C.blue,
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: s(12),
+    paddingVertical: s(14),
     paddingHorizontal: 28,
     alignItems: "center",
     width: "100%",
   },
   restrictedBtnText: {
     color: "#FFFFFF",
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "600",
   },
 
@@ -4154,10 +4225,10 @@ const getStyles = (C) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    marginTop: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
+    marginTop: s(16),
+    paddingVertical: s(12),
+    paddingHorizontal: s(20),
+    borderRadius: s(12),
     borderWidth: 1.5,
     borderColor: C.blue,
     borderStyle: "dashed",
@@ -4165,12 +4236,12 @@ const getStyles = (C) => StyleSheet.create({
     width: "100%",
   },
   unlockInfoBtnText: {
-    fontSize: 13.5,
+    fontSize: fs(13),
     fontWeight: "700",
     color: C.blue,
   },
   unlockInfoArrow: {
-    fontSize: 16,
+    fontSize: fs(16),
     color: C.blue,
     fontWeight: "700",
   },
@@ -4181,12 +4252,12 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.overlay,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: s(24),
   },
   reqModalContent: {
     backgroundColor: C.cardBg,
-    borderRadius: 20,
-    padding: 24,
+    borderRadius: s(20),
+    padding: s(24),
     width: "100%",
     maxWidth: 400,
   },
@@ -4194,90 +4265,90 @@ const getStyles = (C) => StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: s(12),
   },
   reqModalTitle: {
-    fontSize: 20,
+    fontSize: fs(20),
     fontWeight: "800",
     color: C.textDark,
   },
   reqCloseBtn: {
     width: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: s(16),
     backgroundColor: C.bg,
     alignItems: "center",
     justifyContent: "center",
   },
   reqCloseBtnText: {
-    fontSize: 16,
+    fontSize: fs(16),
     color: C.textMuted,
     fontWeight: "600",
   },
   reqModalSub: {
-    fontSize: 13.5,
+    fontSize: fs(13),
     color: C.textMuted,
-    lineHeight: 20,
-    marginBottom: 20,
+    lineHeight: fs(20),
+    marginBottom: s(20),
   },
   reqItem: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 14,
+    gap: s(14),
     marginBottom: 18,
   },
   reqIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: s(44),
+    height: s(44),
+    borderRadius: s(14),
     backgroundColor: C.blueLight,
     alignItems: "center",
     justifyContent: "center",
   },
   reqIcon: {
-    width: 22,
-    height: 22,
+    width: s(22),
+    height: s(22),
     tintColor: C.blue,
   },
   reqItemTitle: {
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "800",
     color: C.textDark,
-    marginBottom: 4,
+    marginBottom: s(4),
   },
   reqItemDesc: {
     fontSize: 12.5,
     color: C.textMuted,
-    lineHeight: 18,
+    lineHeight: fs(18),
   },
   reqGotItBtn: {
     backgroundColor: C.blue,
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: s(12),
+    paddingVertical: s(14),
     alignItems: "center",
     marginTop: 6,
   },
   reqGotItText: {
     color: "#FFFFFF",
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "700",
   },
 
   // Savings Eligibility Banner
   savingsBanner: {
-    marginHorizontal: 18,
+    marginHorizontal: s(18),
     marginBottom: 18,
     backgroundColor: "rgba(245,166,35,0.1)",
     borderWidth: 1,
     borderColor: "rgba(245,166,35,0.25)",
-    borderRadius: 16,
-    padding: 18,
+    borderRadius: s(16),
+    padding: s(18),
   },
   savingsBannerHeader: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 14,
-    marginBottom: 14,
+    gap: s(14),
+    marginBottom: s(14),
   },
   
   errorBox: {
@@ -4285,40 +4356,40 @@ const getStyles = (C) => StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(231,76,60,0.3)",
     padding: 12,
-    borderRadius: 10,
+    borderRadius: s(10),
     alignItems: "center",
   },
   errorText: {
     color: "#E74C3C",
-    fontSize: 13,
+    fontSize: fs(13),
     fontWeight: "700",
     textAlign: "center",
   },
   savingsBannerTitle: {
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "700",
     color: "#8B6914",
-    marginBottom: 4,
+    marginBottom: s(4),
   },
   savingsBannerText: {
-    fontSize: 13,
+    fontSize: fs(13),
     color: "#A07D1C",
-    lineHeight: 18,
+    lineHeight: fs(18),
   },
   savingsBannerProgressBg: {
     height: 8,
     backgroundColor: "rgba(0,0,0,0.08)",
-    borderRadius: 4,
+    borderRadius: s(4),
     overflow: "hidden",
-    marginBottom: 12,
+    marginBottom: s(12),
   },
   savingsBannerProgressFill: {
     height: "100%",
     backgroundColor: "#F5A623",
-    borderRadius: 4,
+    borderRadius: s(4),
   },
   savingsBannerLink: {
-    fontSize: 13,
+    fontSize: fs(13),
     fontWeight: "700",
     color: "#0D1F45",
     textAlign: "right",

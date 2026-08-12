@@ -5,7 +5,17 @@ import { ToastProvider } from './components/ToastContext';
 import { ThemeProvider } from './components/ThemeContext';
 import { AlertProvider } from './components/AlertContext';
 import ErrorBoundary from './components/ErrorBoundary';
-import { registerPushToken, getToken } from './services/AuthService';
+import { NetworkProvider } from './components/NetworkContext';
+import { registerPushToken, getToken, onAuthInvalidated, clearUserData } from './services/AuthService';
+
+// ── Production Log Suppressor ────────────────────────────────────────
+// Prevents sensitive data (IPs, tokens, API paths, retry info) from
+// leaking into native device logs (adb logcat / Xcode console).
+if (!__DEV__) {
+  console.log = () => {};
+  console.warn = () => {};
+  // Keep console.error for crash reporting visibility
+}
 
 import SplashScreen from './screens/SplashScreen';
 import OnboardingScreen from './screens/OnboardingScreen';
@@ -96,19 +106,47 @@ export default function App() {
       });
     }
 
+    // ── Auto-logout on token expiry (401 from any API call) ──────────
+    const unsubAuth = onAuthInvalidated(async () => {
+      try { await clearUserData(); } catch {}
+      if (navigationRef.isReady()) {
+        navigationRef.reset({
+          index: 0,
+          routes: [{ name: 'Login', params: { sessionExpired: true } }],
+        });
+      }
+    });
+
     return () => {
       if (responseListener.current?.remove) {
         responseListener.current.remove();
       }
+      unsubAuth();
     };
   }, []);
 
+  // ── Deep Link Configuration ─────────────────────────────────────────
+  // Handles puac:// scheme URLs (e.g. from password reset emails)
+  const linking = {
+    prefixes: ['puac://'],
+    config: {
+      screens: {
+        NewPassword: 'reset-password',       // puac://reset-password?token=xxx
+        VerifyOTP: 'verify',                  // puac://verify?email=xxx
+        Notifications: 'notifications',       // puac://notifications
+        Loans: 'loans',                       // puac://loans
+        Donations: 'donations',               // puac://donations
+      },
+    },
+  };
+
   return (
     <ErrorBoundary>
+    <NetworkProvider>
     <ThemeProvider>
     <AlertProvider>
     <ToastProvider>
-      <NavigationContainer ref={navigationRef}>
+      <NavigationContainer ref={navigationRef} linking={linking}>
         <Stack.Navigator
           initialRouteName="Splash"
           screenOptions={{ gestureEnabled: false, headerShown: false, animation: 'none' }}
@@ -116,7 +154,7 @@ export default function App() {
           {/* Auth Flow — smooth slide transitions */}
           <Stack.Screen name="Splash" component={SplashScreen} />
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-          <Stack.Screen name="PUAC" component={StartScreen} options={{ animation: 'fade', animationDuration: 200 }} />
+          <Stack.Screen name="Start" component={StartScreen} options={{ animation: 'fade', animationDuration: 200 }} />
           <Stack.Screen name="SignUp" component={SignupScreen} options={{ animation: 'slide_from_right', animationDuration: 200 }} />
           <Stack.Screen name="Login" component={LoginScreen} options={{ animation: 'slide_from_right', animationDuration: 200 }} />
           <Stack.Screen name="VerifyOTP" component={VerifyOTPScreen} options={{ animation: 'slide_from_right', animationDuration: 200 }} />
@@ -146,6 +184,7 @@ export default function App() {
     </ToastProvider>
     </AlertProvider>
     </ThemeProvider>
+    </NetworkProvider>
     </ErrorBoundary>
   );
 }

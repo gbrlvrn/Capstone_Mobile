@@ -26,6 +26,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../components/ThemeContext";
 import * as ImagePicker from "expo-image-picker";
 import { API_CONFIG } from "../services/config";
+import OfflineBanner from "../components/OfflineBanner";
+import QRCode from "react-native-qrcode-svg";
+
+// Metro Reload Trigger: Digital Member Pass QR clean state
 
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -94,6 +98,47 @@ const EMPTY_USER = {
   isVerified: false,
   createdAt: "",
 };
+
+function InfoRow({ icon, label, value }) {
+  const { colors } = useTheme();
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        backgroundColor: colors.cardBg || "#FFFFFF",
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: colors.cardBorder || "#E8ECF0",
+        marginBottom: 8,
+      }}
+    >
+      <View
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: 16,
+          backgroundColor: "rgba(13, 31, 69, 0.06)",
+          alignItems: "center",
+          justifyContent: "center",
+          marginRight: 12,
+        }}
+      >
+        <Ionicons name={icon || "information-circle-outline"} size={17} color="#0D1F45" />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: "600", marginBottom: 2 }}>
+          {label}
+        </Text>
+        <Text style={{ fontSize: 13.5, color: colors.textDark, fontWeight: "700" }} numberOfLines={1}>
+          {value || "Not specified"}
+        </Text>
+      </View>
+    </View>
+  );
+}
 
 function cleanEmail(value) {
   if (!value) return "";
@@ -169,30 +214,11 @@ export default function ProfileScreen({ navigation, route }) {
   const [deactivateModalVisible, setDeactivateModalVisible] = useState(false);
   const [deactivateConfirmText, setDeactivateConfirmText] = useState("");
   const [deactivating, setDeactivating] = useState(false);
-  const [infoModalOpen, setInfoModalOpen] = useState(false);
   const [profilePhoto, setProfilePhoto] = useState("");
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const indicatorPosition = useRef(new Animated.Value(0)).current;
   const slideX = useRef(new Animated.Value(-260)).current;
-  const infoSlideX = useRef(new Animated.Value(SCREEN_WIDTH)).current;
-
-  const openInfoModal = useCallback(() => {
-    setInfoModalOpen(true);
-    Animated.timing(infoSlideX, {
-      toValue: 0,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
-  }, [infoSlideX]);
-
-  const closeInfoModal = useCallback(() => {
-    Animated.timing(infoSlideX, {
-      toValue: SCREEN_WIDTH,
-      duration: 300,
-      useNativeDriver: true,
-    }).start(() => setInfoModalOpen(false));
-  }, [infoSlideX]);
 
   // Menu panel states
   const [aboutUsOpen, setAboutUsOpen] = useState(false);
@@ -224,6 +250,9 @@ export default function ProfileScreen({ navigation, route }) {
   const resolvedEmail = userEmail || routeEmail;
   const [userRole, setUserRole] = useState("");
   const [userPosition, setUserPosition] = useState("");
+
+  // QR Pass Modal state
+  const [qrPassModalOpen, setQrPassModalOpen] = useState(false);
 
   // Load cache first, then fetch real profile
   useEffect(() => {
@@ -444,7 +473,7 @@ export default function ProfileScreen({ navigation, route }) {
 
       navigation.reset({
         index: 0,
-        routes: [{ name: "PUAC" }],
+        routes: [{ name: "Start" }],
       });
     } catch (e) {
       showAlert("Deactivate Failed", e?.message || "Failed to deactivate account.");
@@ -456,28 +485,27 @@ export default function ProfileScreen({ navigation, route }) {
   const InfoRow = ({ label, value }) => (
     <View style={styles.infoSection}>
       <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{value || "â€”"}</Text>
+      <Text style={styles.infoValue}>{value || "—"}</Text>
     </View>
   );
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <OfflineBanner />
       <View style={styles.circleTopRight} />
       <View style={styles.circleBottomLeft} />
 
       {/* Top Bar */}
       <View style={[styles.topBar, { backgroundColor: "transparent" }]}>
-        <TouchableOpacity
-          style={styles.menuBtn}
-          onPress={openSidebar}
-          activeOpacity={0.6}
-        >
-          <View style={styles.menuLine} />
-          <View style={styles.menuLine} />
-          <View style={styles.menuLine} />
+        <TouchableOpacity style={styles.menuBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home', { email: resolvedEmail })} activeOpacity={0.6}>
+          <Text style={{ color: colors.textDark, fontSize: 26, fontWeight: '700', paddingHorizontal: 4 }}>←</Text>
         </TouchableOpacity>
 
-        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: 36, height: 36 }} resizeMode="contain" /></View>
+        <View style={{ flex: 1, alignItems: "center" }}>
+          <View style={{ width: 34, height: 34, borderRadius: 17, overflow: "hidden" }}>
+            <Image source={LOGO} style={{ width: 34, height: 34, borderRadius: 17 }} resizeMode="cover" />
+          </View>
+        </View>
         <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: 22, height: 22, tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
       </View>
 
@@ -491,56 +519,127 @@ export default function ProfileScreen({ navigation, route }) {
         <View style={styles.header}>
           <Text style={[styles.pageTitle, { color: colors.textDark }]}>My Profile</Text>
           <Text style={[styles.pageSubtitle, { color: colors.textMuted }]}>
-            Your information from registration
+            Your official member digital pass & registration info
           </Text>
         </View>
 
-        <View style={[styles.profileCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-          <TouchableOpacity
-            style={styles.profileRow}
-            activeOpacity={0.7}
-            onPress={openInfoModal}
-          >
-            <TouchableOpacity style={styles.avatar} activeOpacity={0.8} onPress={handlePickPhoto}>
-              {profilePhoto ? (
-                <Image
-                  source={{ uri: profilePhoto.startsWith("file://") || profilePhoto.startsWith("content://") ? profilePhoto : `${API_CONFIG.CUSTOM_BACKEND.BASE_URL}${profilePhoto}` }}
-                  style={styles.avatarPhoto}
-                />
-              ) : (
-                <Image
-                  source={ICONS.person}
-                  style={styles.avatarIcon}
-                  resizeMode="contain"
-                />
-              )}
-              <View style={styles.cameraOverlay}>
-                {uploadingPhoto ? (
-                  <ActivityIndicator size="small" color="#FFF" />
-                ) : (
-                  <Ionicons name="camera" size={14} color="#FFF" />
-                )}
-              </View>
-            </TouchableOpacity>
+        {/* Unified Official Digital Member Pass Card */}
+        <TouchableOpacity
+          activeOpacity={0.88}
+          onPress={() => setQrPassModalOpen(true)}
+          style={{
+            marginHorizontal: 18,
+            marginBottom: 20,
+            borderRadius: 20,
+            overflow: "hidden",
+            backgroundColor: "#0D1F45",
+            borderWidth: 1,
+            borderColor: "rgba(255,255,255,0.15)",
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 6 },
+            shadowOpacity: 0.15,
+            shadowRadius: 10,
+            elevation: 4,
+          }}
+        >
+          <View style={{ padding: 18, position: "relative" }}>
+            {/* Background Decorative Circle */}
+            <View
+              style={{
+                position: "absolute",
+                top: -30,
+                right: -30,
+                width: 130,
+                height: 130,
+                borderRadius: 65,
+                backgroundColor: "rgba(0, 195, 255, 0.12)",
+              }}
+            />
 
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.nameBig, { color: colors.textDark }]}>{user.fullName || "Member"}</Text>
-              <Text style={[styles.emailSmall, { color: colors.textMuted }]} numberOfLines={1}>
-                {resolvedEmail || "No email loaded"}
-              </Text>
-              <View style={styles.verifiedRow}>
-                {userRole === "officer" && (
-                  <Ionicons name="checkmark-circle" size={18} color={C.blue} />
-                )}
-                <Text style={styles.verifiedPillText}>
-                  {userRole === "officer" ? "Officer" : "Member"}
-                </Text>
+            {/* Header row */}
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <View style={{ width: 32, height: 32, borderRadius: 16, overflow: "hidden", backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" }}>
+                  <Image source={LOGO} style={{ width: 32, height: 32, borderRadius: 16 }} resizeMode="cover" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 12, fontWeight: "800", color: "#FFFFFF", letterSpacing: 0.4 }}>PHILIPPINE UNITED APOSTOLIC CHURCH</Text>
+                  <Text style={{ fontSize: 10, color: "rgba(0, 195, 255, 0.9)", fontWeight: "700" }}>OFFICIAL MEMBER DIGITAL PASS</Text>
+                </View>
               </View>
             </View>
 
-            <Ionicons name="chevron-forward" size={22} color={C.textMuted} />
-          </TouchableOpacity>
-        </View>
+            {/* Content row with Avatar + Member Info + Mini QR */}
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
+                <TouchableOpacity style={styles.avatar} activeOpacity={0.8} onPress={handlePickPhoto}>
+                  {profilePhoto ? (
+                    <Image
+                      source={{ uri: profilePhoto.startsWith("file://") || profilePhoto.startsWith("content://") ? profilePhoto : `${API_CONFIG.CUSTOM_BACKEND.BASE_URL}${profilePhoto}` }}
+                      style={styles.avatarPhoto}
+                    />
+                  ) : (
+                    <Image
+                      source={ICONS.person}
+                      style={styles.avatarIcon}
+                      resizeMode="contain"
+                    />
+                  )}
+                  <View style={styles.cameraOverlay}>
+                    {uploadingPhoto ? (
+                      <ActivityIndicator size="small" color="#FFF" />
+                    ) : (
+                      <Ionicons name="camera" size={12} color="#FFF" />
+                    )}
+                  </View>
+                </TouchableOpacity>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 16.5, fontWeight: "800", color: "#FFFFFF", marginBottom: 2 }} numberOfLines={1}>
+                    {user.fullName || "Member"}
+                  </Text>
+                  <Text style={{ fontSize: 11.5, color: "rgba(255,255,255,0.75)", marginBottom: 4 }} numberOfLines={1}>
+                    {resolvedEmail || "No email"}
+                  </Text>
+
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: "rgba(255,255,255,0.15)", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
+                      {userRole === "officer" && <Ionicons name="checkmark-circle" size={12} color="#00C3FF" />}
+                      <Text style={{ fontSize: 10, fontWeight: "700", color: "#FFFFFF" }}>
+                        {userRole === "officer" ? "Officer" : "Member"}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.6)" }} numberOfLines={1}>• {user.branch || "Central Branch"}</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Crisp Mini QR Preview */}
+              <View style={{ alignItems: "center", justifyContent: "center" }}>
+                <View
+                  style={{
+                    backgroundColor: "#FFFFFF",
+                    padding: 5,
+                    borderRadius: 12,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderWidth: 1,
+                    borderColor: "rgba(255,255,255,0.3)",
+                    marginBottom: 4,
+                  }}
+                >
+                  <QRCode
+                    value={resolvedEmail || "isangdiwa-member"}
+                    size={50}
+                    color="#0D1F45"
+                    backgroundColor="#FFFFFF"
+                  />
+                </View>
+                <Text style={{ fontSize: 9.5, fontWeight: "700", color: "#00C3FF" }}>View Pass ›</Text>
+              </View>
+            </View>
+          </View>
+        </TouchableOpacity>
 
         {/* Menu Items */}
         <View style={[styles.menuCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
@@ -579,94 +678,6 @@ export default function ProfileScreen({ navigation, route }) {
 
         <View style={{ height: 24 }} />
       </ScrollView>
-
-      {/* Account Information Modal */}
-      <Modal
-        visible={infoModalOpen}
-        transparent
-        animationType="none"
-        onRequestClose={closeInfoModal}
-      >
-        <Animated.View style={[styles.infoModalOverlay, { transform: [{ translateX: infoSlideX }] }]}>
-          <View style={styles.infoModalContent}>
-            <View style={styles.infoModalHeader}>
-              <TouchableOpacity
-                onPress={closeInfoModal}
-                style={styles.infoModalBackBtn}
-              >
-                <Ionicons name="arrow-back" size={22} color={C.textDark} />
-              </TouchableOpacity>
-              <Text style={styles.infoModalTitle}>Account Information</Text>
-              <View style={{ width: 34 }} />
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false} style={styles.infoModalScroll}>
-              {/* Avatar header inside modal */}
-              <View style={styles.infoModalAvatarSection}>
-                <TouchableOpacity style={styles.avatarLarge} activeOpacity={0.8} onPress={handlePickPhoto}>
-                  {profilePhoto ? (
-                    <Image
-                      source={{ uri: profilePhoto.startsWith("file://") || profilePhoto.startsWith("content://") ? profilePhoto : `${API_CONFIG.CUSTOM_BACKEND.BASE_URL}${profilePhoto}` }}
-                      style={styles.avatarPhotoLarge}
-                    />
-                  ) : (
-                    <Image
-                      source={ICONS.person}
-                      style={styles.avatarIconLarge}
-                      resizeMode="contain"
-                    />
-                  )}
-                  <View style={styles.cameraOverlayLarge}>
-                    {uploadingPhoto ? (
-                      <ActivityIndicator size="small" color="#FFF" />
-                    ) : (
-                      <Ionicons name="camera" size={16} color="#FFF" />
-                    )}
-                  </View>
-                </TouchableOpacity>
-                <Text style={styles.infoModalName}>{user.fullName || "Member"}</Text>
-                <View style={styles.verifiedRow}>
-                  {userRole === "officer" && (
-                    <Ionicons name="checkmark-circle" size={18} color={C.blue} />
-                  )}
-                  <Text style={styles.verifiedPillText}>
-                    {userRole === "officer" ? "Officer" : "Member"}
-                  </Text>
-                </View>
-              </View>
-
-              {loadingUser ? (
-                <SkeletonInfoRows count={6} />
-              ) : (
-                <View style={styles.infoBlock}>
-                  <InfoRow label="Email Address" value={resolvedEmail} />
-                  <InfoRow label="Phone Number" value={user.phone} />
-                  <InfoRow label="Community" value={user.branch} />
-                  <InfoRow label="Position in Church" value={user.position} />
-                  <InfoRow label="Gender" value={user.gender} />
-                  <InfoRow label="Date of Birth" value={user.birthday ? user.birthday.split("T")[0] : ""} />
-                </View>
-              )}
-
-              <TouchableOpacity
-                style={styles.deleteBtn}
-                activeOpacity={0.7}
-                onPress={() => {
-                  closeInfoModal();
-                  setTimeout(() => {
-                    setDeactivateConfirmText("");
-                    setDeactivateModalVisible(true);
-                  }, 350);
-                }}
-              >
-                <Text style={styles.deleteBtnText}>Deactivate Account</Text>
-              </TouchableOpacity>
-
-              <View style={{ height: 30 }} />
-            </ScrollView>
-          </View>
-        </Animated.View>
-      </Modal>
 
       {/* About Us Panel */}
       <Modal visible={aboutUsOpen} transparent animationType="none" onRequestClose={() => closePanel(setAboutUsOpen, aboutUsSlide)}>
@@ -784,7 +795,7 @@ export default function ProfileScreen({ navigation, route }) {
 
               <View style={styles.faqItem}>
                 <Text style={styles.faqQuestion}>How do I deactivate my account?</Text>
-                <Text style={styles.faqAnswer}>Go to your Profile, tap on your name to open Account Information, and scroll to the bottom to find the "Deactivate Account" option.</Text>
+                <Text style={styles.faqAnswer}>Go to your Profile, tap on your Digital Member Pass to view your QR Code and Account Information, then scroll to the bottom to find the "Deactivate Account" option.</Text>
               </View>
               <View style={styles.panelSection}>
                 <Text style={styles.panelSectionTitle}>Contact Support</Text>
@@ -863,6 +874,219 @@ export default function ProfileScreen({ navigation, route }) {
         </View>
       </Modal>
 
+      {/* High-Contrast Full Digital Member Pass & Account Info Modal */}
+      <Modal
+        visible={qrPassModalOpen}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setQrPassModalOpen(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.75)",
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 16,
+          }}
+        >
+          {/* Backdrop Touch Dismiss */}
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => setQrPassModalOpen(false)}
+            style={{
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              left: 0,
+              right: 0,
+            }}
+          />
+
+          {/* Inner Card Modal Container */}
+          <View
+            style={{
+              width: "100%",
+              maxWidth: 380,
+              maxHeight: "88%",
+              backgroundColor: colors.cardBg,
+              borderRadius: 24,
+              padding: 0,
+              overflow: "hidden",
+              borderWidth: 1,
+              borderColor: colors.cardBorder,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 12 },
+              shadowOpacity: 0.35,
+              shadowRadius: 18,
+              elevation: 14,
+            }}
+          >
+            {/* Pass Top Banner / Header (Navy Theme) */}
+            <View style={{ backgroundColor: "#0D1F45", paddingHorizontal: 20, paddingTop: 18, paddingBottom: 16 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <View style={{ width: 32, height: 32, borderRadius: 16, overflow: "hidden", backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" }}>
+                    <Image source={LOGO} style={{ width: 32, height: 32, borderRadius: 16 }} resizeMode="cover" />
+                  </View>
+                  <View>
+                    <Text style={{ fontSize: 11, fontWeight: "800", color: "#FFFFFF", letterSpacing: 0.5 }}>PHILIPPINE UNITED APOSTOLIC CHURCH</Text>
+                    <Text style={{ fontSize: 10, color: "#00C3FF", fontWeight: "700" }}>OFFICIAL MEMBER DIGITAL PASS</Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={() => setQrPassModalOpen(false)} style={{ padding: 6, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 14 }}>
+                  <Ionicons name="close" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={true}
+              nestedScrollEnabled={true}
+              style={{ flexShrink: 1, width: "100%" }}
+              contentContainerStyle={{ padding: 18, alignItems: "center" }}
+            >
+              {/* Member Profile Banner Card */}
+              <View style={{ width: "100%", alignItems: "center", marginBottom: 18 }}>
+                <TouchableOpacity style={styles.avatarLarge} activeOpacity={0.8} onPress={handlePickPhoto}>
+                  {profilePhoto ? (
+                    <Image
+                      source={{ uri: profilePhoto.startsWith("file://") || profilePhoto.startsWith("content://") ? profilePhoto : `${API_CONFIG.CUSTOM_BACKEND.BASE_URL}${profilePhoto}` }}
+                      style={styles.avatarPhotoLarge}
+                    />
+                  ) : (
+                    <Image
+                      source={ICONS.person}
+                      style={styles.avatarIconLarge}
+                      resizeMode="contain"
+                    />
+                  )}
+                  <View style={styles.cameraOverlayLarge}>
+                    {uploadingPhoto ? (
+                      <ActivityIndicator size="small" color="#FFF" />
+                    ) : (
+                      <Ionicons name="camera" size={14} color="#FFF" />
+                    )}
+                  </View>
+                </TouchableOpacity>
+
+                <Text style={{ fontSize: 19, fontWeight: "800", color: colors.textDark, textAlign: "center", marginTop: 4 }}>
+                  {user.fullName || "Member"}
+                </Text>
+                
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(13, 31, 69, 0.08)", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                    {userRole === "officer" && (
+                      <Ionicons name="checkmark-circle" size={14} color={C.blue} />
+                    )}
+                    <Text style={{ fontSize: 11.5, fontWeight: "700", color: C.blue }}>
+                      {userRole === "officer" ? "Church Officer" : "Official Member"}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Scannable Pass Box */}
+              <View
+                style={{
+                  width: "100%",
+                  backgroundColor: "#F4F7FB",
+                  borderRadius: 20,
+                  padding: 16,
+                  alignItems: "center",
+                  borderWidth: 1,
+                  borderColor: "rgba(13, 31, 69, 0.1)",
+                  marginBottom: 20,
+                }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: "700", color: colors.textMuted, textAlign: "center", marginBottom: 12, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  Sunday Service & Event Check-In Pass
+                </Text>
+
+                <View
+                  style={{
+                    backgroundColor: "#FFFFFF",
+                    padding: 14,
+                    borderRadius: 16,
+                    borderWidth: 2,
+                    borderColor: "#0D1F45",
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.08,
+                    shadowRadius: 6,
+                    elevation: 2,
+                    marginBottom: 10,
+                  }}
+                >
+                  <QRCode
+                    value={resolvedEmail || "isangdiwa-member"}
+                    size={175}
+                    color="#000000"
+                    backgroundColor="#FFFFFF"
+                    logo={LOGO}
+                    logoSize={38}
+                    logoBackgroundColor="#FFFFFF"
+                    logoMargin={2}
+                    logoBorderRadius={19}
+                  />
+                </View>
+
+                <Text style={{ fontSize: 11, color: colors.textMuted, textAlign: "center" }}>
+                  Scan code at admin station to register attendance
+                </Text>
+              </View>
+
+              {/* Account Information Section */}
+              <View style={{ width: "100%", backgroundColor: colors.bg, borderRadius: 18, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: colors.cardBorder }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 }}>
+                  <Ionicons name="person-circle-outline" size={18} color={C.blue} />
+                  <Text style={{ fontSize: 13, fontWeight: "800", color: colors.textDark, letterSpacing: 0.4 }}>
+                    MEMBER DETAILS
+                  </Text>
+                </View>
+                
+                {loadingUser ? (
+                  <SkeletonInfoRows count={6} />
+                ) : (
+                  <View style={{ width: "100%" }}>
+                    <InfoRow icon="mail-outline" label="Email Address" value={resolvedEmail} />
+                    <InfoRow icon="call-outline" label="Phone Number" value={user.phone} />
+                    <InfoRow icon="business-outline" label="Community / Branch" value={user.branch} />
+                    <InfoRow icon="briefcase-outline" label="Position in Church" value={user.position} />
+                    <InfoRow icon="person-outline" label="Gender" value={user.gender} />
+                    <InfoRow icon="calendar-outline" label="Date of Birth" value={user.birthday ? user.birthday.split("T")[0] : ""} />
+                  </View>
+                )}
+              </View>
+
+              {/* Close Button */}
+              <TouchableOpacity
+                onPress={() => setQrPassModalOpen(false)}
+                activeOpacity={0.8}
+                style={{
+                  width: "100%",
+                  backgroundColor: "#0D1F45",
+                  paddingVertical: 14,
+                  borderRadius: 16,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexDirection: "row",
+                  gap: 6,
+                  shadowColor: "#0D1F45",
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.2,
+                  shadowRadius: 6,
+                  elevation: 3,
+                }}
+              >
+                <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+                <Text style={{ fontSize: 14, fontWeight: "700", color: "#FFFFFF" }}>Close Digital Pass</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* Floating draggable chat button */}
       <DraggableChatButton onPress={() => setChatbotOpen(true)} />
 
@@ -870,73 +1094,6 @@ export default function ProfileScreen({ navigation, route }) {
         visible={chatbotOpen}
         onClose={() => setChatbotOpen(false)}
       />
-
-      {/* Bottom tab bar (UI restored) */}
-      <View style={styles.tabBar}>
-        <Animated.View
-          style={[
-            styles.tabIndicator,
-            { transform: [{ translateX: indicatorPosition }] },
-          ]}
-        />
-
-        {(userRole !== "officer"
-          ? ALL_TAB_ITEMS.filter(t => t.key !== "Loans")
-          : ALL_TAB_ITEMS
-        ).map((tab) => {
-          const isActive = activeTab === tab.key;
-          const allIndex = ALL_TAB_ITEMS.findIndex(t => t.key === tab.key);
-
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={styles.tabItem}
-              onPress={() => {
-                setActiveTab(tab.key);
-                navWithEmail(tab.key);
-              }}
-              activeOpacity={0.7}
-            >
-              <Animated.View
-                style={[
-                  styles.tabBgCircle,
-                  { opacity: tabAnimations[allIndex].bgOpacity },
-                ]}
-              />
-
-              <Animated.View
-                style={{ transform: [{ scale: tabAnimations[allIndex].scale }] }}
-              >
-                <Image
-                  source={tab.icon}
-                  style={[
-                    styles.tabIcon,
-                    {
-                      tintColor: isActive ? C.tabActive : C.tabInactive,
-                      opacity: isActive ? 1 : 0.6,
-                    },
-                  ]}
-                  resizeMode="contain"
-                />
-              </Animated.View>
-
-              <Text
-                style={[
-                  styles.tabLabel,
-                  {
-                    color: isActive ? C.tabActive : C.tabInactive,
-                    fontWeight: isActive ? "700" : "500",
-                    fontSize: isActive ? 11 : 10,
-                    opacity: isActive ? 1 : 0.7,
-                  },
-                ]}
-              >
-                {tab.key}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
 
       {/* Sidebar overlay */}
       {sidebarOpen ? (
@@ -1030,7 +1187,7 @@ export default function ProfileScreen({ navigation, route }) {
             onPress={async () => {
               closeSidebar();
               await AsyncStorage.removeItem("faithly_user");
-              setTimeout(() => navigation.navigate("PUAC"), 300);
+              setTimeout(() => navigation.navigate("Start"), 300);
             }}
           >
             <Image
@@ -1121,6 +1278,35 @@ const getStyles = (C) => StyleSheet.create({
     justifyContent: "center",
   },
   avatarIcon: { width: 26, height: 26, tintColor: "#FFFFFF" },
+  avatarPhoto: { width: 56, height: 56, borderRadius: 28 },
+  cameraOverlay: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    backgroundColor: C.blue,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
+  },
+
+  avatarPhotoLarge: { width: 80, height: 80, borderRadius: 40 },
+  cameraOverlayLarge: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    backgroundColor: C.blue,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
 
   nameBig: { fontSize: 17, fontWeight: "800", color: C.textDark },
   emailSmall: { fontSize: 12.5, color: C.textMuted, marginTop: 2 },
@@ -1357,7 +1543,7 @@ const getStyles = (C) => StyleSheet.create({
     left: 0,
     bottom: 0,
     width: 260,
-    backgroundColor: "#0D1F45",
+    backgroundColor: C.sidebarBg,
     zIndex: 11,
     flexDirection: "column",
   },

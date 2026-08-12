@@ -18,14 +18,20 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import ChatbotModal from "./ChatbotModal";
 import DraggableChatButton from "../components/DraggableChatButton";
+import FloatingNavBar from "../components/FloatingNavBar";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { MapView, Marker } from "../components/Map";
 import COMMUNITY_COORDINATES from "../data/communityCoordinates";
 import { useTheme } from "../components/ThemeContext";
 import { getBranches } from "../services/AuthService";
+import OfflineBanner from "../components/OfflineBanner";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
+const s = (v) => Math.round(v * _WR);
+const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
+const SIDEBAR_WIDTH = s(260);
 const CARD_WIDTH = SCREEN_WIDTH * 0.85; // slightly smaller than full width so peeking works
 
 const LOGO = require("../assets/puac_logo.png");
@@ -217,7 +223,7 @@ export default function BranchScreen({ navigation, route }) {
   const TAB_WIDTH = SCREEN_WIDTH / TAB_ITEMS.length;
 
   const indicatorPosition = useRef(new Animated.Value(0)).current;
-  const slideX = useRef(new Animated.Value(-260)).current;
+  const slideX = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
 
   const tabAnimations = useRef(
     ALL_TAB_ITEMS.map(() => ({
@@ -347,7 +353,7 @@ export default function BranchScreen({ navigation, route }) {
 
   const closeSidebar = useCallback(() => {
     Animated.timing(slideX, {
-      toValue: -260,
+      toValue: -SIDEBAR_WIDTH,
       duration: 250,
       useNativeDriver: true,
     }).start(() => setSidebarOpen(false));
@@ -461,6 +467,7 @@ export default function BranchScreen({ navigation, route }) {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <OfflineBanner />
       <View style={styles.circleTopRight} />
       <View style={styles.circleBottomLeft} />
 
@@ -475,8 +482,8 @@ export default function BranchScreen({ navigation, route }) {
           <View style={styles.menuLine} />
           <View style={styles.menuLine} />
         </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: 36, height: 36 }} resizeMode="contain" /></View>
-        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: 22, height: 22, tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
+        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: s(36), height: 36, borderRadius: 18 }} resizeMode="cover" /></View>
+        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: s(22), height: s(22), tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
       </View>
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}
@@ -516,7 +523,7 @@ export default function BranchScreen({ navigation, route }) {
               <Text style={[styles.statLabel, { color: colors.textMuted }]}>Nearest Branch</Text>
               <Text style={[styles.statValue, { color: colors.textDark }]}>{nearestBranchDistance}</Text>
               {nearestBranchName !== "" && (
-                <Text style={{ fontSize: 13, color: C.blue, marginTop: 4, fontWeight: "600" }}>{nearestBranchName}</Text>
+                <Text style={{ fontSize: fs(13), color: C.blue, marginTop: 4, fontWeight: "600" }}>{nearestBranchName}</Text>
               )}
             </View>
             <View style={[styles.statIconBox, { backgroundColor: C.goldLight }]}>
@@ -578,10 +585,49 @@ export default function BranchScreen({ navigation, route }) {
         </View>
 
         {/* Branch Listings — Accordion with Pagination */}
-        <View style={{ paddingHorizontal: 18, paddingBottom: 8 }}>
+        <View style={{ paddingHorizontal: s(18), paddingBottom: 8 }}>
           {branchesLinkedWithDistance.length === 0 && !loadingBranches && (
-            <View style={{ alignItems: 'center', paddingVertical: 32 }}>
-              <Text style={{ color: colors.textMuted, fontSize: 14 }}>No branches found.</Text>
+            <View style={{
+              backgroundColor: colors.cardBg,
+              borderRadius: 16,
+              padding: s(24),
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginVertical: 16,
+              borderWidth: 1,
+              borderColor: colors.cardBorder,
+            }}>
+              <View style={{
+                width: s(52),
+                height: s(52),
+                borderRadius: s(26),
+                backgroundColor: colors.bg,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 12,
+              }}>
+                <Ionicons name="location-outline" size={26} color={colors.textMuted} />
+              </View>
+              <Text style={{ color: colors.textDark, fontSize: fs(16), fontWeight: '700', marginBottom: 6, textAlign: 'center' }}>
+                No Branches Found
+              </Text>
+              <Text style={{ color: colors.textMuted, fontSize: fs(13), textAlign: 'center', marginBottom: 16, paddingHorizontal: 12 }}>
+                {searchQuery ? `We couldn't find any branches matching "${searchQuery}".` : 'No branches are currently available in this category.'}
+              </Text>
+              {searchQuery ? (
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: C.blue,
+                    paddingVertical: 10,
+                    paddingHorizontal: 20,
+                    borderRadius: 8,
+                  }}
+                  onPress={() => setSearchQuery('')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: fs(13) }}>Clear Search</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           )}
           {branchesLinkedWithDistance
@@ -607,11 +653,11 @@ export default function BranchScreen({ navigation, route }) {
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
                     {branch.computedDistance !== null && (
-                      <Text style={{ fontSize: 11, color: C.blue, fontWeight: '600', marginBottom: 2 }}>
+                      <Text style={{ fontSize: fs(11), color: C.blue, fontWeight: '600', marginBottom: 2 }}>
                         {branch.computedDistance.toFixed(1)} km
                       </Text>
                     )}
-                    <Text style={{ fontSize: 18, color: isExpanded ? C.blue : colors.textMuted }}>
+                    <Text style={{ fontSize: fs(18), color: isExpanded ? C.blue : colors.textMuted }}>
                       {isExpanded ? '▲' : '▼'}
                     </Text>
                   </View>
@@ -639,7 +685,7 @@ export default function BranchScreen({ navigation, route }) {
 
                     {/* Service Times */}
                     <View style={[styles.serviceTimesSection, { marginTop: 12 }]}>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 8 }}>Service Times</Text>
+                      <Text style={{ fontSize: fs(11), fontWeight: '700', color: colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 8 }}>Service Times</Text>
                       {branch.serviceTimes.map((service, idx) => (
                         <View key={idx} style={styles.serviceTimeRow}>
                           <Text style={[styles.serviceDay, { color: idx % 2 === 0 ? C.blue : C.gold }]}>{service.day}</Text>
@@ -650,35 +696,35 @@ export default function BranchScreen({ navigation, route }) {
 
                     {/* Community Statistics */}
                     <View style={{ marginTop: 14 }}>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 }}>Community Statistics</Text>
+                      <Text style={{ fontSize: fs(11), fontWeight: '700', color: colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 }}>Community Statistics</Text>
                       <View style={{ flexDirection: 'row', gap: 10 }}>
-                        <View style={{ flex: 1, backgroundColor: colors.bg, borderRadius: 10, borderWidth: 1, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 14 }}>
-                          <Text style={{ fontSize: 22, fontWeight: '800', color: C.blue }}>{branch.members || 0}</Text>
-                          <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 }}>Members</Text>
+                        <View style={{ flex: 1, backgroundColor: colors.bg, borderRadius: s(10), borderWidth: 1, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 14 }}>
+                          <Text style={{ fontSize: fs(22), fontWeight: '800', color: C.blue }}>{branch.members || 0}</Text>
+                          <Text style={{ fontSize: fs(10), fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 }}>Members</Text>
                         </View>
-                        <View style={{ flex: 1, backgroundColor: colors.bg, borderRadius: 10, borderWidth: 1, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 14 }}>
-                          <Text style={{ fontSize: 22, fontWeight: '800', color: C.blue }}>{branch.officers || 0}</Text>
-                          <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 }}>Officers</Text>
+                        <View style={{ flex: 1, backgroundColor: colors.bg, borderRadius: s(10), borderWidth: 1, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 14 }}>
+                          <Text style={{ fontSize: fs(22), fontWeight: '800', color: C.blue }}>{branch.officers || 0}</Text>
+                          <Text style={{ fontSize: fs(10), fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 }}>Officers</Text>
                         </View>
                       </View>
                     </View>
 
                     {/* Upcoming Events */}
                     <View style={{ marginTop: 14 }}>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 }}>Upcoming Events</Text>
+                      <Text style={{ fontSize: fs(11), fontWeight: '700', color: colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 }}>Upcoming Events</Text>
                       {branch.upcomingEvents && branch.upcomingEvents.length > 0 ? (
                         branch.upcomingEvents.map((ev, idx) => (
-                          <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: idx < branch.upcomingEvents.length - 1 ? 1 : 0, borderBottomColor: colors.cardBorder }}>
-                            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.blue, marginRight: 10 }} />
+                          <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: s(8), borderBottomWidth: idx < branch.upcomingEvents.length - 1 ? 1 : 0, borderBottomColor: colors.cardBorder }}>
+                            <View style={{ width: 8, height: 8, borderRadius: s(4), backgroundColor: C.blue, marginRight: 10 }} />
                             <View style={{ flex: 1 }}>
-                              <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textDark }}>{ev.title}</Text>
-                              <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>{ev.date}</Text>
+                              <Text style={{ fontSize: fs(13), fontWeight: '600', color: colors.textDark }}>{ev.title}</Text>
+                              <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 2 }}>{ev.date}</Text>
                             </View>
                           </View>
                         ))
                       ) : (
-                        <View style={{ backgroundColor: colors.bg, borderRadius: 10, borderWidth: 1, borderColor: colors.cardBorder, paddingVertical: 16, alignItems: 'center' }}>
-                          <Text style={{ fontSize: 13, color: colors.textMuted }}>No upcoming events scheduled.</Text>
+                        <View style={{ backgroundColor: colors.bg, borderRadius: s(10), borderWidth: 1, borderColor: colors.cardBorder, paddingVertical: s(16), alignItems: 'center' }}>
+                          <Text style={{ fontSize: fs(13), color: colors.textMuted }}>No upcoming events scheduled.</Text>
                         </View>
                       )}
                     </View>
@@ -705,7 +751,7 @@ export default function BranchScreen({ navigation, route }) {
 
           {/* Pagination Controls */}
           {branchesLinkedWithDistance.length > PAGE_SIZE && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, marginBottom: 4, paddingHorizontal: 4 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: s(12), marginBottom: s(4), paddingHorizontal: 4 }}>
               <TouchableOpacity
                 onPress={() => {
                   setCurrentPage(p => Math.max(1, p - 1));
@@ -714,17 +760,17 @@ export default function BranchScreen({ navigation, route }) {
                 disabled={currentPage === 1}
                 activeOpacity={0.7}
                 style={{
-                  paddingHorizontal: 18, paddingVertical: 9,
-                  borderRadius: 10, borderWidth: 1.5,
+                  paddingHorizontal: s(18), paddingVertical: 9,
+                  borderRadius: s(10), borderWidth: 1.5,
                   borderColor: currentPage === 1 ? colors.cardBorder : C.blue,
                   backgroundColor: currentPage === 1 ? colors.bg : C.blue,
                 }}
               >
-                <Text style={{ fontSize: 13, fontWeight: '700', color: currentPage === 1 ? colors.textMuted : '#fff' }}>← Prev</Text>
+                <Text style={{ fontSize: fs(13), fontWeight: '700', color: currentPage === 1 ? colors.textMuted : '#fff' }}>← Prev</Text>
               </TouchableOpacity>
 
               {/* Page number pills */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: 1, justifyContent: 'center', marginHorizontal: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: s(6), flexWrap: 'wrap', flex: 1, justifyContent: 'center', marginHorizontal: 8 }}>
                 {Array.from({ length: Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE) }, (_, i) => i + 1)
                   .filter(p => {
                     const total = Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE);
@@ -744,13 +790,13 @@ export default function BranchScreen({ navigation, route }) {
                         onPress={() => { setCurrentPage(item); setExpandedBranchId(null); }}
                         activeOpacity={0.7}
                         style={{
-                          width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+                          width: 32, height: 32, borderRadius: s(8), alignItems: 'center', justifyContent: 'center',
                           backgroundColor: currentPage === item ? C.blue : colors.bg,
                           borderWidth: 1.5,
                           borderColor: currentPage === item ? C.blue : colors.cardBorder,
                         }}
                       >
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: currentPage === item ? '#fff' : colors.textMuted }}>{item}</Text>
+                        <Text style={{ fontSize: fs(12), fontWeight: '700', color: currentPage === item ? '#fff' : colors.textMuted }}>{item}</Text>
                       </TouchableOpacity>
                     )
                   )
@@ -765,20 +811,20 @@ export default function BranchScreen({ navigation, route }) {
                 disabled={currentPage === Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE)}
                 activeOpacity={0.7}
                 style={{
-                  paddingHorizontal: 18, paddingVertical: 9,
-                  borderRadius: 10, borderWidth: 1.5,
+                  paddingHorizontal: s(18), paddingVertical: 9,
+                  borderRadius: s(10), borderWidth: 1.5,
                   borderColor: currentPage === Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE) ? colors.cardBorder : C.blue,
                   backgroundColor: currentPage === Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE) ? colors.bg : C.blue,
                 }}
               >
-                <Text style={{ fontSize: 13, fontWeight: '700', color: currentPage === Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE) ? colors.textMuted : '#fff' }}>Next →</Text>
+                <Text style={{ fontSize: fs(13), fontWeight: '700', color: currentPage === Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE) ? colors.textMuted : '#fff' }}>Next →</Text>
               </TouchableOpacity>
             </View>
           )}
 
           {/* Page info */}
           {branchesLinkedWithDistance.length > PAGE_SIZE && (
-            <Text style={{ textAlign: 'center', fontSize: 11, color: colors.textMuted, marginTop: 6, marginBottom: 8 }}>
+            <Text style={{ textAlign: 'center', fontSize: fs(11), color: colors.textMuted, marginTop: 6, marginBottom: 8 }}>
               Showing {Math.min((currentPage - 1) * PAGE_SIZE + 1, branchesLinkedWithDistance.length)}–{Math.min(currentPage * PAGE_SIZE, branchesLinkedWithDistance.length)} of {branchesLinkedWithDistance.length} branches
             </Text>
           )}
@@ -905,70 +951,13 @@ export default function BranchScreen({ navigation, route }) {
         </View>
       </Modal>
 
-      {/* Bottom tab bar */}
-      <View style={[styles.tabBar, { backgroundColor: colors.tabBg }]}>
-        <Animated.View
-          style={[
-            styles.tabIndicator,
-            { transform: [{ translateX: indicatorPosition }] },
-          ]}
-        />
-
-        {TAB_ITEMS.map((tab) => {
-          const isActive = activeTab === tab.key;
-          const allIndex = ALL_TAB_ITEMS.findIndex(t => t.key === tab.key);
-
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={styles.tabItem}
-              onPress={() => {
-                setActiveTab(tab.key);
-                if (tab.key === "Branches") return;
-                navWithEmail(tab.key);
-              }}
-              activeOpacity={0.7}
-            >
-              <Animated.View
-                style={[
-                  styles.tabBgCircle,
-                  { opacity: tabAnimations[allIndex].bgOpacity },
-                ]}
-              />
-
-              <Animated.View
-                style={{ transform: [{ scale: tabAnimations[allIndex].scale }] }}
-              >
-                <Image
-                  source={tab.icon}
-                  style={[
-                    styles.tabIcon,
-                    {
-                      tintColor: isActive ? C.tabActive : colors.tabInactive,
-                      opacity: isActive ? 1 : 0.6,
-                    },
-                  ]}
-                  resizeMode="contain"
-                />
-              </Animated.View>
-
-              <Text
-                style={[
-                  styles.tabLabel,
-                  {
-                    color: isActive ? C.tabActive : colors.tabInactive,
-                    fontWeight: isActive ? "700" : "500",
-                    fontSize: isActive ? 11 : 10,
-                    opacity: isActive ? 1 : 0.7,
-                  },
-                ]}
-              >
-                {tab.key}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      {/* Floating Bottom Tab Bar */}
+      <FloatingNavBar
+        activeTab="Branches"
+        navigation={navigation}
+        userEmail={userEmail}
+        userRole={userRole}
+      />
 
       {/* Sidebar overlay */}
       {sidebarOpen ? (
@@ -1067,7 +1056,7 @@ export default function BranchScreen({ navigation, route }) {
               </TouchableOpacity>
             </View>
 
-            <View style={[styles.searchBox, { marginHorizontal: 18, marginBottom: 12, marginTop: 8 }]}>
+            <View style={[styles.searchBox, { marginHorizontal: s(18), marginBottom: s(12), marginTop: 8 }]}>
               <Image source={ICONS.search} style={styles.searchIcon} resizeMode="contain" />
               <TextInput
                 style={styles.searchInput}
@@ -1196,13 +1185,13 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.navBg,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 18,
-    paddingTop: Platform.OS === "ios" ? 56 : 42,
+    paddingHorizontal: s(18),
+    paddingTop: Platform.OS === "ios" ? s(56) : s(42),
     paddingBottom: 14,
   },
   menuBtn: { padding: 4, justifyContent: "center", gap: 5 },
   menuLine: {
-    width: 22,
+    width: s(22),
     height: 2.2,
     backgroundColor: C.textDark,
     borderRadius: 1.2,
@@ -1210,7 +1199,7 @@ const getStyles = (C) => StyleSheet.create({
   topTitle: {
     flex: 1,
     textAlign: "center",
-    fontSize: 20,
+    fontSize: fs(20),
     fontWeight: "600",
     color: C.textDark,
   },
@@ -1220,37 +1209,37 @@ const getStyles = (C) => StyleSheet.create({
 
   // Header
   header: {
-    paddingHorizontal: 18,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingHorizontal: s(18),
+    paddingTop: s(20),
+    paddingBottom: s(16),
   },
   headerTitle: {
-    fontSize: 26,
+    fontSize: fs(26),
     fontWeight: "700",
     color: C.textDark,
-    marginBottom: 4,
+    marginBottom: s(4),
   },
   headerSubtitle: {
-    fontSize: 14,
+    fontSize: fs(14),
     color: C.textMuted,
-    lineHeight: 20,
+    lineHeight: fs(20),
     fontWeight: "500",
   },
 
   // Search Bar
   searchSection: {
-    paddingHorizontal: 18,
-    marginBottom: 16,
+    paddingHorizontal: s(18),
+    marginBottom: s(16),
   },
   searchRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: s(10),
   },
   filterBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+    width: s(48),
+    height: s(48),
+    borderRadius: s(14),
     backgroundColor: C.cardBg,
     borderWidth: 1,
     borderColor: C.cardBorder,
@@ -1274,13 +1263,13 @@ const getStyles = (C) => StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "rgba(46,107,240,0.1)",
-    borderRadius: 20,
+    borderRadius: s(20),
     paddingVertical: 6,
-    paddingHorizontal: 12,
-    gap: 6,
+    paddingHorizontal: s(12),
+    gap: s(6),
   },
   regionChipText: {
-    fontSize: 13,
+    fontSize: fs(13),
     fontWeight: "600",
     color: C.blue,
   },
@@ -1294,32 +1283,32 @@ const getStyles = (C) => StyleSheet.create({
     left: 0,
     right: 0,
     maxHeight: "55%",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: C.cardBg,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    paddingTop: 20,
-    paddingHorizontal: 20,
+    paddingTop: s(20),
+    paddingHorizontal: s(20),
     paddingBottom: Platform.OS === "ios" ? 34 : 20,
   },
   regionModalHandle: {
-    width: 40,
-    height: 4,
+    width: s(40),
+    height: s(4),
     borderRadius: 2,
-    backgroundColor: "#D1D5DB",
+    backgroundColor: C.cardBorder,
     alignSelf: "center",
-    marginBottom: 16,
+    marginBottom: s(16),
   },
   regionModalTitle: {
-    fontSize: 18,
+    fontSize: fs(18),
     fontWeight: "700",
     color: C.textDark,
-    marginBottom: 16,
+    marginBottom: s(16),
     textAlign: "center",
   },
   regionModalItem: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+    paddingVertical: s(14),
+    paddingHorizontal: s(16),
+    borderRadius: s(10),
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -1328,7 +1317,7 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: "rgba(46,107,240,0.1)",
   },
   regionModalItemText: {
-    fontSize: 15,
+    fontSize: fs(15),
     color: C.textDark,
   },
   regionModalItemTextActive: {
@@ -1336,7 +1325,7 @@ const getStyles = (C) => StyleSheet.create({
     fontWeight: "600",
   },
   regionModalCheck: {
-    fontSize: 16,
+    fontSize: fs(16),
     color: C.blue,
     fontWeight: "700",
   },
@@ -1346,9 +1335,9 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.cardBg,
     borderWidth: 1,
     borderColor: C.cardBorder,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    height: 48,
+    borderRadius: s(14),
+    paddingHorizontal: s(14),
+    height: s(48),
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.04,
@@ -1356,27 +1345,27 @@ const getStyles = (C) => StyleSheet.create({
     elevation: 1,
   },
   searchIcon: {
-    width: 20,
-    height: 20,
+    width: s(20),
+    height: s(20),
     tintColor: C.textMuted,
     marginRight: 10,
   },
   searchInput: {
     flex: 1,
-    fontSize: 14.5,
+    fontSize: fs(14),
     color: C.textDark,
   },
 
   // Stats
   statsContainer: {
-    paddingHorizontal: 18,
-    gap: 12,
-    marginBottom: 20,
+    paddingHorizontal: s(18),
+    gap: s(12),
+    marginBottom: s(20),
   },
   statCard: {
     backgroundColor: C.cardBg,
-    borderRadius: 16,
-    padding: 18,
+    borderRadius: s(16),
+    padding: s(18),
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -1390,27 +1379,27 @@ const getStyles = (C) => StyleSheet.create({
   },
   statLeft: { flex: 1 },
   statLabel: {
-    fontSize: 13,
+    fontSize: fs(13),
     color: C.textMuted,
-    marginBottom: 6,
+    marginBottom: s(6),
     fontWeight: "600",
   },
-  statValue: { fontSize: 26, fontWeight: "700", color: C.textDark },
+  statValue: { fontSize: fs(26), fontWeight: "700", color: C.textDark },
   statIconBox: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
+    width: s(46),
+    height: s(46),
+    borderRadius: s(14),
     alignItems: "center",
     justifyContent: "center",
   },
-  statIcon: { width: 22, height: 22 },
+  statIcon: { width: s(22), height: 22 },
 
   // Branch Card
   branchCard: {
     backgroundColor: C.cardBg,
     marginRight: 16,
-    borderRadius: 18,
-    padding: 20,
+    borderRadius: s(18),
+    padding: s(20),
     borderWidth: 1,
     borderColor: C.cardBorder,
     shadowColor: "#000",
@@ -1423,8 +1412,8 @@ const getStyles = (C) => StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 16,
-    paddingBottom: 16,
+    marginBottom: s(16),
+    paddingBottom: s(16),
     borderBottomWidth: 1,
     borderBottomColor: C.cardBorder,
   },
@@ -1432,59 +1421,59 @@ const getStyles = (C) => StyleSheet.create({
 
   branchNameRow: {
     flexDirection: "row",
-    gap: 12,
+    gap: s(12),
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: s(10),
   },
   branchIconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: s(44),
+    height: s(44),
+    borderRadius: s(14),
     backgroundColor: C.blueLight,
     alignItems: "center",
     justifyContent: "center",
   },
-  branchIcon: { width: 22, height: 22, tintColor: C.blue },
+  branchIcon: { width: s(22), height: s(22), tintColor: C.blue },
 
   branchName: {
-    fontSize: 18,
+    fontSize: fs(18),
     fontWeight: "700",
     color: C.textDark,
     marginBottom: 2,
   },
-  branchLeader: { fontSize: 13, color: C.textMuted, fontWeight: "600" },
+  branchLeader: { fontSize: fs(13), color: C.textMuted, fontWeight: "600" },
 
   distanceRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   distanceIcon: { width: 14, height: 14, tintColor: C.blue },
-  distanceText: { fontSize: 13, color: C.blue, fontWeight: "600" },
+  distanceText: { fontSize: fs(13), color: C.blue, fontWeight: "600" },
 
   membersBox: {
     backgroundColor: C.blueLight,
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    borderRadius: s(14),
+    paddingVertical: s(10),
+    paddingHorizontal: s(14),
     alignItems: "center",
     minWidth: 76,
   },
   membersCount: {
-    fontSize: 18,
+    fontSize: fs(18),
     fontWeight: "700",
     color: C.blue,
     marginBottom: 2,
   },
-  membersLabel: { fontSize: 11, color: C.blue, fontWeight: "700" },
+  membersLabel: { fontSize: fs(11), color: C.blue, fontWeight: "700" },
 
   // Contact
   contactSection: {
-    gap: 10,
-    marginBottom: 16,
-    paddingBottom: 16,
+    gap: s(10),
+    marginBottom: s(16),
+    paddingBottom: s(16),
     borderBottomWidth: 1,
     borderBottomColor: C.cardBorder,
   },
   contactRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  contactIcon: { width: 18, height: 18, tintColor: C.textMuted },
-  contactText: { fontSize: 14, color: C.textDark, flex: 1, fontWeight: "600" },
+  contactIcon: { width: s(18), height: s(18), tintColor: C.textMuted },
+  contactText: { fontSize: fs(14), color: C.textDark, flex: 1, fontWeight: "600" },
 
   // Service Times
   serviceTimesSection: { marginBottom: 16 },
@@ -1492,31 +1481,31 @@ const getStyles = (C) => StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 12,
+    marginBottom: s(12),
   },
-  serviceTimesIcon: { width: 18, height: 18, tintColor: C.textDark },
-  serviceTimesTitle: { fontSize: 16, fontWeight: "700", color: C.textDark },
+  serviceTimesIcon: { width: s(18), height: s(18), tintColor: C.textDark },
+  serviceTimesTitle: { fontSize: fs(16), fontWeight: "700", color: C.textDark },
 
   serviceTimeRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: "#F8F9FB",
-    borderRadius: 10,
-    marginBottom: 8,
+    paddingVertical: s(10),
+    paddingHorizontal: s(12),
+    backgroundColor: C.inputBg,
+    borderRadius: s(10),
+    marginBottom: s(8),
   },
-  serviceDay: { fontSize: 14, color: C.textDark, fontWeight: "700" },
-  serviceTime: { fontSize: 13, color: C.textMuted, fontWeight: "600" },
+  serviceDay: { fontSize: fs(14), color: C.textDark, fontWeight: "700" },
+  serviceTime: { fontSize: fs(13), color: C.textMuted, fontWeight: "600" },
 
   // Buttons
   actionButtons: { flexDirection: "row", gap: 10 },
   primaryBtn: {
     flex: 1,
     backgroundColor: C.blue,
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: s(12),
+    paddingVertical: s(14),
     alignItems: "center",
     justifyContent: "center",
     shadowColor: C.blue,
@@ -1525,26 +1514,26 @@ const getStyles = (C) => StyleSheet.create({
     shadowRadius: 6,
     elevation: 3,
   },
-  primaryBtnText: { fontSize: 14.5, fontWeight: "700", color: "#FFFFFF" },
+  primaryBtnText: { fontSize: fs(14), fontWeight: "700", color: "#FFFFFF" },
   secondaryBtn: {
     flex: 1,
-    backgroundColor: "#FFF",
-    borderRadius: 12,
-    paddingVertical: 14,
+    backgroundColor: C.cardBg,
+    borderRadius: s(12),
+    paddingVertical: s(14),
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderColor: C.cardBorder,
   },
-  secondaryBtnText: { fontSize: 14.5, fontWeight: "700", color: C.textDark },
+  secondaryBtnText: { fontSize: fs(14), fontWeight: "700", color: C.textDark },
 
   // Map
   mapSection: {
     backgroundColor: C.cardBg,
-    marginHorizontal: 18,
-    borderRadius: 18,
-    padding: 20,
-    marginBottom: 20,
+    marginHorizontal: s(18),
+    borderRadius: s(18),
+    padding: s(20),
+    marginBottom: s(20),
     borderWidth: 1,
     borderColor: C.cardBorder,
     shadowColor: "#000",
@@ -1557,26 +1546,26 @@ const getStyles = (C) => StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 14,
+    marginBottom: s(14),
   },
-  mapTitle: { fontSize: 18, fontWeight: "700", color: C.textDark },
+  mapTitle: { fontSize: fs(18), fontWeight: "700", color: C.textDark },
   expandMapBtn: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: C.blueLight,
-    paddingHorizontal: 12,
+    paddingHorizontal: s(12),
     paddingVertical: 6,
-    borderRadius: 16,
+    borderRadius: s(16),
     gap: 4,
   },
   expandMapText: {
-    fontSize: 13,
+    fontSize: fs(13),
     fontWeight: "700",
     color: C.blue,
   },
   mapContainer: {
     height: 250,
-    borderRadius: 14,
+    borderRadius: s(14),
     overflow: "hidden",
     borderWidth: 1,
     borderColor: C.cardBorder,
@@ -1600,23 +1589,23 @@ const getStyles = (C) => StyleSheet.create({
     position: "absolute",
     top: Platform.OS === "ios" ? 50 : 30,
     right: 20,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: s(44),
+    height: s(44),
+    borderRadius: s(22),
     backgroundColor: "rgba(0,0,0,0.5)",
     alignItems: "center",
     justifyContent: "center",
   },
 
-  bottomPad: { height: 24 },
+  bottomPad: { height: 110 },
 
   // Chat Button
   chatBtn: {
     position: "absolute",
     bottom: 100,
     right: 20,
-    width: 52,
-    height: 52,
+    width: s(52),
+    height: s(52),
     borderRadius: 26,
     backgroundColor: C.blue,
     alignItems: "center",
@@ -1628,7 +1617,7 @@ const getStyles = (C) => StyleSheet.create({
     elevation: 5,
     zIndex: 2,
   },
-  chatIcon: { width: 24, height: 24, tintColor: "#FFFFFF" },
+  chatIcon: { width: s(24), height: s(24), tintColor: "#FFFFFF" },
 
   // Tab Bar
   tabBar: {
@@ -1636,7 +1625,7 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.tabBg,
     borderTopWidth: 1,
     borderTopColor: "rgba(100,140,200,0.2)",
-    paddingVertical: 15,
+    paddingVertical: s(15),
     paddingBottom: Platform.OS === "ios" ? 20 : 8,
     position: "relative",
   },
@@ -1645,7 +1634,7 @@ const getStyles = (C) => StyleSheet.create({
     bottom: 0,
     left: 0,
     width: SCREEN_WIDTH / 5,
-    height: 3,
+    height: s(3),
     backgroundColor: C.tabActive,
   },
   tabItem: {
@@ -1663,7 +1652,7 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: "rgba(46,107,240,0.15)",
     top: -8,
   },
-  tabIcon: { width: 26, height: 26 },
+  tabIcon: { width: s(26), height: 26 },
   tabLabel: { fontSize: 10 },
 
   // Sidebar
@@ -1674,70 +1663,72 @@ const getStyles = (C) => StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: C.overlay,
-    zIndex: 10,
+    zIndex: 998,
+    elevation: 998,
   },
   sidebar: {
     position: "absolute",
     top: 0,
     left: 0,
     bottom: 0,
-    width: 260,
-    backgroundColor: "#0D1F45",
-    zIndex: 11,
+    width: SIDEBAR_WIDTH,
+    backgroundColor: C.sidebarBg,
+    zIndex: 1000,
+    elevation: 1000,
     flexDirection: "column",
   },
   sidebarHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingTop: Platform.OS === "ios" ? 58 : 44,
+    gap: s(12),
+    paddingTop: Platform.OS === "ios" ? s(58) : s(44),
     paddingBottom: 22,
-    paddingHorizontal: 20,
+    paddingHorizontal: s(20),
   },
-  sidebarLogo: { width: 46, height: 46, borderRadius: 45 },
-  sidebarTitle: { fontSize: 18, fontWeight: "900", color: "#FFF" },
-  sidebarRole: { fontSize: 12, color: "#FFF", marginTop: 1, fontWeight: "800" },
+  sidebarLogo: { width: s(46), height: s(46), borderRadius: 45 },
+  sidebarTitle: { fontSize: fs(18), fontWeight: "900", color: "#FFF" },
+  sidebarRole: { fontSize: fs(12), color: "#FFF", marginTop: 1, fontWeight: "800" },
 
   sidebarNav: { flex: 1, paddingHorizontal: 12 },
   sidebarItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
-    paddingVertical: 13,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    marginBottom: 6,
+    gap: s(14),
+    paddingVertical: s(13),
+    paddingHorizontal: s(14),
+    borderRadius: s(12),
+    marginBottom: s(6),
   },
   sidebarItemActive: { backgroundColor: "rgba(46,107,240,0.1)" },
-  sidebarIcon: { width: 20, height: 20 },
-  sidebarItemText: { fontSize: 15, color: C.textMuted, fontWeight: "600" },
+  sidebarIcon: { width: s(20), height: 20 },
+  sidebarItemText: { fontSize: fs(15), color: C.textMuted, fontWeight: "600" },
   sidebarItemTextActive: { color: C.blue },
 
   sidebarFooter: {
     borderTopWidth: 1,
     borderTopColor: C.cardBorder,
-    paddingHorizontal: 18,
-    paddingTop: 16,
-    paddingBottom: Platform.OS === "ios" ? 34 : 18,
+    paddingHorizontal: s(18),
+    paddingTop: s(16),
+    paddingBottom: Platform.OS === "ios" ? s(34) : s(18),
   },
   sidebarUserRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    marginBottom: 16,
+    gap: s(12),
+    marginBottom: s(16),
   },
   sidebarAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: s(36),
+    height: s(36),
+    borderRadius: s(18),
     backgroundColor: "rgba(31, 102, 255, 0.93)",
     alignItems: "center",
     justifyContent: "center",
   },
-  sidebarAvatarIcon: { width: 18, height: 18, tintColor: "#FFFFFF" },
-  sidebarUserName: { fontSize: 14, fontWeight: "900", color: "#FFF" },
+  sidebarAvatarIcon: { width: s(18), height: s(18), tintColor: "#FFFFFF" },
+  sidebarUserName: { fontSize: fs(14), fontWeight: "900", color: "#FFF" },
   sidebarUserEmail: {
-    fontSize: 11,
+    fontSize: fs(11),
     color: C.textMuted,
     marginTop: 1,
     fontWeight: "800",
@@ -1745,11 +1736,11 @@ const getStyles = (C) => StyleSheet.create({
   signOutRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: s(10),
     paddingVertical: 6,
   },
-  signOutIcon: { width: 30, height: 40, tintColor: C.red },
-  signOutText: { fontSize: 14, color: C.red, fontWeight: "900" },
+  signOutIcon: { width: 30, height: s(40), tintColor: C.red },
+  signOutText: { fontSize: fs(14), color: C.red, fontWeight: "900" },
 
   // Weekly Services Modal
   modalOverlay: {
@@ -1757,14 +1748,14 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 18,
+    paddingHorizontal: s(18),
   },
   weeklyModalContainer: {
     backgroundColor: C.cardBg,
     width: "100%",
     maxHeight: "80%",
-    borderRadius: 20,
-    paddingTop: 20,
+    borderRadius: s(20),
+    paddingTop: s(20),
     paddingBottom: 10,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
@@ -1776,43 +1767,43 @@ const getStyles = (C) => StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    marginBottom: 10,
+    paddingHorizontal: s(20),
+    marginBottom: s(10),
   },
   weeklyModalTitle: {
-    fontSize: 20,
+    fontSize: fs(20),
     fontWeight: "700",
     color: C.textDark,
   },
   weeklyModalClose: {
     padding: 8,
     backgroundColor: C.bg,
-    borderRadius: 20,
+    borderRadius: s(20),
   },
   weeklyModalCloseText: {
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: "800",
     color: C.textMuted,
   },
   weeklyModalScroll: {
-    paddingHorizontal: 20,
+    paddingHorizontal: s(20),
   },
   weeklyCard: {
     backgroundColor: C.bg,
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 12,
+    padding: s(16),
+    borderRadius: s(14),
+    marginBottom: s(12),
   },
   weeklyCardTitle: {
-    fontSize: 16,
+    fontSize: fs(16),
     fontWeight: "700",
     color: C.textDark,
-    marginBottom: 8,
+    marginBottom: s(8),
   },
   weeklyDivider: {
     height: 1,
     backgroundColor: "rgba(0,0,0,0.05)",
-    marginBottom: 10,
+    marginBottom: s(10),
   },
 
   // Sign Out Confirmation Modal
@@ -1821,12 +1812,12 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.6)",
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: s(24),
   },
   confirmDialog: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 28,
+    backgroundColor: C.cardBg,
+    borderRadius: s(20),
+    padding: s(28),
     width: "100%",
     maxWidth: 340,
     alignItems: "center",
@@ -1837,13 +1828,13 @@ const getStyles = (C) => StyleSheet.create({
     elevation: 10,
   },
   confirmIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: s(64),
+    height: s(64),
+    borderRadius: s(32),
     backgroundColor: "rgba(231, 76, 60, 0.1)",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 20,
+    marginBottom: s(20),
   },
   confirmIcon: {
     width: 32,
@@ -1851,47 +1842,47 @@ const getStyles = (C) => StyleSheet.create({
     tintColor: C.red,
   },
   confirmTitle: {
-    fontSize: 22,
+    fontSize: fs(22),
     fontWeight: "800",
     color: C.textDark,
-    marginBottom: 12,
+    marginBottom: s(12),
     textAlign: "center",
   },
   confirmMessage: {
-    fontSize: 15,
+    fontSize: fs(15),
     color: C.textMuted,
     textAlign: "center",
-    lineHeight: 22,
+    lineHeight: fs(22),
     marginBottom: 28,
   },
   confirmButtons: {
     flexDirection: "row",
-    gap: 12,
+    gap: s(12),
     width: "100%",
   },
   confirmBtnCancel: {
     flex: 1,
-    backgroundColor: "#F0F2F5",
-    borderRadius: 12,
-    paddingVertical: 14,
+    backgroundColor: C.secondaryBtnBg,
+    borderRadius: s(12),
+    paddingVertical: s(14),
     alignItems: "center",
     justifyContent: "center",
   },
   confirmBtnCancelText: {
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "700",
     color: C.textDark,
   },
   confirmBtnSignOut: {
     flex: 1,
     backgroundColor: C.red,
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: s(12),
+    paddingVertical: s(14),
     alignItems: "center",
     justifyContent: "center",
   },
   confirmBtnSignOutText: {
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "700",
     color: "#FFFFFF",
   },

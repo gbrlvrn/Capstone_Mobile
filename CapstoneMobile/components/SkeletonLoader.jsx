@@ -6,7 +6,7 @@ import { useTheme } from "./ThemeContext";
  * Base skeleton block with animated shimmer.
  * Props: width, height, borderRadius, style
  */
-export function SkeletonBlock({ width = "100%", height = 16, borderRadius = 8, style }) {
+function SkeletonBlockBase({ width = "100%", height = 16, borderRadius = 8, style }) {
   const { colors } = useTheme();
   const shimmer = useRef(new Animated.Value(0)).current;
 
@@ -46,9 +46,12 @@ export function SkeletonBlock({ width = "100%", height = 16, borderRadius = 8, s
         },
         style,
       ]}
+      accessibilityLabel="Loading placeholder"
     />
   );
 }
+
+export const SkeletonBlock = React.memo(SkeletonBlockBase);
 
 /** Circle avatar skeleton */
 export function SkeletonAvatar({ size = 48, style }) {
@@ -123,6 +126,56 @@ export function SkeletonQuickAction() {
   );
 }
 
+/** Feed card skeleton (for announcements) */
+export function SkeletonFeedCard() {
+  return (
+    <View style={skeletonStyles.feedCard}>
+      <SkeletonBlock width="100%" height={140} borderRadius={12} style={{ marginBottom: 14 }} />
+      <SkeletonBlock width={80} height={20} borderRadius={6} style={{ marginBottom: 10 }} />
+      <SkeletonLine width="85%" height={18} style={{ marginBottom: 8 }} />
+      <SkeletonLine width="95%" height={12} />
+      <SkeletonLine width="60%" height={12} />
+    </View>
+  );
+}
+
+/** Devotional verse card skeleton */
+export function SkeletonDevotionalCard() {
+  return (
+    <View style={skeletonStyles.devotionalCard}>
+      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 16 }}>
+        <SkeletonBlock width={40} height={40} borderRadius={12} style={{ marginRight: 12 }} />
+        <SkeletonLine width="40%" height={14} />
+      </View>
+      <SkeletonLine width="95%" height={16} />
+      <SkeletonLine width="90%" height={16} />
+      <SkeletonLine width="70%" height={16} style={{ marginBottom: 16 }} />
+      <SkeletonLine width="45%" height={14} />
+    </View>
+  );
+}
+
+/** Prayer card skeleton */
+export function SkeletonPrayerCard() {
+  return (
+    <View style={skeletonStyles.prayerCard}>
+      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+        <SkeletonAvatar size={36} />
+        <View style={{ flex: 1, marginLeft: 10 }}>
+          <SkeletonLine width="40%" height={14} style={{ marginBottom: 4 }} />
+          <SkeletonLine width="25%" height={10} />
+        </View>
+      </View>
+      <SkeletonLine width="95%" height={14} />
+      <SkeletonLine width="80%" height={14} style={{ marginBottom: 14 }} />
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+        <SkeletonBlock width={80} height={30} borderRadius={8} />
+        <SkeletonLine width="30%" height={12} />
+      </View>
+    </View>
+  );
+}
+
 const skeletonStyles = StyleSheet.create({
   card: {
     borderRadius: 16,
@@ -163,6 +216,30 @@ const skeletonStyles = StyleSheet.create({
     borderColor: "#E8ECF0",
     width: "48%",
     marginBottom: 12,
+  },
+  feedCard: {
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#E8ECF0",
+    marginBottom: 16,
+    marginHorizontal: 18,
+  },
+  devotionalCard: {
+    borderRadius: 20,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: "#E8ECF0",
+    marginBottom: 20,
+    marginHorizontal: 18,
+  },
+  prayerCard: {
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#E8ECF0",
+    marginBottom: 14,
+    marginHorizontal: 18,
   },
 });
 

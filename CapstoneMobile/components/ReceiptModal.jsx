@@ -53,6 +53,39 @@ export default function ReceiptModal({ visible, onClose, type = "loan", data = {
     ? "Your loan application has been submitted for review."
     : "Thank you so much for your generous donation! Your contribution will be a very big help to our community.";
 
+  const formatReceiptDate = (d) => {
+    try {
+      const dateObj = d ? new Date(d) : new Date();
+      if (isNaN(dateObj.getTime())) return String(d);
+      return dateObj.toLocaleDateString("en-PH", {
+        timeZone: "Asia/Manila",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    } catch (e) {
+      return new Date().toLocaleDateString();
+    }
+  };
+
+  const formatReceiptDateTime = (d) => {
+    try {
+      const dateObj = d ? new Date(d) : new Date();
+      if (isNaN(dateObj.getTime())) return new Date().toLocaleDateString("en-PH", { timeZone: "Asia/Manila" });
+      return dateObj.toLocaleString("en-PH", {
+        timeZone: "Asia/Manila",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+    } catch (e) {
+      return new Date().toLocaleDateString();
+    }
+  };
+
   const formatCurrency = (val) => {
     const n = typeof val === "number" ? val : parseFloat(String(val).replace(/[^0-9.-]+/g, "")) || 0;
     return `₱${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -76,7 +109,7 @@ export default function ReceiptModal({ visible, onClose, type = "loan", data = {
     { label: "Amount", value: typeof data.amount === "string" ? data.amount : formatCurrency(data.amount), bold: true },
     { label: "Payment Method", value: data.method || "—" },
     { label: "Type", value: data.status || "One-time" },
-    { label: "Date", value: data.date || new Date().toLocaleDateString() },
+    { label: "Date", value: formatReceiptDate(data.date) },
   ];
 
   const rows = isLoan ? loanRows : donationRows;
@@ -105,7 +138,7 @@ export default function ReceiptModal({ visible, onClose, type = "loan", data = {
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <Animated.View style={[styles.card, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
+        <Animated.View style={[styles.card, { backgroundColor: colors.cardBg, transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
           <ViewShot ref={viewShotRef} options={{ format: "png", quality: 1.0, result: "tmpfile" }}>
             <View style={[styles.captureArea, { backgroundColor: colors.cardBg }]}>
               {/* Header */}
@@ -142,7 +175,7 @@ export default function ReceiptModal({ visible, onClose, type = "loan", data = {
 
               {/* Branding footer inside capture */}
               <View style={[styles.brandingFooter, { backgroundColor: colors.bg }]}>
-                <Text style={[styles.brandingText, { color: colors.textDimmed }]}>FaithLy • {new Date().toLocaleDateString()}</Text>
+                <Text style={[styles.brandingText, { color: colors.textDimmed }]}>IsangDiwa • {formatReceiptDateTime(new Date())}</Text>
               </View>
             </View>
           </ViewShot>

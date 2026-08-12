@@ -20,8 +20,14 @@ import ChatbotModal from "./ChatbotModal";
 import DraggableChatButton from "../components/DraggableChatButton";
 import { useTheme } from "../components/ThemeContext";
 import { getDailyVerse, saveJournalEntry, getJournalEntry, getAllJournalEntries } from "../services/DevotionalService";
+import OfflineBanner from "../components/OfflineBanner";
+import { SkeletonDevotionalCard } from "../components/SkeletonLoader";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
+const s = (v) => Math.round(v * _WR);
+const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
+const SIDEBAR_WIDTH = s(260);
 
 const LOGO = require("../assets/puac_logo.png");
 
@@ -110,7 +116,7 @@ export default function DevotionalScreen({ navigation, route }) {
   const verseAnim = useRef(new Animated.Value(0)).current;
   const journalAnim = useRef(new Animated.Value(0)).current;
   const indicatorPosition = useRef(new Animated.Value(0)).current;
-  const slideX = useRef(new Animated.Value(-260)).current;
+  const slideX = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
 
   const tabAnimations = useRef(
     ALL_TAB_ITEMS.map(() => ({
@@ -184,7 +190,7 @@ export default function DevotionalScreen({ navigation, route }) {
   }, [slideX]);
 
   const closeSidebar = useCallback(() => {
-    Animated.timing(slideX, { toValue: -260, duration: 250, useNativeDriver: true }).start(() => setSidebarOpen(false));
+    Animated.timing(slideX, { toValue: -SIDEBAR_WIDTH, duration: 250, useNativeDriver: true }).start(() => setSidebarOpen(false));
   }, [slideX]);
 
   useEffect(() => {
@@ -217,7 +223,7 @@ export default function DevotionalScreen({ navigation, route }) {
     if (!verse) return;
     try {
       await Share.share({
-        message: `"${verse.text}"\n\nâ€” ${verse.reference} (${verse.translation})\n\nShared from PUAC`,
+        message: `"${verse.text}"\n\n— ${verse.reference} (${verse.translation})\n\nShared from PUAC`,
       });
     } catch {}
   };
@@ -233,16 +239,17 @@ export default function DevotionalScreen({ navigation, route }) {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <OfflineBanner />
       <View style={styles.circleTopRight} />
       <View style={styles.circleBottomLeft} />
 
       {/* Top Bar */}
       <View style={[styles.topBar, { backgroundColor: "transparent" }]}>
         <TouchableOpacity style={styles.menuBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home', { email: userEmail })} activeOpacity={0.6}>
-          <Text style={{color: '#FFF', fontSize: 28, paddingHorizontal: 4}}>â†</Text>
+          <Text style={{color: '#FFF', fontSize: fs(28), paddingHorizontal: 4}}>â†</Text>
         </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: 36, height: 36 }} resizeMode="contain" /></View>
-        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: 22, height: 22, tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
+        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: s(36), height: 36, borderRadius: 18 }} resizeMode="cover" /></View>
+        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: s(22), height: s(22), tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
       </View>
 
       <ScrollView
@@ -260,10 +267,7 @@ export default function DevotionalScreen({ navigation, route }) {
 
         {/* Verse Card */}
         {loading ? (
-          <View style={[styles.verseCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-            <ActivityIndicator size="large" color={C.blue} />
-            <Text style={[styles.loadingText, { color: colors.textMuted }]}>Loading today's verse...</Text>
-          </View>
+          <SkeletonDevotionalCard />
         ) : verse ? (
           <Animated.View
             style={[
@@ -274,7 +278,7 @@ export default function DevotionalScreen({ navigation, route }) {
           >
             <View style={styles.verseIconRow}>
               <View style={[styles.verseIconBox, { backgroundColor: C.goldLight }]}>
-                <Image source={ICONS.document} style={{width: 20, height: 20, tintColor: C.gold}} resizeMode="contain"/>
+                <Image source={ICONS.document} style={{width: s(20), height: s(20), tintColor: C.gold}} resizeMode="contain"/>
               </View>
               <Text style={[styles.verseDate, { color: colors.textMuted }]}>
                 {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
@@ -282,7 +286,7 @@ export default function DevotionalScreen({ navigation, route }) {
             </View>
 
             <Text style={[styles.verseText, { color: colors.textDark }]}>"{verse.text}"</Text>
-            <Text style={[styles.verseReference, { color: C.blue }]}>â€” {verse.reference}</Text>
+            <Text style={[styles.verseReference, { color: C.blue }]}>— {verse.reference}</Text>
             <Text style={[styles.verseTranslation, { color: colors.textMuted }]}>{verse.translation}</Text>
 
             <TouchableOpacity style={styles.shareBtn} onPress={handleShare} activeOpacity={0.7}>
@@ -335,7 +339,7 @@ export default function DevotionalScreen({ navigation, route }) {
             activeOpacity={0.7}
           >
             <Text style={[styles.sectionTitle, { color: colors.textDark }]}>Past Reflections</Text>
-            <Text style={{ color: C.blue, fontSize: 14, fontWeight: "600" }}>
+            <Text style={{ color: C.blue, fontSize: fs(14), fontWeight: "600" }}>
               {showPastEntries ? "Hide" : `View (${pastEntries.length})`}
             </Text>
           </TouchableOpacity>
@@ -344,7 +348,7 @@ export default function DevotionalScreen({ navigation, route }) {
             <View style={{ gap: 12 }}>
               {pastEntries.length === 0 ? (
                 <View style={[styles.emptyCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-                  <Image source={ICONS.document} style={{width: 40, height: 40, tintColor: colors.textMuted, marginBottom: 12, opacity: 0.5}} resizeMode="contain"/>
+                  <Image source={ICONS.document} style={{width: s(40), height: s(40), tintColor: colors.textMuted, marginBottom: s(12), opacity: 0.5}} resizeMode="contain"/>
                   <Text style={[styles.emptyTitle, { color: colors.textDark }]}>No Reflections Yet</Text>
                   <Text style={[styles.emptySub, { color: colors.textMuted }]}>
                     Your journal entries will appear here
@@ -403,7 +407,7 @@ export default function DevotionalScreen({ navigation, route }) {
       <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideX }] }]}>
         <View style={styles.sidebarHeader}>
           <Image source={LOGO} style={styles.sidebarLogo} resizeMode="contain" />
-          <Image source={LOGO} style={{ width: 40, height: 40, tintColor: "#fff" }} resizeMode="contain" />
+          <Image source={LOGO} style={{ width: s(40), height: s(40), tintColor: "#fff" }} resizeMode="contain" />
         </View>
         <View style={styles.sidebarNav}>
           {SIDEBAR_ITEMS.map((item) => (
@@ -453,77 +457,83 @@ const getStyles = (C) => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg  },
   circleTopRight: { position: 'absolute', top: -120, right: -120, width: 350, height: 350, borderRadius: 175, backgroundColor: '#0D1F45', opacity: 0.04, zIndex: 0 },
   circleBottomLeft: { position: 'absolute', bottom: -150, left: -150, width: 450, height: 450, borderRadius: 225, backgroundColor: '#00C3FF', opacity: 0.04, zIndex: 0 },
-  topBar: { backgroundColor: C.navBg, flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingTop: Platform.OS === "ios" ? 56 : 42, paddingBottom: 14 },
+  topBar: { backgroundColor: C.navBg, flexDirection: "row", alignItems: "center", paddingHorizontal: s(18), paddingTop: Platform.OS === "ios" ? s(56) : s(42), paddingBottom: 14 },
   menuBtn: { padding: 4, justifyContent: "center", gap: 5 },
-  menuLine: { width: 22, height: 2.2, backgroundColor: C.textDark, borderRadius: 1.2 },
-  topTitle: { flex: 1, textAlign: "center", fontSize: 20, fontWeight: "600", color: C.textDark },
+  menuLine: { width: s(22), height: 2.2, backgroundColor: C.textDark, borderRadius: 1.2 },
+  topTitle: { flex: 1, textAlign: "center", fontSize: fs(20), fontWeight: "600", color: C.textDark },
   topSpacer: { width: 28 },
   scroll: { flex: 1 },
-  header: { paddingHorizontal: 18, paddingTop: 20, paddingBottom: 16 },
-  headerTitle: { fontSize: 26, fontWeight: "700", color: C.textDark, marginBottom: 4 },
-  headerSubtitle: { fontSize: 14, color: C.textMuted, lineHeight: 20 },
+  header: { paddingHorizontal: s(18), paddingTop: s(20), paddingBottom: 16 },
+  headerTitle: { fontSize: fs(26), fontWeight: "700", color: C.textDark, marginBottom: 4 },
+  headerSubtitle: { fontSize: fs(14), color: C.textMuted, lineHeight: 20 },
 
   // Verse Card
-  verseCard: { marginHorizontal: 18, borderRadius: 20, padding: 24, borderWidth: 1, marginBottom: 20, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 12, elevation: 2 },
-  verseIconRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 20 },
-  verseIconBox: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  verseDate: { fontSize: 13, fontWeight: "600" },
-  verseText: { fontSize: 18, fontWeight: "500", lineHeight: 28, fontStyle: "italic", marginBottom: 16 },
-  verseReference: { fontSize: 15, fontWeight: "700", marginBottom: 4 },
-  verseTranslation: { fontSize: 12, marginBottom: 16 },
-  shareBtn: { alignSelf: "flex-start", backgroundColor: C.blueLight, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 10 },
-  shareBtnText: { color: C.blue, fontSize: 14, fontWeight: "600" },
-  loadingText: { marginTop: 12, fontSize: 14, textAlign: "center" },
+  verseCard: { marginHorizontal: s(18), borderRadius: s(20), padding: s(24), borderWidth: 1, marginBottom: s(20), shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 12, elevation: 2 },
+  verseIconRow: { flexDirection: "row", alignItems: "center", gap: s(12), marginBottom: 20 },
+  verseIconBox: { width: s(44), height: s(44), borderRadius: s(14), alignItems: "center", justifyContent: "center" },
+  verseDate: { fontSize: fs(13), fontWeight: "600" },
+  verseText: { fontSize: fs(18), fontWeight: "500", lineHeight: 28, fontStyle: "italic", marginBottom: 16 },
+  verseReference: { fontSize: fs(15), fontWeight: "700", marginBottom: 4 },
+  verseTranslation: { fontSize: fs(12), marginBottom: 16 },
+  shareBtn: { alignSelf: "flex-start", backgroundColor: C.blueLight, paddingVertical: s(10), paddingHorizontal: s(18), borderRadius: 10 },
+  shareBtnText: { color: C.blue, fontSize: fs(14), fontWeight: "600" },
+  loadingText: { marginTop: s(12), fontSize: fs(14), textAlign: "center" },
 
   // Journal
-  journalSection: { paddingHorizontal: 18, marginBottom: 20 },
-  sectionTitle: { fontSize: 18, fontWeight: "700", marginBottom: 14 },
-  journalCard: { borderRadius: 16, padding: 18, borderWidth: 1 },
-  journalInput: { borderWidth: 1, borderRadius: 12, padding: 14, fontSize: 15, lineHeight: 22, minHeight: 120, marginBottom: 12 },
+  journalSection: { paddingHorizontal: s(18), marginBottom: 20 },
+  sectionTitle: { fontSize: fs(18), fontWeight: "700", marginBottom: 14 },
+  journalCard: { borderRadius: s(16), padding: s(18), borderWidth: 1 },
+  journalInput: { borderWidth: 1, borderRadius: s(12), padding: s(14), fontSize: fs(15), lineHeight: fs(22), minHeight: 120, marginBottom: 12 },
   journalActions: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 12 },
-  savedLabel: { fontSize: 13, color: C.green, fontWeight: "600" },
-  saveJournalBtn: { backgroundColor: C.blue, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 10 },
-  saveJournalText: { color: "#FFF", fontSize: 14, fontWeight: "600" },
+  savedLabel: { fontSize: fs(13), color: C.green, fontWeight: "600" },
+  saveJournalBtn: { backgroundColor: C.blue, paddingVertical: s(10), paddingHorizontal: s(20), borderRadius: 10 },
+  saveJournalText: { color: "#FFF", fontSize: fs(14), fontWeight: "600" },
 
   // Past entries
-  section: { paddingHorizontal: 18, marginBottom: 20 },
+  section: { paddingHorizontal: s(18), marginBottom: 20 },
   pastEntriesHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 },
-  entryCard: { borderRadius: 14, padding: 16, borderWidth: 1 },
-  entryDate: { fontSize: 12, fontWeight: "600", marginBottom: 6 },
-  entryText: { fontSize: 14, lineHeight: 20 },
-  emptyCard: { borderRadius: 14, padding: 30, borderWidth: 1, alignItems: "center" },
-  emptyTitle: { fontSize: 15, fontWeight: "600", marginBottom: 4 },
-  emptySub: { fontSize: 13, textAlign: "center" },
+  entryCard: { borderRadius: s(14), padding: s(16), borderWidth: 1 },
+  entryDate: { fontSize: fs(12), fontWeight: "600", marginBottom: 6 },
+  entryText: { fontSize: fs(14), lineHeight: 20 },
+  emptyCard: { borderRadius: s(14), padding: 30, borderWidth: 1, alignItems: "center" },
+  emptyTitle: { fontSize: fs(15), fontWeight: "600", marginBottom: 4 },
+  emptySub: { fontSize: fs(13), textAlign: "center" },
 
-  bottomPad: { height: 100 },
+  bottomPad: { height: 110 },
 
   // Tab bar
-  tabBar: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", backgroundColor: C.tabBg, borderTopWidth: 1, borderTopColor: "rgba(100,140,200,0.2)", paddingVertical: 15, paddingBottom: Platform.OS === "ios" ? 30 : 10 },
-  tabIndicator: { position: "absolute", bottom: 0, width: SCREEN_WIDTH / 5, height: 3, backgroundColor: C.tabActive, borderRadius: 2 },
+  tabBar: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", backgroundColor: C.tabBg, borderTopWidth: 1, borderTopColor: "rgba(100,140,200,0.2)", paddingVertical: s(15), paddingBottom: Platform.OS === "ios" ? 30 : 10 },
+  tabIndicator: { position: "absolute", bottom: 0, width: SCREEN_WIDTH / 5, height: s(3), backgroundColor: C.tabActive, borderRadius: 2 },
   tabItem: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, position: "relative" },
   tabBgCircle: { position: "absolute", width: 75, height: 62, borderRadius: 15, backgroundColor: "rgba(46,107,240,0.15)", top: -14 },
-  tabIcon: { width: 26, height: 26 },
+  tabIcon: { width: s(26), height: 26 },
   tabLabel: { fontSize: 10 },
 
   // Sidebar
-  overlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.overlay, zIndex: 10 },
-  sidebar: { position: "absolute", top: 0, left: 0, bottom: 0, width: 260, backgroundColor: "#0D1F45", zIndex: 20, paddingTop: Platform.OS === "ios" ? 60 : 44, paddingHorizontal: 18, justifyContent: "space-between" },
-  sidebarHeader: { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 30 },
-  sidebarLogo: { width: 40, height: 40, borderRadius: 20 },
-  sidebarTitle: { fontSize: 20, fontWeight: "700", color: "#FFF" },
+  overlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.overlay, zIndex: 998, elevation: 998 },
+  sidebar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: SIDEBAR_WIDTH,
+    backgroundColor: C.sidebarBg, zIndex: 1000, elevation: 1000, paddingTop: Platform.OS === "ios" ? s(60) : s(44), paddingHorizontal: s(18), justifyContent: "space-between" },
+  sidebarHeader: { flexDirection: "row", alignItems: "center", gap: s(14), marginBottom: 30 },
+  sidebarLogo: { width: s(40), height: s(40), borderRadius: 20 },
+  sidebarTitle: { fontSize: fs(20), fontWeight: "700", color: "#FFF" },
   sidebarNav: { flex: 1, gap: 4 },
-  sidebarItem: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12 },
-  sidebarIcon: { width: 20, height: 20 },
-  sidebarItemText: { fontSize: 15, color: C.textMuted, fontWeight: "600" },
-  sidebarFooter: { paddingBottom: Platform.OS === "ios" ? 30 : 16, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.1)", paddingTop: 16 },
-  sidebarUserRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 },
-  sidebarAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" },
-  sidebarAvatarIcon: { width: 18, height: 18, tintColor: "#FFF" },
-  sidebarUserName: { fontSize: 14, fontWeight: "600", color: "#FFF" },
-  sidebarUserEmail: { fontSize: 12, color: "rgba(255,255,255,0.5)" },
-  signOutRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
-  signOutIcon: { width: 18, height: 18, tintColor: "#E74C3C" },
-  signOutText: { fontSize: 14, fontWeight: "500", color: "#E74C3C" },
+  sidebarItem: { flexDirection: "row", alignItems: "center", gap: s(14), paddingVertical: s(12), paddingHorizontal: s(12), borderRadius: 12 },
+  sidebarIcon: { width: s(20), height: 20 },
+  sidebarItemText: { fontSize: fs(15), color: C.textMuted, fontWeight: "600" },
+  sidebarFooter: { paddingBottom: Platform.OS === "ios" ? s(30) : s(16), borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.1)", paddingTop: 16 },
+  sidebarUserRow: { flexDirection: "row", alignItems: "center", gap: s(12), marginBottom: 16 },
+  sidebarAvatar: { width: s(36), height: s(36), borderRadius: s(18), backgroundColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" },
+  sidebarAvatarIcon: { width: s(18), height: s(18), tintColor: "#FFF" },
+  sidebarUserName: { fontSize: fs(14), fontWeight: "600", color: "#FFF" },
+  sidebarUserEmail: { fontSize: fs(12), color: "rgba(255,255,255,0.5)" },
+  signOutRow: { flexDirection: "row", alignItems: "center", gap: s(12), paddingVertical: 10 },
+  signOutIcon: { width: s(18), height: s(18), tintColor: "#E74C3C" },
+  signOutText: { fontSize: fs(14), fontWeight: "500", color: "#E74C3C" },
 });
 
 

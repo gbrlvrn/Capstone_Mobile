@@ -28,8 +28,13 @@ import * as ImagePicker from "expo-image-picker";
 import * as ExpoLinking from "expo-linking";
 import { getPublicSettings, getVerificationStatus, createSavingsDeposit, createSavingsTransfer, getSavingsData, createSavingsWithdrawal, createSavingsGoal } from "../services/AuthService";
 import EmptyState from "../components/EmptyState";
+import OfflineBanner from "../components/OfflineBanner";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
+const s = (v) => Math.round(v * _WR);
+const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
+const SIDEBAR_WIDTH = s(260);
 
 const LOGO = require("../assets/puac_logo.png");
 
@@ -178,7 +183,7 @@ export default function SavingsScreen({ navigation, route }) {
   const TAB_WIDTH = SCREEN_WIDTH / TAB_ITEMS.length;
 
   const indicatorPosition = useRef(new Animated.Value(0)).current;
-  const slideX = useRef(new Animated.Value(-260)).current;
+  const slideX = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
 
   const tabAnimations = useRef(
     ALL_TAB_ITEMS.map(() => ({
@@ -414,7 +419,7 @@ export default function SavingsScreen({ navigation, route }) {
   }, [slideX]);
 
   const closeSidebar = useCallback(() => {
-    Animated.timing(slideX, { toValue: -260, duration: 250, useNativeDriver: true }).start(() => setSidebarOpen(false));
+    Animated.timing(slideX, { toValue: -SIDEBAR_WIDTH, duration: 250, useNativeDriver: true }).start(() => setSidebarOpen(false));
   }, [slideX]);
 
   const handleSignOut = useCallback(async () => {
@@ -784,18 +789,17 @@ export default function SavingsScreen({ navigation, route }) {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <OfflineBanner />
       <View style={styles.circleTopRight} />
       <View style={styles.circleBottomLeft} />
 
       {/* Top Bar */}
       <View style={[styles.topBar, { backgroundColor: "transparent" }]}>
-        <TouchableOpacity style={styles.menuBtn} onPress={openSidebar} activeOpacity={0.6}>
-          <View style={styles.menuLine} />
-          <View style={styles.menuLine} />
-          <View style={styles.menuLine} />
+        <TouchableOpacity style={styles.menuBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home', { email: userEmail })} activeOpacity={0.6}>
+          <Text style={{ color: colors.textDark, fontSize: fs(26), fontWeight: '700', paddingHorizontal: 4 }}>←</Text>
         </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: 36, height: 36 }} resizeMode="contain" /></View>
-        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: 22, height: 22, tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
+        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: s(36), height: 36, borderRadius: 18 }} resizeMode="cover" /></View>
+        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: s(22), height: s(22), tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
       </View>
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}
@@ -862,31 +866,31 @@ export default function SavingsScreen({ navigation, route }) {
             {/* Total Savings Card */}
             <Animated.View style={[styles.statCardGrid, { backgroundColor: colors.cardBg, borderColor: C.green, opacity: statAnims[0].opacity, transform: [{ translateY: statAnims[0].translateY }] }]}>
               <View style={styles.statHeaderRow}>
-                <Text style={[styles.statLabel, { color: colors.textMuted, fontSize: 11, textTransform: "uppercase" }]}>Total Savings</Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted, fontSize: fs(11), textTransform: "uppercase" }]}>Total Savings</Text>
                 <Image source={ICONS.wallet} style={{ width: 14, height: 14, tintColor: C.blue }} resizeMode="contain" />
               </View>
               <Text style={[styles.statValue, { color: C.green, marginTop: 4, fontSize: 18 }]}>₱{(totalSavingsToDisplay || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-              <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>Current balance</Text>
+              <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 4 }}>Current balance</Text>
             </Animated.View>
 
             {/* This Month Card */}
             <Animated.View style={[styles.statCardGrid, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder, opacity: statAnims[0].opacity, transform: [{ translateY: statAnims[0].translateY }] }]}>
               <View style={styles.statHeaderRow}>
-                <Text style={[styles.statLabel, { color: colors.textMuted, fontSize: 11, textTransform: "uppercase" }]}>This Month</Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted, fontSize: fs(11), textTransform: "uppercase" }]}>This Month</Text>
                 <Image source={ICONS.calendar} style={{ width: 14, height: 14, tintColor: C.blue }} resizeMode="contain" />
               </View>
               <Text style={[styles.statValue, { color: colors.textDark, marginTop: 4, fontSize: 18 }]}>₱{thisMonthTotalToDisplay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-              <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>Deposited in {currentMonthName} {currentYearNum}</Text>
+              <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 4 }}>Deposited in {currentMonthName} {currentYearNum}</Text>
             </Animated.View>
 
             {/* Active Goals Card */}
             <Animated.View style={[styles.statCardGrid, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder, opacity: statAnims[0].opacity, transform: [{ translateY: statAnims[0].translateY }] }]}>
               <View style={styles.statHeaderRow}>
-                <Text style={[styles.statLabel, { color: colors.textMuted, fontSize: 11, textTransform: "uppercase" }]}>Active Goals</Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted, fontSize: fs(11), textTransform: "uppercase" }]}>Active Goals</Text>
                 <Image source={ICONS.check} style={{ width: 14, height: 14, tintColor: C.blue }} resizeMode="contain" />
               </View>
               <Text style={[styles.statValue, { color: colors.textDark, marginTop: 4, fontSize: 18 }]}>{goals.length}</Text>
-              <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>
+              <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 4 }}>
                 {goals.filter(g => (g.amountSaved || 0) < g.target).length} in progress · {goals.filter(g => (g.amountSaved || 0) >= g.target).length} done
               </Text>
             </Animated.View>
@@ -894,11 +898,11 @@ export default function SavingsScreen({ navigation, route }) {
             {/* Max Loanable Card */}
             <Animated.View style={[styles.statCardGrid, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder, opacity: statAnims[0].opacity, transform: [{ translateY: statAnims[0].translateY }] }]}>
               <View style={styles.statHeaderRow}>
-                <Text style={[styles.statLabel, { color: colors.textMuted, fontSize: 11, textTransform: "uppercase" }]}>Max Loanable</Text>
+                <Text style={[styles.statLabel, { color: colors.textMuted, fontSize: fs(11), textTransform: "uppercase" }]}>Max Loanable</Text>
                 <Image source={ICONS.document} style={{ width: 14, height: 14, tintColor: C.blue }} resizeMode="contain" />
               </View>
               <Text style={[styles.statValue, { color: colors.textDark, marginTop: 4, fontSize: 18 }]}>₱{(totalSavingsToDisplay * 2).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-              <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 4 }}>Personal loan (2x limits)</Text>
+              <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 4 }}>Personal loan (2x limits)</Text>
             </Animated.View>
           </View>
         )}
@@ -913,7 +917,7 @@ export default function SavingsScreen({ navigation, route }) {
 
         <View style={[styles.goalsContainer, { backgroundColor: colors.cardBg }]}>
           {goals.length === 0 ? (
-            <View style={{ padding: 24, alignItems: "center" }}>
+            <View style={{ padding: s(24), alignItems: "center" }}>
               <Text style={{ color: colors.textMuted }}>No goals set up yet.</Text>
             </View>
           ) : (
@@ -945,13 +949,13 @@ export default function SavingsScreen({ navigation, route }) {
                         setFormError("");
                         setDepositModalOpen(true);
                      }} activeOpacity={0.6}>
-                        <Text style={{ color: C.blue, fontSize: 11, fontWeight: "700" }}>Add Savings</Text>
+                        <Text style={{ color: C.blue, fontSize: fs(11), fontWeight: "700" }}>Add Savings</Text>
                      </TouchableOpacity>
 
                      {/* Only allow removal if no money has been saved yet */}
                      {amountSaved === 0 && (
                        <TouchableOpacity onPress={() => handleDeleteGoal(goal.id)} activeOpacity={0.6}>
-                          <Text style={{ color: C.red, fontSize: 11, fontWeight: "700" }}>Remove</Text>
+                          <Text style={{ color: C.red, fontSize: fs(11), fontWeight: "700" }}>Remove</Text>
                        </TouchableOpacity>
                      )}
                    </View>
@@ -991,7 +995,7 @@ export default function SavingsScreen({ navigation, route }) {
                   style={[styles.sleekHistoryItem, idx !== deposits.length - 1 && { borderBottomWidth: 1, borderBottomColor: "#E8ECF0" }]}
                 >
                   <View style={[styles.sleekHistoryIconBox, isWithdrawal && { backgroundColor: "rgba(231,76,60,0.1)" }]}>
-                    <Text style={{ fontSize: 16, color: isWithdrawal ? C.red : C.green }}>{isWithdrawal ? "↓" : "↑"}</Text>
+                    <Text style={{ fontSize: fs(16), color: isWithdrawal ? C.red : C.green }}>{isWithdrawal ? "↓" : "↑"}</Text>
                   </View>
                   <View style={{ flex: 1, paddingLeft: 12 }}>
                     <Text style={[styles.sleekHistoryTitle, { color: colors.textDark }]}>{isWithdrawal ? "Withdrawal" : "Deposit"} · {dep.description || dep.note || dep.goalName || "Savings"}</Text>
@@ -1028,15 +1032,15 @@ export default function SavingsScreen({ navigation, route }) {
       {/* ── Deposit Success Modal ── */}
       <Modal visible={!!successDeposit} transparent animationType="fade" onRequestClose={() => setSuccessDeposit(null)}>
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", alignItems: "center", padding: 24 }}>
-          <View style={{ backgroundColor: "#fff", borderRadius: 24, padding: 32, alignItems: "center", width: "100%", maxWidth: 360, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 24, elevation: 12 }}>
+          <View style={{ backgroundColor: "#fff", borderRadius: s(24), padding: 32, alignItems: "center", width: "100%", maxWidth: 360, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 24, elevation: 12 }}>
             {/* Green check circle */}
             <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "#E8FAF0", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-              <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: "#34C759", alignItems: "center", justifyContent: "center" }}>
-                <Text style={{ fontSize: 26, color: "#fff" }}>✓</Text>
+              <View style={{ width: s(52), height: s(52), borderRadius: 26, backgroundColor: "#34C759", alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: fs(26), color: "#fff" }}>✓</Text>
               </View>
             </View>
-            <Text style={{ fontSize: 20, fontWeight: "800", color: "#0D1F45", marginBottom: 4 }}>Deposit Submitted!</Text>
-            <Text style={{ fontSize: 13, color: "#6B7FA3", marginBottom: 24, textAlign: "center" }}>Your deposit is pending admin validation.</Text>
+            <Text style={{ fontSize: fs(20), fontWeight: "800", color: "#0D1F45", marginBottom: 4 }}>Deposit Submitted!</Text>
+            <Text style={{ fontSize: fs(13), color: "#6B7FA3", marginBottom: s(24), textAlign: "center" }}>Your deposit is pending admin validation.</Text>
 
             {/* Receipt rows */}
             {[
@@ -1048,16 +1052,16 @@ export default function SavingsScreen({ navigation, route }) {
               { label: "Date", value: successDeposit?.date },
             ].filter(Boolean).map((row, i) => (
               <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", width: "100%", paddingVertical: 7, borderBottomWidth: i < 4 ? 1 : 0, borderBottomColor: "#F0F3F8" }}>
-                <Text style={{ fontSize: 13, color: "#6B7FA3", fontWeight: "500" }}>{row.label}</Text>
-                <Text style={{ fontSize: 13, color: "#0D1F45", fontWeight: "700", flexShrink: 1, textAlign: "right", marginLeft: 8 }}>{row.value}</Text>
+                <Text style={{ fontSize: fs(13), color: "#6B7FA3", fontWeight: "500" }}>{row.label}</Text>
+                <Text style={{ fontSize: fs(13), color: "#0D1F45", fontWeight: "700", flexShrink: 1, textAlign: "right", marginLeft: 8 }}>{row.value}</Text>
               </View>
             ))}
 
             <TouchableOpacity
               onPress={() => setSuccessDeposit(null)}
-              style={{ marginTop: 24, backgroundColor: "#34C759", borderRadius: 14, paddingVertical: 14, paddingHorizontal: 48, width: "100%" }}
+              style={{ marginTop: 24, backgroundColor: "#34C759", borderRadius: s(14), paddingVertical: s(14), paddingHorizontal: 48, width: "100%" }}
             >
-              <Text style={{ color: "#fff", fontWeight: "800", fontSize: 15, textAlign: "center" }}>Done</Text>
+              <Text style={{ color: "#fff", fontWeight: "800", fontSize: fs(15), textAlign: "center" }}>Done</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1066,25 +1070,25 @@ export default function SavingsScreen({ navigation, route }) {
       {/* ── Transaction Receipt Modal ── */}
       <Modal visible={!!receiptTxn} transparent animationType="slide" onRequestClose={() => setReceiptTxn(null)}>
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
-          <View style={{ backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 28, paddingBottom: 40 }}>
+          <View style={{ backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: s(28), paddingBottom: 40 }}>
             {/* Header */}
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <Text style={{ fontSize: 17, fontWeight: "800", color: "#0D1F45" }}>Transaction Receipt</Text>
+              <Text style={{ fontSize: fs(17), fontWeight: "800", color: "#0D1F45" }}>Transaction Receipt</Text>
               <TouchableOpacity onPress={() => setReceiptTxn(null)}>
-                <Text style={{ fontSize: 22, color: "#6B7FA3", lineHeight: 24 }}>×</Text>
+                <Text style={{ fontSize: fs(22), color: "#6B7FA3", lineHeight: 24 }}>×</Text>
               </TouchableOpacity>
             </View>
 
             {/* Type badge */}
             <View style={{ alignItems: "center", marginBottom: 20 }}>
-              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: receiptTxn?.type === "withdrawal" ? "rgba(231,76,60,0.1)" : "rgba(52,199,89,0.1)", alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
-                <Text style={{ fontSize: 24, color: receiptTxn?.type === "withdrawal" ? C.red : C.green }}>{receiptTxn?.type === "withdrawal" ? "↓" : "↑"}</Text>
+              <View style={{ width: 56, height: 56, borderRadius: s(28), backgroundColor: receiptTxn?.type === "withdrawal" ? "rgba(231,76,60,0.1)" : "rgba(52,199,89,0.1)", alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
+                <Text style={{ fontSize: fs(24), color: receiptTxn?.type === "withdrawal" ? C.red : C.green }}>{receiptTxn?.type === "withdrawal" ? "↓" : "↑"}</Text>
               </View>
-              <Text style={{ fontSize: 26, fontWeight: "800", color: receiptTxn?.type === "withdrawal" ? C.red : C.green }}>
+              <Text style={{ fontSize: fs(26), fontWeight: "800", color: receiptTxn?.type === "withdrawal" ? C.red : C.green }}>
                 {receiptTxn?.type === "withdrawal" ? "-" : "+"}₱{receiptTxn ? parseFloat(receiptTxn.amount).toLocaleString(undefined, { minimumFractionDigits: 2 }) : ""}
               </Text>
-              <View style={{ marginTop: 6, paddingHorizontal: 12, paddingVertical: 3, borderRadius: 20, backgroundColor: receiptTxn?.displayStatus === "confirmed" ? "rgba(52,199,89,0.12)" : receiptTxn?.displayStatus === "rejected" ? "rgba(231,76,60,0.12)" : "rgba(255,149,0,0.12)" }}>
-                <Text style={{ fontSize: 11, fontWeight: "700", color: receiptTxn?.displayStatus === "confirmed" ? C.green : receiptTxn?.displayStatus === "rejected" ? C.red : "#FF9500" }}>{(receiptTxn?.displayStatus || "").toUpperCase()}</Text>
+              <View style={{ marginTop: 6, paddingHorizontal: s(12), paddingVertical: 3, borderRadius: s(20), backgroundColor: receiptTxn?.displayStatus === "confirmed" ? "rgba(52,199,89,0.12)" : receiptTxn?.displayStatus === "rejected" ? "rgba(231,76,60,0.12)" : "rgba(255,149,0,0.12)" }}>
+                <Text style={{ fontSize: fs(11), fontWeight: "700", color: receiptTxn?.displayStatus === "confirmed" ? C.green : receiptTxn?.displayStatus === "rejected" ? C.red : "#FF9500" }}>{(receiptTxn?.displayStatus || "").toUpperCase()}</Text>
               </View>
             </View>
 
@@ -1097,56 +1101,23 @@ export default function SavingsScreen({ navigation, route }) {
               { label: "Reference ID", value: receiptTxn?.referenceNumber || "—" },
               { label: "Date", value: receiptTxn?.dateStr || "—" },
             ].map((row, i) => (
-              <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#F0F3F8" }}>
-                <Text style={{ fontSize: 13, color: "#6B7FA3", fontWeight: "500" }}>{row.label}</Text>
-                <Text style={{ fontSize: 13, color: "#0D1F45", fontWeight: "700", flexShrink: 1, textAlign: "right", marginLeft: 16 }}>{row.value}</Text>
+              <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: s(10), borderBottomWidth: 1, borderBottomColor: "#F0F3F8" }}>
+                <Text style={{ fontSize: fs(13), color: "#6B7FA3", fontWeight: "500" }}>{row.label}</Text>
+                <Text style={{ fontSize: fs(13), color: "#0D1F45", fontWeight: "700", flexShrink: 1, textAlign: "right", marginLeft: 16 }}>{row.value}</Text>
               </View>
             ))}
 
             <TouchableOpacity
               onPress={() => setReceiptTxn(null)}
-              style={{ marginTop: 22, backgroundColor: "#0D1F45", borderRadius: 14, paddingVertical: 14 }}
+              style={{ marginTop: s(22), backgroundColor: "#0D1F45", borderRadius: s(14), paddingVertical: 14 }}
             >
-              <Text style={{ color: "#fff", fontWeight: "800", fontSize: 15, textAlign: "center" }}>Close</Text>
+              <Text style={{ color: "#fff", fontWeight: "800", fontSize: fs(15), textAlign: "center" }}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* Bottom tab bar */}
-      <View style={[styles.tabBar, { backgroundColor: colors.tabBg }]}>
-        <Animated.View
-          style={[styles.tabIndicator, { width: TAB_WIDTH, transform: [{ translateX: indicatorPosition }] }]}
-        />
-        {TAB_ITEMS.map((tab) => {
-          const isActive = activeTab === tab.key;
-          const allIndex = ALL_TAB_ITEMS.findIndex(t => t.key === tab.key);
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={styles.tabItem}
-              onPress={() => {
-                setActiveTab(tab.key);
-                navWithEmail(tab.key);
-              }}
-              activeOpacity={0.7}
-            >
-              <Animated.View style={[styles.tabBgCircle, { opacity: tabAnimations[allIndex].bgOpacity }]} />
-              <Animated.View style={{ transform: [{ scale: tabAnimations[allIndex].scale }] }}>
-                <Image
-                  source={tab.icon}
-                  style={[styles.tabIcon, { tintColor: isActive ? C.tabActive : colors.tabInactive, opacity: isActive ? 1 : 0.6 }]}
-                  resizeMode="contain"
-                />
-              </Animated.View>
-              <Text style={[styles.tabLabel, { color: isActive ? C.tabActive : colors.tabInactive, fontWeight: isActive ? "700" : "500", fontSize: isActive ? 11 : 10, opacity: isActive ? 1 : 0.7 }]}>
-                {tab.key}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
+            {/* Floating Bottom Tab Bar */}
       {/* Sidebar overlay */}
       {sidebarOpen ? (
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={closeSidebar} />
@@ -1245,10 +1216,10 @@ export default function SavingsScreen({ navigation, route }) {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalBox, { backgroundColor: colors.cardBg, padding: 0 }]}>
               
-              <View style={{ padding: 24, paddingBottom: 0 }}>
+              <View style={{ padding: s(24), paddingBottom: 0 }}>
                 <View style={[styles.modalHeaderRow, { marginBottom: 20 }]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.modalTitle, { color: colors.textDark, fontSize: 18, marginBottom: 2 }]}>Deposit to savings</Text>
+                    <Text style={[styles.modalTitle, { color: colors.textDark, fontSize: fs(18), marginBottom: 2 }]}>Deposit to savings</Text>
                     <Text style={{ color: "#6B7FA3", fontSize: 13 }}>Choose a goal and enter the amount you'd like to add.</Text>
                   </View>
                   <TouchableOpacity onPress={() => setDepositModalOpen(false)} style={styles.modalCloseIconBtn}>
@@ -1304,21 +1275,21 @@ export default function SavingsScreen({ navigation, route }) {
                       <View style={[styles.radioOuter, selectedPayment === "cash" && styles.radioOuterActive]}>
                         {selectedPayment === "cash" && <View style={styles.radioInner} />}
                       </View>
-                      <Text style={styles.radioMethodText}>Cash</Text>
+                      <Text style={styles.radioMethodText} numberOfLines={1} adjustsFontSizeToFit>Cash</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={[styles.radioMethodBox, selectedPayment === "gcash" && styles.radioMethodBoxActive]} activeOpacity={0.9} onPress={() => setSelectedPayment("gcash")}>
                       <View style={[styles.radioOuter, selectedPayment === "gcash" && styles.radioOuterActive]}>
                         {selectedPayment === "gcash" && <View style={styles.radioInner} />}
                       </View>
-                      <Text style={styles.radioMethodText}>E-Wallet</Text>
+                      <Text style={styles.radioMethodText} numberOfLines={1} adjustsFontSizeToFit>E-Wallet</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={[styles.radioMethodBox, selectedPayment === "bank" && styles.radioMethodBoxActive]} activeOpacity={0.9} onPress={() => setSelectedPayment("bank")}>
                       <View style={[styles.radioOuter, selectedPayment === "bank" && styles.radioOuterActive]}>
                         {selectedPayment === "bank" && <View style={styles.radioInner} />}
                       </View>
-                      <Text style={styles.radioMethodText}>Bank Transfer</Text>
+                      <Text style={styles.radioMethodText} numberOfLines={1} adjustsFontSizeToFit>Bank Transfer</Text>
                     </TouchableOpacity>
                   </View>
 
@@ -1433,10 +1404,10 @@ export default function SavingsScreen({ navigation, route }) {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalBox, { backgroundColor: colors.cardBg, padding: 0 }]}>
               
-              <View style={{ padding: 24, paddingBottom: 0 }}>
+              <View style={{ padding: s(24), paddingBottom: 0 }}>
                 <View style={[styles.modalHeaderRow, { marginBottom: 20 }]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.modalTitle, { color: colors.textDark, fontSize: 18, marginBottom: 2 }]}>Withdraw from savings</Text>
+                    <Text style={[styles.modalTitle, { color: colors.textDark, fontSize: fs(18), marginBottom: 2 }]}>Withdraw from savings</Text>
                     <Text style={{ color: "#6B7FA3", fontSize: 13 }}>Funds will be sent to your preferred account after approval.</Text>
                   </View>
                   <TouchableOpacity onPress={() => setWithdrawModalOpen(false)} style={styles.modalCloseIconBtn}>
@@ -1543,10 +1514,10 @@ export default function SavingsScreen({ navigation, route }) {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalBox, { backgroundColor: colors.cardBg, padding: 0 }]}>
               
-              <View style={{ padding: 24, paddingBottom: 0 }}>
+              <View style={{ padding: s(24), paddingBottom: 0 }}>
                 <View style={[styles.modalHeaderRow, { marginBottom: 20 }]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.modalTitle, { color: colors.textDark, fontSize: 18, marginBottom: 2 }]}>Instant Transfer</Text>
+                    <Text style={[styles.modalTitle, { color: colors.textDark, fontSize: fs(18), marginBottom: 2 }]}>Instant Transfer</Text>
                     <Text style={{ color: "#6B7FA3", fontSize: 13 }}>Move funds instantly between your savings goals.</Text>
                   </View>
                   <TouchableOpacity onPress={() => setTransferModalOpen(false)} style={styles.modalCloseIconBtn}>
@@ -1610,7 +1581,7 @@ export default function SavingsScreen({ navigation, route }) {
                     />
                   </View>
 
-                  {formError ? <Text style={[styles.formError, { marginTop: 16, textAlign: "center", marginBottom: 10 }]}>{formError}</Text> : <View style={{ height: 20 }} />}
+                  {formError ? <Text style={[styles.formError, { marginTop: s(16), textAlign: "center", marginBottom: 10 }]}>{formError}</Text> : <View style={{ height: 20 }} />}
                 </ScrollView>
               </View>
 
@@ -1699,14 +1670,14 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.navBg,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 18,
-    paddingTop: Platform.OS === "ios" ? 56 : 42,
+    paddingHorizontal: s(18),
+    paddingTop: Platform.OS === "ios" ? s(56) : s(42),
     paddingBottom: 14,
   },
   menuBtn: { padding: 4, justifyContent: "center", gap: 5 },
-  menuLine: { width: 22, height: 2.2, backgroundColor: C.textDark, borderRadius: 1.2 },
+  menuLine: { width: s(22), height: 2.2, backgroundColor: C.textDark, borderRadius: 1.2 },
   topTitle: {
-    flex: 1, textAlign: "center", fontSize: 20, fontWeight: "600", color: C.textDark,
+    flex: 1, textAlign: "center", fontSize: fs(20), fontWeight: "600", color: C.textDark,
   },
   topSpacer: { width: 28 },
 
@@ -1714,38 +1685,38 @@ const getStyles = (C) => StyleSheet.create({
 
   // Header
   header: {
-    paddingHorizontal: 18,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingHorizontal: s(18),
+    paddingTop: s(20),
+    paddingBottom: s(16),
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
   },
-  pageTitle: { fontSize: 26, fontWeight: "700", color: C.textDark, marginBottom: 4 },
-  pageSubtitle: { fontSize: 14, color: C.textMuted, lineHeight: 20 },
+  pageTitle: { fontSize: fs(26), fontWeight: "700", color: C.textDark, marginBottom: 4 },
+  pageSubtitle: { fontSize: fs(14), color: C.textMuted, lineHeight: 20 },
   addBtn: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: C.blue,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    gap: 6,
+    paddingHorizontal: s(14),
+    paddingVertical: s(10),
+    borderRadius: s(12),
+    gap: s(6),
     shadowColor: C.blue,
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
     shadowRadius: 6,
     elevation: 3,
   },
-  addBtnPlus: { fontSize: 18, fontWeight: "700", color: "#FFF" },
-  addBtnText: { fontSize: 13, fontWeight: "700", color: "#FFF" },
+  addBtnPlus: { fontSize: fs(18), fontWeight: "700", color: "#FFF" },
+  addBtnText: { fontSize: fs(13), fontWeight: "700", color: "#FFF" },
 
   // Stats
-  statsContainer: { paddingHorizontal: 18, gap: 12, marginBottom: 20 },
+  statsContainer: { paddingHorizontal: s(18), gap: s(12), marginBottom: 20 },
   statCard: {
     backgroundColor: C.cardBg,
-    borderRadius: 16,
-    padding: 18,
+    borderRadius: s(16),
+    padding: s(18),
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -1758,60 +1729,60 @@ const getStyles = (C) => StyleSheet.create({
     elevation: 1,
   },
   statLeft: { flex: 1 },
-  statLabel: { fontSize: 13, color: C.textMuted, marginBottom: 6, fontWeight: "600" },
-  statValue: { fontSize: 26, fontWeight: "700", color: C.textDark },
+  statLabel: { fontSize: fs(13), color: C.textMuted, marginBottom: s(6), fontWeight: "600" },
+  statValue: { fontSize: fs(26), fontWeight: "700", color: C.textDark },
   statIconBox: {
-    width: 46, height: 46, borderRadius: 14,
+    width: s(46), height: s(46), borderRadius: s(14),
     alignItems: "center", justifyContent: "center",
   },
-  statIcon: { width: 22, height: 22 },
+  statIcon: { width: s(22), height: 22 },
 
   // Loan Eligibility
   eligibilityCard: {
-    marginHorizontal: 18,
-    borderRadius: 16,
-    padding: 18,
+    marginHorizontal: s(18),
+    borderRadius: s(16),
+    padding: s(18),
     borderWidth: 1,
-    marginBottom: 20,
+    marginBottom: s(20),
   },
   eligibilityHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
+    gap: s(14),
   },
   eligibilityIconBox: {
-    width: 44, height: 44, borderRadius: 14,
+    width: s(44), height: s(44), borderRadius: s(14),
     alignItems: "center", justifyContent: "center",
   },
-  eligibilityTitle: { fontSize: 15, fontWeight: "700", marginBottom: 3 },
-  eligibilitySubtext: { fontSize: 13, lineHeight: 18 },
+  eligibilityTitle: { fontSize: fs(15), fontWeight: "700", marginBottom: 3 },
+  eligibilitySubtext: { fontSize: fs(13), lineHeight: 18 },
   eligibilityProgressBg: {
     height: 8,
     backgroundColor: "rgba(0,0,0,0.08)",
-    borderRadius: 4,
+    borderRadius: s(4),
     marginTop: 14,
     overflow: "hidden",
   },
   eligibilityProgressFill: {
     height: "100%",
     backgroundColor: C.gold,
-    borderRadius: 4,
+    borderRadius: s(4),
   },
 
   // Section
-  section: { paddingHorizontal: 18, marginBottom: 20 },
+  section: { paddingHorizontal: s(18), marginBottom: 20 },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: s(12),
   },
-  sectionTitle: { fontSize: 18, fontWeight: "700", color: C.textDark, marginBottom: 8 },
-  addGoalText: { fontSize: 14, fontWeight: "700", color: C.blue },
+  sectionTitle: { fontSize: fs(18), fontWeight: "700", color: C.textDark, marginBottom: 8 },
+  addGoalText: { fontSize: fs(14), fontWeight: "700", color: C.blue },
 
   // Goals
   emptyGoalCard: {
-    borderRadius: 16,
+    borderRadius: s(16),
     padding: 30,
     alignItems: "center",
     borderWidth: 1,
@@ -1821,14 +1792,14 @@ const getStyles = (C) => StyleSheet.create({
     shadowRadius: 14,
     elevation: 1,
   },
-  emptyGoalTitle: { fontSize: 16, fontWeight: "700", marginBottom: 4 },
-  emptyGoalSub: { fontSize: 13, textAlign: "center", lineHeight: 18 },
+  emptyGoalTitle: { fontSize: fs(16), fontWeight: "700", marginBottom: 4 },
+  emptyGoalSub: { fontSize: fs(13), textAlign: "center", lineHeight: 18 },
 
   goalCard: {
-    borderRadius: 16,
-    padding: 18,
+    borderRadius: s(16),
+    padding: s(18),
     borderWidth: 1,
-    marginBottom: 12,
+    marginBottom: s(12),
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.05,
@@ -1839,30 +1810,30 @@ const getStyles = (C) => StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 14,
+    marginBottom: s(14),
   },
-  goalName: { fontSize: 16, fontWeight: "700", marginBottom: 4 },
-  goalAmount: { fontSize: 13, fontWeight: "500" },
+  goalName: { fontSize: fs(16), fontWeight: "700", marginBottom: 4 },
+  goalAmount: { fontSize: fs(13), fontWeight: "500" },
   goalBadge: {
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 999,
   },
-  goalBadgeText: { fontSize: 12, fontWeight: "700" },
+  goalBadgeText: { fontSize: fs(12), fontWeight: "700" },
   goalProgressBg: {
     height: 8,
     backgroundColor: "rgba(0,0,0,0.06)",
-    borderRadius: 4,
+    borderRadius: s(4),
     overflow: "hidden",
   },
   goalProgressFill: {
     height: "100%",
-    borderRadius: 4,
+    borderRadius: s(4),
   },
 
   // History
   historyList: {
-    borderRadius: 16,
+    borderRadius: s(16),
     borderWidth: 0,
     overflow: "hidden",
     shadowColor: "#000",
@@ -1874,21 +1845,21 @@ const getStyles = (C) => StyleSheet.create({
   historyItem: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 16,
-    gap: 14,
+    padding: s(16),
+    gap: s(14),
     borderBottomWidth: 1,
-    borderBottomColor: "#E8ECF0",
+    borderBottomColor: C.cardBorder,
   },
   historyIconBox: {
-    width: 42, height: 42, borderRadius: 12,
+    width: 42, height: 42, borderRadius: s(12),
     alignItems: "center", justifyContent: "center",
   },
-  historyIcon: { width: 20, height: 20 },
-  historyTitle: { fontSize: 14, fontWeight: "600", marginBottom: 3 },
+  historyIcon: { width: s(20), height: 20 },
+  historyTitle: { fontSize: fs(14), fontWeight: "600", marginBottom: 3 },
   historyDate: { fontSize: 12 },
-  historyAmount: { fontSize: 16, fontWeight: "700" },
+  historyAmount: { fontSize: fs(16), fontWeight: "700" },
 
-  bottomPad: { height: 24 },
+  bottomPad: { height: 110 },
 
   // Tab Bar
   tabBar: {
@@ -1896,14 +1867,14 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.tabBg,
     borderTopWidth: 1,
     borderTopColor: "rgba(100,140,200,0.2)",
-    paddingVertical: 15,
+    paddingVertical: s(15),
     paddingBottom: Platform.OS === "ios" ? 20 : 8,
     position: "relative",
   },
   tabIndicator: {
     position: "absolute",
     bottom: 0, left: 0,
-    height: 3,
+    height: s(3),
     backgroundColor: C.tabActive,
   },
   tabItem: {
@@ -1916,261 +1887,265 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: "rgba(46,107,240,0.15)",
     top: -8,
   },
-  tabIcon: { width: 26, height: 26 },
+  tabIcon: { width: s(26), height: 26 },
   tabLabel: { fontSize: 10 },
 
   // Sidebar
   overlay: {
     position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: C.overlay, zIndex: 10,
+    backgroundColor: C.overlay, zIndex: 998, elevation: 998,
   },
   sidebar: {
-    position: "absolute", top: 0, left: 0, bottom: 0, width: 260,
-    backgroundColor: "#0D1F45", zIndex: 11, flexDirection: "column",
+    position: "absolute",
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: SIDEBAR_WIDTH,
+    backgroundColor: C.sidebarBg, zIndex: 1000, elevation: 1000, flexDirection: "column",
   },
   sidebarHeader: {
-    flexDirection: "row", alignItems: "center", gap: 12,
-    paddingTop: Platform.OS === "ios" ? 58 : 44,
-    paddingBottom: 22, paddingHorizontal: 20,
+    flexDirection: "row", alignItems: "center", gap: s(12),
+    paddingTop: Platform.OS === "ios" ? s(58) : s(44),
+    paddingBottom: 22, paddingHorizontal: s(20),
   },
-  sidebarLogo: { width: 46, height: 46, borderRadius: 45 },
-  sidebarTitle: { fontSize: 18, fontWeight: "900", color: "#FFF" },
+  sidebarLogo: { width: s(46), height: s(46), borderRadius: 45 },
+  sidebarTitle: { fontSize: fs(18), fontWeight: "900", color: "#FFF" },
 
   sidebarNav: { flex: 1, paddingHorizontal: 12 },
   sidebarItem: {
-    flexDirection: "row", alignItems: "center", gap: 14,
-    paddingVertical: 13, paddingHorizontal: 14,
-    borderRadius: 12, marginBottom: 6,
+    flexDirection: "row", alignItems: "center", gap: s(14),
+    paddingVertical: s(13), paddingHorizontal: s(14),
+    borderRadius: s(12), marginBottom: s(6),
   },
   sidebarItemActive: { backgroundColor: "rgba(46,107,240,0.1)" },
-  sidebarIcon: { width: 20, height: 20 },
-  sidebarItemText: { fontSize: 15, color: C.textMuted, fontWeight: "600" },
+  sidebarIcon: { width: s(20), height: 20 },
+  sidebarItemText: { fontSize: fs(15), color: C.textMuted, fontWeight: "600" },
   sidebarItemTextActive: { color: C.blue },
 
   sidebarFooter: {
     borderTopWidth: 1, borderTopColor: C.cardBorder,
-    paddingHorizontal: 18, paddingTop: 16,
-    paddingBottom: Platform.OS === "ios" ? 34 : 18,
+    paddingHorizontal: s(18), paddingTop: s(16),
+    paddingBottom: Platform.OS === "ios" ? s(34) : s(18),
   },
-  sidebarUserRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 },
+  sidebarUserRow: { flexDirection: "row", alignItems: "center", gap: s(12), marginBottom: 16 },
   sidebarAvatar: {
-    width: 36, height: 36, borderRadius: 18,
+    width: s(36), height: s(36), borderRadius: s(18),
     backgroundColor: "rgba(31, 102, 255, 0.93)",
     alignItems: "center", justifyContent: "center",
   },
-  sidebarAvatarIcon: { width: 18, height: 18, tintColor: "#FFFFFF" },
-  sidebarUserName: { fontSize: 14, fontWeight: "900", color: "#FFF" },
-  sidebarUserEmail: { fontSize: 11, color: C.textMuted, marginTop: 1, fontWeight: "700" },
+  sidebarAvatarIcon: { width: s(18), height: s(18), tintColor: "#FFFFFF" },
+  sidebarUserName: { fontSize: fs(14), fontWeight: "900", color: "#FFF" },
+  sidebarUserEmail: { fontSize: fs(11), color: C.textMuted, marginTop: 1, fontWeight: "700" },
 
-  signOutRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 },
-  signOutIcon: { width: 30, height: 40, tintColor: C.red },
-  signOutText: { fontSize: 14, color: C.red, fontWeight: "900" },
+  signOutRow: { flexDirection: "row", alignItems: "center", gap: s(10), paddingVertical: 6 },
+  signOutIcon: { width: 30, height: s(40), tintColor: C.red },
+  signOutText: { fontSize: fs(14), color: C.red, fontWeight: "900" },
 
   // Confirm Modal
   confirmOverlay: {
     flex: 1, backgroundColor: "rgba(0, 0, 0, 0.6)",
-    justifyContent: "center", alignItems: "center", paddingHorizontal: 24,
+    justifyContent: "center", alignItems: "center", paddingHorizontal: s(24),
   },
   confirmDialog: {
-    backgroundColor: "#FFFFFF", borderRadius: 20, padding: 28,
+    backgroundColor: C.cardBg, borderRadius: s(20), padding: s(28),
     width: "100%", maxWidth: 340, alignItems: "center",
     shadowColor: "#000", shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.25, shadowRadius: 16, elevation: 10,
   },
   confirmIconContainer: {
-    width: 64, height: 64, borderRadius: 32,
+    width: s(64), height: s(64), borderRadius: s(32),
     backgroundColor: "rgba(231, 76, 60, 0.1)",
-    alignItems: "center", justifyContent: "center", marginBottom: 20,
+    alignItems: "center", justifyContent: "center", marginBottom: s(20),
   },
   confirmIcon: { width: 32, height: 32, tintColor: C.red },
-  confirmTitle: { fontSize: 22, fontWeight: "800", marginBottom: 12, textAlign: "center" },
-  confirmMessage: { fontSize: 15, textAlign: "center", lineHeight: 22, marginBottom: 28 },
-  confirmButtons: { flexDirection: "row", gap: 12, width: "100%" },
+  confirmTitle: { fontSize: fs(22), fontWeight: "800", marginBottom: s(12), textAlign: "center" },
+  confirmMessage: { fontSize: fs(15), textAlign: "center", lineHeight: fs(22), marginBottom: 28 },
+  confirmButtons: { flexDirection: "row", gap: s(12), width: "100%" },
   confirmBtnCancel: {
-    flex: 1, backgroundColor: "#F0F2F5", borderRadius: 12,
-    paddingVertical: 14, alignItems: "center", justifyContent: "center",
+    flex: 1, backgroundColor: C.secondaryBtnBg, borderRadius: s(12),
+    paddingVertical: s(14), alignItems: "center", justifyContent: "center",
   },
-  confirmBtnCancelText: { fontSize: 15, fontWeight: "700" },
+  confirmBtnCancelText: { fontSize: fs(15), fontWeight: "700" },
   confirmBtnSignOut: {
-    flex: 1, backgroundColor: C.red, borderRadius: 12,
-    paddingVertical: 14, alignItems: "center", justifyContent: "center",
+    flex: 1, backgroundColor: C.red, borderRadius: s(12),
+    paddingVertical: s(14), alignItems: "center", justifyContent: "center",
   },
-  confirmBtnSignOutText: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
+  confirmBtnSignOutText: { fontSize: fs(15), fontWeight: "700", color: "#FFFFFF" },
 
   // Modals
   modalOverlay: {
     flex: 1, backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center", alignItems: "center", paddingHorizontal: 20,
+    justifyContent: "center", alignItems: "center", paddingHorizontal: s(20),
   },
   modalBox: {
-    width: "100%", borderRadius: 24, padding: 0, overflow: "hidden", maxHeight: "85%",
+    width: "100%", borderRadius: s(24), padding: 0, overflow: "hidden", maxHeight: "85%",
     shadowColor: "#000", shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.2, shadowRadius: 20, elevation: 8,
     display: "flex", flexDirection: "column",
   },
-  modalContent: { padding: 28, paddingBottom: 20 },
+  modalContent: { padding: s(28), paddingBottom: 20 },
   modalFooter: {
-    padding: 20,
-    paddingTop: 16,
+    padding: s(20),
+    paddingTop: s(16),
     borderTopWidth: 1,
   },
-  modalTitle: { fontSize: 22, fontWeight: "800", marginBottom: 6 },
-  modalSubtext: { fontSize: 14, lineHeight: 20, marginBottom: 24 },
-  inputLabel: { fontSize: 13, fontWeight: "600", marginBottom: 8 },
+  modalTitle: { fontSize: fs(22), fontWeight: "800", marginBottom: 6 },
+  modalSubtext: { fontSize: fs(14), lineHeight: fs(20), marginBottom: 24 },
+  inputLabel: { fontSize: fs(13), fontWeight: "600", marginBottom: 8 },
   input: {
-    borderWidth: 1, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
-    fontSize: 15, marginBottom: 18, backgroundColor: "rgba(0,0,0,0.02)",
+    borderWidth: 1, borderRadius: s(12), paddingHorizontal: s(16), paddingVertical: s(14),
+    fontSize: fs(15), marginBottom: 18, backgroundColor: "rgba(0,0,0,0.02)",
   },
-  formError: { fontSize: 13, color: C.red, marginBottom: 14, fontWeight: "500" },
-  modalButtons: { flexDirection: "row", gap: 12, marginTop: 4 },
+  formError: { fontSize: fs(13), color: C.red, marginBottom: s(14), fontWeight: "500" },
+  modalButtons: { flexDirection: "row", gap: s(12), marginTop: 4 },
   modalBtnCancel: {
-    flex: 1, backgroundColor: "#F0F2F5", borderRadius: 12,
-    paddingVertical: 14, alignItems: "center",
+    flex: 1, backgroundColor: C.secondaryBtnBg, borderRadius: s(12),
+    paddingVertical: s(14), alignItems: "center",
   },
-  modalBtnCancelText: { fontSize: 15, fontWeight: "700" },
+  modalBtnCancelText: { fontSize: fs(15), fontWeight: "700" },
   modalBtnSubmit: {
-    flex: 1, backgroundColor: C.blue, borderRadius: 12,
-    paddingVertical: 14, alignItems: "center",
+    flex: 1, backgroundColor: C.blue, borderRadius: s(12),
+    paddingVertical: s(14), alignItems: "center",
     shadowColor: C.blue, shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3, shadowRadius: 6, elevation: 3,
   },
-  modalBtnSubmitText: { fontSize: 15, fontWeight: "700", color: "#FFF" },
+  modalBtnSubmitText: { fontSize: fs(15), fontWeight: "700", color: "#FFF" },
 
   // Payment Method & Proof
-  paymentMethodRow: { flexDirection: "row", gap: 12, marginBottom: 16 },
+  paymentMethodRow: { flexDirection: "row", gap: s(12), marginBottom: 16 },
   paymentMethodBtn: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 8, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: C.cardBorder,
+    gap: 8, paddingVertical: s(14), borderRadius: s(12), borderWidth: 1, borderColor: C.cardBorder,
   },
-  paymentMethodIcon: { width: 18, height: 18 },
-  paymentMethodText: { fontSize: 14, fontWeight: "600", color: C.textDark },
+  paymentMethodIcon: { width: s(18), height: 18 },
+  paymentMethodText: { fontSize: fs(14), fontWeight: "600", color: C.textDark },
 
   gatewayBox: {
-    backgroundColor: "#F8F9FB", borderRadius: 12, padding: 16, marginBottom: 20,
+    backgroundColor: C.inputBg, borderRadius: s(12), padding: s(16), marginBottom: s(20),
     borderWidth: 1, borderColor: C.cardBorder,
   },
   gatewayHeader: {
-    flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12,
-    paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "#E8ECF0",
+    flexDirection: "row", alignItems: "center", gap: 8, marginBottom: s(12),
+    paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: C.cardBorder,
   },
-  gatewayLogo: { width: 20, height: 20 },
-  gatewayTitle: { fontSize: 14, fontWeight: "700", color: C.textDark },
+  gatewayLogo: { width: s(20), height: 20 },
+  gatewayTitle: { fontSize: fs(14), fontWeight: "700", color: C.textDark },
   gatewayRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
-  gatewayLabel: { fontSize: 13, color: C.textMuted, fontWeight: "500" },
-  gatewayValue: { fontSize: 13, color: C.textDark, fontWeight: "700" },
-  gatewayNote: { fontSize: 11, color: C.textMuted, fontStyle: "italic", marginTop: 8, textAlign: "center" },
+  gatewayLabel: { fontSize: fs(13), color: C.textMuted, fontWeight: "500" },
+  gatewayValue: { fontSize: fs(13), color: C.textDark, fontWeight: "700" },
+  gatewayNote: { fontSize: fs(11), color: C.textMuted, fontStyle: "italic", marginTop: 8, textAlign: "center" },
 
   proofUploadBox: {
-    borderWidth: 2, borderColor: "#D1D5DB", borderStyle: "dashed", borderRadius: 14,
-    padding: 24, alignItems: "center", marginBottom: 18, backgroundColor: "rgba(0,0,0,0.015)",
+    borderWidth: 2, borderColor: "#D1D5DB", borderStyle: "dashed", borderRadius: s(14),
+    padding: s(24), alignItems: "center", marginBottom: 18, backgroundColor: "rgba(0,0,0,0.015)",
   },
   proofUploadIconImg: { width: 32, height: 32, tintColor: C.textMuted, marginBottom: 10 },
-  proofUploadTitle: { fontSize: 14, fontWeight: "700", color: C.textDark, marginBottom: 4 },
-  proofUploadHint: { fontSize: 12, color: C.textMuted, marginBottom: 14 },
+  proofUploadTitle: { fontSize: fs(14), fontWeight: "700", color: C.textDark, marginBottom: 4 },
+  proofUploadHint: { fontSize: fs(12), color: C.textMuted, marginBottom: 14 },
   proofBtnRow: { flexDirection: "row", gap: 10 },
   proofBtn: {
-    backgroundColor: C.blueLight, paddingHorizontal: 16, paddingVertical: 10,
-    borderRadius: 10, borderWidth: 1, borderColor: C.blue,
+    backgroundColor: C.blueLight, paddingHorizontal: s(16), paddingVertical: s(10),
+    borderRadius: s(10), borderWidth: 1, borderColor: C.blue,
   },
   proofBtnInner: { flexDirection: "row", alignItems: "center", gap: 6 },
   proofBtnIcon: { width: 16, height: 16, tintColor: C.blue },
-  proofBtnText: { fontSize: 13, fontWeight: "700", color: C.blue },
+  proofBtnText: { fontSize: fs(13), fontWeight: "700", color: C.blue },
   proofPreviewContainer: {
-    position: "relative", marginBottom: 18, borderRadius: 14, overflow: "hidden",
+    position: "relative", marginBottom: 18, borderRadius: s(14), overflow: "hidden",
     borderWidth: 1, borderColor: C.cardBorder,
   },
   proofPreview: { width: "100%", height: 200, borderRadius: 14 },
   proofRemoveBtn: {
-    position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: 14,
+    position: "absolute", top: 8, right: 8, width: 28, height: 28, borderRadius: s(14),
     backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center",
   },
-  proofRemoveText: { color: "#FFF", fontSize: 14, fontWeight: "700" },
+  proofRemoveText: { color: "#FFF", fontSize: fs(14), fontWeight: "700" },
   proofAttachedBadge: {
     position: "absolute", bottom: 8, left: 8, backgroundColor: "rgba(52,199,89,0.9)",
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: s(8),
   },
-  proofAttachedText: { fontSize: 11, color: "#FFF", fontWeight: "700" },
+  proofAttachedText: { fontSize: fs(11), color: "#FFF", fontWeight: "700" },
 
   // --- NEW SLEEK UI STYLES ---
   headerDepositBtn: {
-    backgroundColor: C.navBg, paddingHorizontal: 16, paddingVertical: 10,
-    borderRadius: 8, marginTop: 6,
+    backgroundColor: C.navBg, paddingHorizontal: s(16), paddingVertical: s(10),
+    borderRadius: s(8), marginTop: 6,
   },
-  headerDepositBtnText: { color: "#FFF", fontSize: 13, fontWeight: "700" },
+  headerDepositBtnText: { color: "#FFF", fontSize: fs(13), fontWeight: "700" },
 
   puacAlertBox: {
-    marginHorizontal: 18, marginTop: 18, marginBottom: 16, 
-    padding: 16, borderRadius: 12, borderWidth: 1, 
+    marginHorizontal: s(18), marginTop: 18, marginBottom: s(16), 
+    padding: s(16), borderRadius: s(12), borderWidth: 1, 
     borderColor: "rgba(46,107,240,0.15)", backgroundColor: "rgba(46,107,240,0.04)"
   },
-  puacAlertText: { fontSize: 13, color: C.textDark, lineHeight: 20 },
+  puacAlertText: { fontSize: fs(13), color: C.textDark, lineHeight: 20 },
 
   statCardGrid: {
-    width: "48%", borderRadius: 14, padding: 12, borderWidth: 1,
+    width: "48%", borderRadius: s(14), padding: 12, borderWidth: 1,
     shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.04, shadowRadius: 10, elevation: 1
   },
   statHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  sectionRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginHorizontal: 18, marginTop: 24, marginBottom: 12 },
+  sectionRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginHorizontal: s(18), marginTop: 24, marginBottom: 12 },
   
-  goalsContainer: { marginHorizontal: 18, borderRadius: 16, borderWidth: 1, borderColor: "#E8ECF0", overflow: "hidden" },
+  goalsContainer: { marginHorizontal: s(18), borderRadius: s(16), borderWidth: 1, borderColor: C.cardBorder, overflow: "hidden" },
   sleekGoalItem: { padding: 18 },
   sleekGoalHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 10 },
-  sleekGoalName: { fontSize: 15, fontWeight: "700", marginBottom: 2 },
+  sleekGoalName: { fontSize: fs(15), fontWeight: "700", marginBottom: 2 },
   sleekGoalSub: { fontSize: 11 },
-  sleekGoalSavedText: { fontSize: 14, fontWeight: "700", marginBottom: 2 },
+  sleekGoalSavedText: { fontSize: fs(14), fontWeight: "700", marginBottom: 2 },
   sleekProgressBarRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  sleekProgressBg: { flex: 1, height: 4, backgroundColor: "#E8ECF0", borderRadius: 2, overflow: "hidden" },
+  sleekProgressBg: { flex: 1, height: s(4), backgroundColor: C.cardBorder, borderRadius: 2, overflow: "hidden" },
   sleekProgressFill: { height: "100%", backgroundColor: C.gold, borderRadius: 2 },
-  sleekProgressPercentText: { fontSize: 11, color: C.textDark, fontWeight: "600", width: 30, textAlign: "right" },
+  sleekProgressPercentText: { fontSize: fs(11), color: C.textDark, fontWeight: "600", width: 30, textAlign: "right" },
 
-  loanableBannerBlock: { marginHorizontal: 18, marginTop: 18, backgroundColor: "#EEF8EE", borderRadius: 12, padding: 16, borderWidth: 1, borderColor: "rgba(52,199,89,0.2)" },
+  loanableBannerBlock: { marginHorizontal: s(18), marginTop: 18, backgroundColor: "#EEF8EE", borderRadius: s(12), padding: s(16), borderWidth: 1, borderColor: "rgba(52,199,89,0.2)" },
   loanableBannerHeader: { marginBottom: 12 },
-  loanableBannerTitle: { fontSize: 14, fontWeight: "700", color: "#2E5C3B", marginBottom: 2 },
-  loanableBannerSub: { fontSize: 12, color: "#4B7E58" },
-  loanableBadgeItem: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(52,199,89,0.08)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
-  loanableBadgeLabel: { fontSize: 12, fontWeight: "600", color: "#2E5C3B", flex: 0.8 },
-  loanableBadgeSeparator: { fontSize: 12, color: "rgba(46,92,59,0.3)", marginHorizontal: 8 },
-  loanableBadgeValue: { fontSize: 12, fontWeight: "700", color: "#164121", flex: 1 },
+  loanableBannerTitle: { fontSize: fs(14), fontWeight: "700", color: "#2E5C3B", marginBottom: 2 },
+  loanableBannerSub: { fontSize: fs(12), color: "#4B7E58" },
+  loanableBadgeItem: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(52,199,89,0.08)", paddingHorizontal: s(12), paddingVertical: 6, borderRadius: 6 },
+  loanableBadgeLabel: { fontSize: fs(12), fontWeight: "600", color: "#2E5C3B", flex: 0.8 },
+  loanableBadgeSeparator: { fontSize: fs(12), color: "rgba(46,92,59,0.3)", marginHorizontal: 8 },
+  loanableBadgeValue: { fontSize: fs(12), fontWeight: "700", color: "#164121", flex: 1 },
 
   sleekHistoryItem: { flexDirection: "row", alignItems: "center", padding: 16 },
-  sleekHistoryIconBox: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(52,199,89,0.1)", alignItems: "center", justifyContent: "center" },
-  sleekHistoryTitle: { fontSize: 13, fontWeight: "600" },
+  sleekHistoryIconBox: { width: s(36), height: s(36), borderRadius: s(18), backgroundColor: "rgba(52,199,89,0.1)", alignItems: "center", justifyContent: "center" },
+  sleekHistoryTitle: { fontSize: fs(13), fontWeight: "600" },
   sleekHistoryDate: { fontSize: 11 },
-  sleekValidatedBadge: { backgroundColor: "rgba(52,199,89,0.15)", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 },
+  sleekValidatedBadge: { backgroundColor: "rgba(52,199,89,0.15)", paddingHorizontal: 6, paddingVertical: 2, borderRadius: s(4), marginLeft: 8 },
   sleekValidatedText: { fontSize: 9, color: C.green, fontWeight: "800" },
 
   // --- NEW MODAL STYLES ---
   modalHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  modalCloseIconBtn: { padding: 4, backgroundColor: "#F0F2F5", borderRadius: 16, width: 32, height: 32, alignItems: "center", justifyContent: "center" },
-  modalCloseIconText: { fontSize: 16, color: "#6B7FA3", fontWeight: "600" },
-  customLabel: { fontSize: 11, fontWeight: "700", color: "#6B7FA3", marginBottom: 8, letterSpacing: 0.5 },
-  dropdownSelectBox: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 1, borderColor: "#CBD5E1", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12 },
-  dropdownSelectedText: { fontSize: 14, color: C.textDark },
-  dropdownOptionsContainer: { position: "absolute", top: 50, left: 0, right: 0, backgroundColor: "#FFF", borderRadius: 10, borderWidth: 1, borderColor: "#CBD5E1", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, elevation: 4 },
-  dropdownOption: { paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#F0F2F5" },
-  dropdownOptionText: { fontSize: 14, color: C.textDark },
-  amountInputOuter: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "#CBD5E1", borderRadius: 10, paddingHorizontal: 14, height: 48 },
-  amountInputPrefix: { fontSize: 16, color: "#6B7FA3", marginRight: 8, fontWeight: "600" },
-  amountInputInner: { flex: 1, fontSize: 16, color: C.textDark },
-  quickPillsRow: { flexDirection: "row", gap: 8, marginTop: 10, flexWrap: "wrap" },
-  quickPill: { backgroundColor: "#F0F2F5", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 },
-  quickPillText: { fontSize: 13, color: "#475569", fontWeight: "600" },
-  radioMethodRow: { flexDirection: "row", gap: 10 },
-  radioMethodBox: { flex: 1, flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "#CBD5E1", borderRadius: 10, padding: 14, backgroundColor: "#FFF" },
+  modalCloseIconBtn: { padding: 4, backgroundColor: C.secondaryBtnBg, borderRadius: s(16), width: 32, height: 32, alignItems: "center", justifyContent: "center" },
+  modalCloseIconText: { fontSize: fs(16), color: C.textMuted, fontWeight: "600" },
+  customLabel: { fontSize: fs(11), fontWeight: "700", color: C.textMuted, marginBottom: s(8), letterSpacing: 0.5 },
+  dropdownSelectBox: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 1, borderColor: C.cardBorder, borderRadius: s(10), paddingHorizontal: s(14), paddingVertical: 12 },
+  dropdownSelectedText: { fontSize: fs(14), color: C.textDark },
+  dropdownOptionsContainer: { position: "absolute", top: 50, left: 0, right: 0, backgroundColor: C.cardBg, borderRadius: s(10), borderWidth: 1, borderColor: C.cardBorder, shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, elevation: 4 },
+  dropdownOption: { paddingHorizontal: s(14), paddingVertical: s(12), borderBottomWidth: 1, borderBottomColor: C.cardBorder },
+  dropdownOptionText: { fontSize: fs(14), color: C.textDark },
+  amountInputOuter: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: C.cardBorder, borderRadius: s(10), paddingHorizontal: s(14), height: 48 },
+  amountInputPrefix: { fontSize: fs(16), color: C.textMuted, marginRight: 8, fontWeight: "600" },
+  amountInputInner: { flex: 1, fontSize: fs(16), color: C.textDark },
+  quickPillsRow: { flexDirection: "row", gap: s(8), marginTop: 10 },
+  quickPill: { flex: 1, backgroundColor: C.secondaryBtnBg, paddingVertical: s(8), borderRadius: s(16), alignItems: "center", justifyContent: "center" },
+  quickPillText: { fontSize: fs(12), color: C.textMuted, fontWeight: "600" },
+  radioMethodRow: { flexDirection: "row", gap: s(6) },
+  radioMethodBox: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: C.cardBorder, borderRadius: s(10), paddingHorizontal: s(6), paddingVertical: s(12), backgroundColor: C.cardBg },
   radioMethodBoxActive: { borderColor: C.navBg, backgroundColor: "rgba(13,31,69,0.06)" },
-  radioOuter: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: "#CBD5E1", marginRight: 10, alignItems: "center", justifyContent: "center" },
+  radioOuter: { width: s(16), height: s(16), borderRadius: s(8), borderWidth: 2, borderColor: C.cardBorder, marginRight: s(5), alignItems: "center", justifyContent: "center" },
   radioOuterActive: { borderColor: C.navBg },
-  radioInner: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.navBg },
-  radioMethodText: { fontSize: 14, color: C.textDark, fontWeight: "500" },
-  noteInputBox: { borderWidth: 1, borderColor: "#CBD5E1", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, color: C.textDark },
-  uploadDashedBox: { borderWidth: 1, borderStyle: "dashed", borderColor: "#CBD5E1", borderRadius: 10, alignItems: "center", justifyContent: "center", paddingVertical: 24, paddingHorizontal: 20 },
-  uploadDashedIcon: { width: 24, height: 24, tintColor: "#6B7FA3", marginBottom: 8 },
-  uploadDashedText: { fontSize: 13, color: "#6B7FA3", textAlign: "center" },
-  depositFooterBtns: { flexDirection: "row", gap: 12, padding: 24, borderTopWidth: 1, borderTopColor: "#E8ECF0", marginTop: 20, backgroundColor: "#FFF", borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
-  depositCancelBtn: { flex: 0.4, backgroundColor: "#F0F2F5", paddingVertical: 14, borderRadius: 10, alignItems: "center" },
-  depositCancelText: { fontSize: 14, color: C.textDark, fontWeight: "700" },
-  depositConfirmBtn: { flex: 0.6, backgroundColor: "#1E3A8A", paddingVertical: 14, borderRadius: 10, alignItems: "center" },
-  depositConfirmText: { fontSize: 14, color: "#FFF", fontWeight: "700" }
+  radioInner: { width: s(7), height: s(7), borderRadius: s(3.5), backgroundColor: C.navBg },
+  radioMethodText: { flex: 1, fontSize: fs(12), color: C.textDark, fontWeight: "600", textAlign: "left" },
+  noteInputBox: { borderWidth: 1, borderColor: C.cardBorder, borderRadius: s(10), paddingHorizontal: s(14), paddingVertical: s(12), fontSize: fs(14), color: C.textDark },
+  uploadDashedBox: { borderWidth: 1, borderStyle: "dashed", borderColor: C.cardBorder, borderRadius: s(10), alignItems: "center", justifyContent: "center", paddingVertical: 24, paddingHorizontal: 20 },
+  uploadDashedIcon: { width: s(24), height: s(24), tintColor: C.textMuted, marginBottom: 8 },
+  uploadDashedText: { fontSize: fs(13), color: C.textMuted, textAlign: "center" },
+  depositFooterBtns: { flexDirection: "row", gap: s(12), padding: s(24), borderTopWidth: 1, borderTopColor: C.cardBorder, marginTop: s(20), backgroundColor: C.cardBg, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
+  depositCancelBtn: { flex: 0.4, backgroundColor: C.secondaryBtnBg, paddingVertical: s(14), borderRadius: s(10), alignItems: "center" },
+  depositCancelText: { fontSize: fs(14), color: C.textDark, fontWeight: "700" },
+  depositConfirmBtn: { flex: 0.6, backgroundColor: "#1E3A8A", paddingVertical: s(14), borderRadius: s(10), alignItems: "center" },
+  depositConfirmText: { fontSize: fs(14), color: "#FFF", fontWeight: "700" }
 });
 
 

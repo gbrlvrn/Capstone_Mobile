@@ -14,6 +14,9 @@ import { useTheme } from '../components/ThemeContext';
 import { useFonts, Raleway_300Light, Raleway_400Regular, Raleway_500Medium, Raleway_700Bold, Raleway_800ExtraBold } from '@expo-google-fonts/raleway';
 
 const { width, height } = Dimensions.get('window');
+const _WR = Math.min(width / 375, 1.3);
+const s = (v) => Math.round(v * _WR);
+const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
 
 const LOGO = require('../assets/puac_logo.png');
 
@@ -142,28 +145,28 @@ const getStyles = () => StyleSheet.create({
   },
   glowTopLeft: {
     position: 'absolute', top: -80, left: -80,
-    width: 220, height: 220, borderRadius: 110,
+    width: s(220), height: s(220), borderRadius: s(110),
     backgroundColor: 'rgba(255,255,255,0.03)',
   },
   glowBottomRight: {
     position: 'absolute', bottom: -60, right: -60,
-    width: 180, height: 180, borderRadius: 90,
+    width: s(180), height: s(180), borderRadius: s(90),
     backgroundColor: 'rgba(240,192,64,0.04)',
   },
   heroCenter: {
     alignItems: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: s(24),
   },
 
-  /* ── Logo icon — white circle ── */
+  /* ── Logo icon ── */
   logoWrap: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: s(90),
+    height: s(90),
+    borderRadius: s(45),
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 28,
+    marginBottom: s(28),
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
@@ -172,25 +175,25 @@ const getStyles = () => StyleSheet.create({
     elevation: 8,
   },
   logo: {
-    width: 74,
-    height: 74,
+    width: s(74),
+    height: s(74),
   },
 
-  /* ── Tagline row: gold rule + "ALL HONOUR TO GOD" ── */
+  /* ── Tagline row ── */
   taglineRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 10,
+    gap: s(10),
+    marginBottom: s(10),
   },
   taglineRule: {
-    width: 28,
+    width: s(28),
     height: 2,
     borderRadius: 1,
     backgroundColor: '#F0C040',
   },
   taglineText: {
-    fontSize: 10,
+    fontSize: fs(10),
     fontFamily: 'Raleway_500Medium',
     color: '#F0C040',
     letterSpacing: 2.5,
@@ -201,37 +204,37 @@ const getStyles = () => StyleSheet.create({
   wordmarkRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    marginBottom: 14,
+    marginBottom: s(14),
   },
   wordmarkWhite: {
-    fontSize: 52,
+    fontSize: fs(52),
     fontWeight: '800',
     fontFamily: 'Raleway_700Bold',
     color: '#FFFFFF',
     letterSpacing: -1,
   },
   wordmarkGold: {
-    fontSize: 52,
+    fontSize: fs(52),
     fontWeight: '800',
     fontFamily: 'Raleway_700Bold',
     color: '#D4A843',
     letterSpacing: -1,
   },
 
-  /* ── Org row: gold rule + church name ── */
+  /* ── Org row ── */
   orgRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: s(10),
   },
   orgRule: {
-    width: 28,
+    width: s(28),
     height: 2,
     borderRadius: 1,
     backgroundColor: '#F0C040',
   },
   heroOrg: {
-    fontSize: 13,
+    fontSize: fs(13),
     fontFamily: 'Raleway_400Regular',
     color: 'rgba(255,255,255,0.75)',
     letterSpacing: 0.4,
@@ -240,11 +243,11 @@ const getStyles = () => StyleSheet.create({
   /* ── BOTTOM CARD ── */
   card: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 32,
+    borderTopLeftRadius: s(32),
+    borderTopRightRadius: s(32),
+    paddingHorizontal: s(24),
+    paddingTop: s(16),
+    paddingBottom: s(32),
     shadowColor: '#0D1F45',
     shadowOffset: { width: 0, height: -8 },
     shadowOpacity: 0.18,
@@ -252,35 +255,35 @@ const getStyles = () => StyleSheet.create({
     elevation: 20,
   },
   cardHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
+    width: s(40),
+    height: s(4),
+    borderRadius: s(2),
     backgroundColor: '#E2E8F0',
     alignSelf: 'center',
-    marginBottom: 20,
+    marginBottom: s(20),
   },
   cardTitle: {
-    fontSize: 22,
+    fontSize: fs(22),
     fontWeight: '800',
     color: '#0F172A',
-    marginBottom: 6,
+    marginBottom: s(6),
     letterSpacing: -0.3,
   },
   cardSubtitle: {
-    fontSize: 14,
+    fontSize: fs(14),
     color: '#64748B',
-    lineHeight: 21,
-    marginBottom: 22,
+    lineHeight: fs(21),
+    marginBottom: s(22),
     fontWeight: '400',
   },
 
   /* ── BUTTONS ── */
   primaryBtn: {
     backgroundColor: '#0D1F45',
-    paddingVertical: 17,
-    borderRadius: 14,
+    paddingVertical: s(16),
+    borderRadius: s(14),
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: s(12),
     shadowColor: '#0D1F45',
     shadowOffset: { width: 0, height: 5 },
     shadowOpacity: 0.28,
@@ -289,27 +292,27 @@ const getStyles = () => StyleSheet.create({
   },
   primaryBtnText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: fs(16),
     fontWeight: '700',
     letterSpacing: 0.3,
   },
   secondaryBtn: {
     backgroundColor: '#F1F5F9',
-    paddingVertical: 16,
-    borderRadius: 14,
+    paddingVertical: s(15),
+    borderRadius: s(14),
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: s(16),
     borderWidth: 1.5,
     borderColor: '#E2E8F0',
   },
   secondaryBtnText: {
     color: '#334155',
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: '600',
   },
   footerNote: {
     textAlign: 'center',
-    fontSize: 11,
+    fontSize: fs(11),
     color: '#CBD5E1',
     fontWeight: '500',
     letterSpacing: 0.4,
@@ -326,8 +329,8 @@ const getStyles = () => StyleSheet.create({
     top: '30%',
     width: width * 0.84,
     backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 28,
+    borderRadius: s(24),
+    padding: s(28),
     alignItems: 'center',
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 16 },
@@ -336,43 +339,44 @@ const getStyles = () => StyleSheet.create({
     elevation: 20,
   },
   modalIconBox: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
+    width: s(64),
+    height: s(64),
+    borderRadius: s(20),
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 18,
+    marginBottom: s(18),
   },
   modalIcon: {
-    width: 28,
-    height: 28,
+    width: s(28),
+    height: s(28),
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: fs(20),
     fontWeight: '800',
     color: '#0F172A',
-    marginBottom: 10,
+    marginBottom: s(10),
     textAlign: 'center',
     letterSpacing: -0.3,
   },
   modalDesc: {
-    fontSize: 14,
+    fontSize: fs(14),
     color: '#64748B',
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 24,
+    lineHeight: fs(22),
+    marginBottom: s(24),
     fontWeight: '400',
   },
   modalBtn: {
-    paddingVertical: 13,
-    paddingHorizontal: 40,
-    borderRadius: 100,
+    paddingVertical: s(13),
+    paddingHorizontal: s(40),
+    borderRadius: s(100),
     alignItems: 'center',
   },
   modalBtnText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: '700',
     letterSpacing: 0.3,
   },
 });
+

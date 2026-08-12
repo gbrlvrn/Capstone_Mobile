@@ -347,3 +347,39 @@ export async function resetPassword(req, res) {
     return res.status(500).json({ message: "Failed to reset password." });
   }
 }
+
+/**
+ * ✅ POST /api/auth/change-password
+ * Body: { currentPassword, newPassword } (requires authMiddleware)
+ */
+export async function changePassword(req, res) {
+  try {
+    const email = req.user?.email;
+    const currentPassword = (req.body.currentPassword || "").trim();
+    const newPassword = (req.body.newPassword || "").trim();
+
+    if (!email) return res.status(401).json({ message: "Unauthorized." });
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "Current and new password are required." });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ message: "New password must be at least 8 characters." });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: "Account not found." });
+
+    const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Current password is incorrect." });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await User.updateOne({ email }, { passwordHash });
+
+    return res.json({ message: "Password updated successfully." });
+  } catch (err) {
+    console.error("CHANGE PASSWORD ERROR:", err);
+    return res.status(500).json({ message: "Failed to update password." });
+  }
+}

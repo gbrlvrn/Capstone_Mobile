@@ -23,7 +23,15 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const TAB_WIDTH = SCREEN_WIDTH / 5;
 
 /**
- * MainLayout — shared wrapper with top bar, sidebar, tab bar, chatbot, and sign-out modal.
+ * MainLayout — Shared navigation wrapper layout blueprint.
+ *
+ * Capstone Architectural Note (Item #8):
+ * Originally designed to wrap screens with top bar, sidebar drawer, FloatingNavBar,
+ * draggable chatbot button, and sign-out confirmation. In the stabilized navigation
+ * architecture, leaf screens (Announcements, Savings, Profile, Settings) implement custom
+ * top back-navigation bars, while primary screens use direct layout composition to allow
+ * screen-level modal overlays without z-index collisions. MainLayout serves as the reference
+ * model for future centralized layout refactoring.
  *
  * Props:
  *  - activeTab: string (e.g. "Home", "Loans")
@@ -164,16 +172,16 @@ export default function MainLayout({
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
       {/* Top bar */}
       <View style={[styles.topBar, { backgroundColor: colors.navBg }]}>
-        <TouchableOpacity onPress={openSidebar} style={styles.hamburgerBtn} activeOpacity={0.6}>
+        <TouchableOpacity onPress={openSidebar} style={styles.hamburgerBtn} activeOpacity={0.6} accessibilityLabel="Open navigation menu" accessibilityRole="button">
           <View style={styles.hLine} />
           <View style={styles.hLine} />
           <View style={styles.hLine} />
         </TouchableOpacity>
 
-        <Text style={styles.topTitle}>FaithLy</Text>
+        <Text style={styles.topTitle}>IsangDiwa</Text>
 
         {showNotificationBell ? (
-          <TouchableOpacity onPress={handleNotificationPress} style={styles.notificationBtn} activeOpacity={0.6}>
+          <TouchableOpacity onPress={handleNotificationPress} style={styles.notificationBtn} activeOpacity={0.6} accessibilityLabel="View notifications" accessibilityRole="button">
             <Image source={ICONS.notification} style={styles.notificationIcon} resizeMode="contain" />
             {notificationCount > 0 && <View style={styles.notificationDot} />}
           </TouchableOpacity>
@@ -251,7 +259,7 @@ export default function MainLayout({
         <View style={styles.sidebarHeader}>
           <Image source={LOGO} style={styles.sidebarLogo} resizeMode="contain" />
           <View>
-            <Text style={styles.sidebarTitle}>FaithLy</Text>
+            <Text style={styles.sidebarTitle}>IsangDiwa</Text>
           </View>
         </View>
 
@@ -268,6 +276,8 @@ export default function MainLayout({
                   navWithEmail(item.key);
                 }}
                 activeOpacity={0.6}
+                accessibilityLabel={`Go to ${item.key}`}
+                accessibilityRole="menuitem"
               >
                 <Image
                   source={item.icon}
@@ -294,7 +304,7 @@ export default function MainLayout({
               </Text>
             </View>
           </View>
-          <TouchableOpacity style={styles.signOutRow} activeOpacity={0.6} onPress={() => setShowSignOutConfirm(true)}>
+          <TouchableOpacity style={styles.signOutRow} activeOpacity={0.6} onPress={() => setShowSignOutConfirm(true)} accessibilityLabel="Sign out of your account" accessibilityRole="button">
             <Image source={ICONS.signout} style={styles.signOutIcon} resizeMode="contain" />
             <Text style={styles.signOutText}>Sign Out</Text>
           </TouchableOpacity>
@@ -367,7 +377,8 @@ const getStyles = (C) => StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: "rgba(0,0,0,0.45)",
-    zIndex: 10,
+    zIndex: 998,
+    elevation: 998,
   },
 
   sidebar: {
@@ -377,7 +388,8 @@ const getStyles = (C) => StyleSheet.create({
     bottom: 0,
     width: 260,
     backgroundColor: C.sidebarBg,
-    zIndex: 11,
+    zIndex: 1000,
+    elevation: 1000,
     flexDirection: "column",
   },
   sidebarHeader: {

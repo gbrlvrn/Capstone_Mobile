@@ -16,10 +16,11 @@ import {
 } from "react-native";
 import ChatbotModal from "./ChatbotModal";
 import DraggableChatButton from "../components/DraggableChatButton";
+import FloatingNavBar from "../components/FloatingNavBar";
 import { SkeletonMemberCard, SkeletonCard, SkeletonQuickAction } from "../components/SkeletonLoader";
 import { useToast } from "../components/ToastContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getVerificationStatus, getProfile, getAnnouncements, getDonations, getSavingsData } from "../services/AuthService";
+import { getVerificationStatus, getProfile, getAnnouncements, getDonations, getSavingsData, getAttendanceHistory } from "../services/AuthService";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTheme } from "../components/ThemeContext";
 import OfflineBanner from "../components/OfflineBanner";
@@ -34,6 +35,20 @@ const getImageUrl = (url) => {
 
 const LOGO = require("../assets/puac_logo.png");
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
+const s = (v) => Math.round(v * _WR);
+const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
+const SIDEBAR_WIDTH = s(260);
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+];
+const MONTH_SHORT_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+];
+const AVAILABLE_YEARS = [2026, 2025, 2024, 2023];
 
 const ICONS = {
   document: require("../assets/icons/document.png"),
@@ -208,62 +223,6 @@ export default function HomeScreen({ navigation, route }) {
 
   const donationsFrontInt = donationsFlipAnim.interpolate({ inputRange: [0, 180], outputRange: ["0deg", "180deg"] });
   const donationsBackInt = donationsFlipAnim.interpolate({ inputRange: [0, 180], outputRange: ["180deg", "360deg"] });
-
-  useEffect(() => {
-    let mounted = true;
-
-    (async () => {
-      try {
-        const paramEmail = route?.params?.email;
-        if (paramEmail) {
-          if (mounted) setUserEmail(paramEmail);
-
-          // Save for other screens, and also read cached role/name
-          const old = await AsyncStorage.getItem("faithly_user");
-          const parsed = old ? JSON.parse(old) : {};
-          await AsyncStorage.setItem(
-            "faithly_user",
-            JSON.stringify({ ...parsed, email: paramEmail }),
-          );
-
-          // Load cached role + name so the UI renders correctly immediately
-          if (mounted) {
-            if (parsed.role) setUserRole(parsed.role);
-            if (parsed.position) setUserPosition(parsed.position);
-            if (parsed.firstName || parsed.lastName) {
-              setUserName(`${parsed.firstName || ''} ${parsed.lastName || ''}`.trim());
-            }
-          }
-          return;
-        }
-
-        // Load saved email if params missing
-        const saved = await AsyncStorage.getItem("faithly_user");
-
-        if (saved) {
-          const parsed = JSON.parse(saved);
-
-          if (mounted) {
-            setUserEmail(parsed.email || "");
-            if (parsed.firstName || parsed.lastName) {
-              setUserName(`${parsed.firstName || ''} ${parsed.lastName || ''}`.trim());
-            }
-            if (parsed.role) setUserRole(parsed.role);
-            if (parsed.position) setUserPosition(parsed.position);
-          }
-        }
-      } catch (err) {
-        console.log("Email Load Error:", err);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, [route?.params?.email]);
-
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("Home");
   const [chatbotOpen, setChatbotOpen] = useState(false);
@@ -281,8 +240,91 @@ export default function HomeScreen({ navigation, route }) {
   const [totalDonated, setTotalDonated] = useState(0);
   const [attendanceCount, setAttendanceCount] = useState(0);
   const [totalSavings, setTotalSavings] = useState(0);
-  const slideX = useRef(new Animated.Value(-260)).current;
+  const [activityFilter, setActivityFilter] = useState("month"); // "month" | "year"
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth()); // 0..11
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear()); // e.g. 2026
+  const [timePickerVisible, setTimePickerVisible] = useState(false);
+  const [rawAttendance, setRawAttendance] = useState([]);
+  const [rawDonations, setRawDonations] = useState([]);
+  const slideX = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const indicatorPosition = useRef(new Animated.Value(0)).current;
+
+  const displayAttendanceCount = useMemo(() => {
+    const now = new Date();
+    const curMonth = now.getMonth();
+    const curYear = now.getFullYear();
+
+    // If selected timeframe is in the future relative to today, strictly return 0
+    if (selectedYear > curYear || (selectedYear === curYear && activityFilter === "month" && selectedMonth > curMonth)) {
+      return 0;
+    }
+
+    if (!Array.isArray(rawAttendance) || rawAttendance.length === 0) {
+      const isCurrentMonthYear = activityFilter === "month" && selectedMonth === curMonth && selectedYear === curYear;
+      const isCurrentYear = activityFilter === "year" && selectedYear === curYear;
+      return (isCurrentMonthYear || isCurrentYear) ? attendanceCount : 0;
+    }
+
+    const filtered = rawAttendance.filter((item) => {
+      const itemDateStr = item.date || item.createdAt || item.timestamp || item.checkInTime || item.created_at;
+      if (!itemDateStr) return false;
+      const d = new Date(itemDateStr);
+      if (isNaN(d.getTime())) return false;
+      if (activityFilter === "month") {
+        return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear;
+      }
+      return d.getFullYear() === selectedYear;
+    });
+
+    if (filtered.length > 0) return filtered.length;
+
+    const isCurrentMonthYear = activityFilter === "month" && selectedMonth === curMonth && selectedYear === curYear;
+    const isCurrentYear = activityFilter === "year" && selectedYear === curYear;
+    return (isCurrentMonthYear || isCurrentYear) ? attendanceCount : 0;
+  }, [rawAttendance, attendanceCount, activityFilter, selectedMonth, selectedYear]);
+
+  const displayDonatedAmount = useMemo(() => {
+    const now = new Date();
+    const curMonth = now.getMonth();
+    const curYear = now.getFullYear();
+
+    // If selected timeframe is in the future relative to today, strictly return 0
+    if (selectedYear > curYear || (selectedYear === curYear && activityFilter === "month" && selectedMonth > curMonth)) {
+      return 0;
+    }
+
+    if (!Array.isArray(rawDonations) || rawDonations.length === 0) {
+      const isCurrentMonthYear = activityFilter === "month" && selectedMonth === curMonth && selectedYear === curYear;
+      const isCurrentYear = activityFilter === "year" && selectedYear === curYear;
+      return (isCurrentMonthYear || isCurrentYear) ? totalDonated : 0;
+    }
+
+    let sum = 0;
+    let matchCount = 0;
+    rawDonations.forEach((item) => {
+      const itemDateStr = item.date || item.createdAt || item.timestamp || item.created_at;
+      if (!itemDateStr) return;
+      const d = new Date(itemDateStr);
+      if (isNaN(d.getTime())) return;
+
+      const isMatch = activityFilter === "month"
+        ? (d.getMonth() === selectedMonth && d.getFullYear() === selectedYear)
+        : (d.getFullYear() === selectedYear);
+
+      if (isMatch) {
+        const val = parseFloat(String(item.amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
+        sum += val;
+        matchCount++;
+      }
+    });
+
+    if (matchCount === 0) {
+      const isCurrentMonthYear = activityFilter === "month" && selectedMonth === curMonth && selectedYear === curYear;
+      const isCurrentYear = activityFilter === "year" && selectedYear === curYear;
+      return (isCurrentMonthYear || isCurrentYear) ? totalDonated : 0;
+    }
+    return sum;
+  }, [rawDonations, totalDonated, activityFilter, selectedMonth, selectedYear]);
 
   // Staggered card entrance animations
   const cardAnims = useRef(
@@ -325,50 +367,110 @@ export default function HomeScreen({ navigation, route }) {
     }
   }, [loading, cardAnims, qaAnims]);
 
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      try {
+        const paramEmail = route?.params?.email;
+        if (paramEmail) {
+          if (mounted) setUserEmail(paramEmail);
+
+          const old = await AsyncStorage.getItem("faithly_user");
+          const parsed = old ? JSON.parse(old) : {};
+          await AsyncStorage.setItem(
+            "faithly_user",
+            JSON.stringify({ ...parsed, email: paramEmail }),
+          );
+
+          if (mounted) {
+            if (parsed.role) setUserRole(parsed.role);
+            if (parsed.position) setUserPosition(parsed.position);
+            const cachedName = (parsed.firstName || parsed.lastName)
+              ? `${parsed.firstName || ''} ${parsed.lastName || ''}`.trim()
+              : parsed.fullName || parsed.name || "";
+            if (cachedName) setUserName(cachedName);
+          }
+          return;
+        }
+
+        const saved = await AsyncStorage.getItem("faithly_user");
+
+        if (saved) {
+          const parsed = JSON.parse(saved);
+
+          if (mounted) {
+            setUserEmail(parsed.email || "");
+            const cachedName = (parsed.firstName || parsed.lastName)
+              ? `${parsed.firstName || ''} ${parsed.lastName || ''}`.trim()
+              : parsed.fullName || parsed.name || "";
+            if (cachedName) setUserName(cachedName);
+            if (parsed.role) setUserRole(parsed.role);
+            if (parsed.position) setUserPosition(parsed.position);
+          }
+        }
+      } catch (err) {
+        console.log("Email Load Error:", err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [route?.params?.email]);
+
   // Re-fetch user name + role every time screen is focused
   useFocusEffect(
     useCallback(() => {
       if (!userEmail) return;
       (async () => {
         try {
-          // Run both calls in parallel — getProfile is the reliable name source
+          // Run both calls in parallel — getProfile is the primary name source
           const [profileResult, verifResult] = await Promise.allSettled([
             getProfile(),
-            getVerificationStatus(userEmail),
+            getVerificationStatus(true),
           ]);
 
           // ── Name: prefer getProfile (/api/me) ──────────────────────────
-          const profileUser = profileResult.status === "fulfilled" ? profileResult.value?.user : null;
-          if (profileUser?.firstName || profileUser?.lastName) {
-            setUserName(`${profileUser.firstName || ''} ${profileUser.lastName || ''}`.trim());
-          } else if (profileUser?.fullName) {
-            setUserName(profileUser.fullName);
+          const profileUser = profileResult.status === "fulfilled"
+            ? (profileResult.value?.user || profileResult.value)
+            : null;
+          
+          const verifData = verifResult.status === "fulfilled" ? verifResult.value : null;
+
+          const fetchedName = (profileUser?.firstName || profileUser?.lastName)
+            ? `${profileUser.firstName || ''} ${profileUser.lastName || ''}`.trim()
+            : profileUser?.fullName || profileUser?.name
+            || ((verifData?.firstName || verifData?.lastName)
+              ? `${verifData.firstName || ''} ${verifData.lastName || ''}`.trim()
+              : verifData?.fullName || verifData?.name);
+
+          if (fetchedName) {
+            setUserName(fetchedName);
           }
 
           // ── Role / Position: prefer verification status ─────────────────
-          const verifData = verifResult.status === "fulfilled" ? verifResult.value : null;
           if (verifData?.role) setUserRole(verifData.role);
           if (verifData?.position) setUserPosition(verifData.position);
-
-          // If verif had name but profile didn't, use verif name as fallback
-          if (!profileUser?.firstName && !profileUser?.lastName && !profileUser?.fullName) {
-            if (verifData?.firstName || verifData?.lastName) {
-              setUserName(`${verifData.firstName || ''} ${verifData.lastName || ''}`.trim());
-            } else if (verifData?.fullName) {
-              setUserName(verifData.fullName);
-            }
-          }
 
           // Cache everything for other screens / offline use
           const cached = await AsyncStorage.getItem("faithly_user");
           const parsed = cached ? JSON.parse(cached) : {};
+          
+          const updatedFirstName = profileUser?.firstName || verifData?.firstName || parsed.firstName || "";
+          const updatedLastName  = profileUser?.lastName  || verifData?.lastName  || parsed.lastName  || "";
+          const updatedFullName  = profileUser?.fullName  || verifData?.fullName  || fetchedName || parsed.fullName || "";
+
           await AsyncStorage.setItem("faithly_user", JSON.stringify({
             ...parsed,
+            email: userEmail,
             role: verifData?.role || profileUser?.role || parsed.role || "member",
             position: verifData?.position || profileUser?.position || parsed.position || "",
-            firstName: profileUser?.firstName || verifData?.firstName || parsed.firstName || "",
-            lastName: profileUser?.lastName || verifData?.lastName || parsed.lastName || "",
-            fullName: profileUser?.fullName || parsed.fullName || "",
+            firstName: updatedFirstName,
+            lastName: updatedLastName,
+            fullName: updatedFullName,
           }));
         } catch {
           // Full failure — fall back to cached data
@@ -378,11 +480,10 @@ export default function HomeScreen({ navigation, route }) {
               const parsed = JSON.parse(cached);
               if (parsed.role) setUserRole(parsed.role);
               if (parsed.position) setUserPosition(parsed.position);
-              if (parsed.firstName || parsed.lastName) {
-                setUserName(`${parsed.firstName || ''} ${parsed.lastName || ''}`.trim());
-              } else if (parsed.fullName) {
-                setUserName(parsed.fullName);
-              }
+              const cachedName = (parsed.firstName || parsed.lastName)
+                ? `${parsed.firstName || ''} ${parsed.lastName || ''}`.trim()
+                : parsed.fullName || parsed.name || "";
+              if (cachedName) setUserName(cachedName);
             }
           } catch {}
         }
@@ -487,16 +588,18 @@ export default function HomeScreen({ navigation, route }) {
             setNextPaymentDate("");
           }
 
-          // Donations + Savings in parallel (was sequential — this cuts load time in half)
-          const [donationResult, savingsResult] = await Promise.allSettled([
+          // Donations + Savings + Attendance in parallel (was sequential — this cuts load time in half)
+          const [donationResult, savingsResult, attendanceResult] = await Promise.allSettled([
             getDonations(),
             getSavingsData(),
+            getAttendanceHistory(1, 100),
           ]);
 
           // Process donations
           if (donationResult.status === "fulfilled") {
             const sd = donationResult.value;
             const donations = Array.isArray(sd) ? sd : (sd?.donations || []);
+            setRawDonations(donations);
             let total = 0;
             donations.forEach(d => {
               total += parseFloat(String(d.amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
@@ -508,11 +611,28 @@ export default function HomeScreen({ navigation, route }) {
             const savedDonations = await AsyncStorage.getItem(`faithly_donations_${userEmail}`);
             if (savedDonations) {
               const donations = JSON.parse(savedDonations);
+              setRawDonations(donations);
               let total = 0;
               donations.forEach(d => {
                 total += parseFloat(String(d.amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
               });
               setTotalDonated(total);
+            }
+          }
+
+          // Process attendance
+          if (attendanceResult && attendanceResult.status === "fulfilled") {
+            const att = attendanceResult.value;
+            const records = Array.isArray(att) ? att : (att?.records || att?.attendance || att?.data || []);
+            setRawAttendance(records);
+            setAttendanceCount(records.length);
+            await AsyncStorage.setItem(`faithly_attendance_${userEmail}`, JSON.stringify(records));
+          } else {
+            const savedAtt = await AsyncStorage.getItem(`faithly_attendance_${userEmail}`);
+            if (savedAtt) {
+              const records = JSON.parse(savedAtt);
+              setRawAttendance(records);
+              setAttendanceCount(records.length);
             }
           }
 
@@ -572,7 +692,7 @@ export default function HomeScreen({ navigation, route }) {
 
   const closeSidebar = useCallback(() => {
     Animated.timing(slideX, {
-      toValue: -260,
+      toValue: -SIDEBAR_WIDTH,
       duration: 250,
       useNativeDriver: true,
     }).start(() => setSidebarOpen(false));
@@ -690,7 +810,7 @@ export default function HomeScreen({ navigation, route }) {
           <View style={[styles.hLine, { backgroundColor: colors.hamburgerColor }]} />
         </TouchableOpacity>
 
-        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: 36, height: 36 }} resizeMode="contain" /></View>
+        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: s(36), height: 36, borderRadius: 18 }} resizeMode="cover" /></View>
 
         <TouchableOpacity
           onPress={handleNotificationPress}
@@ -746,7 +866,7 @@ export default function HomeScreen({ navigation, route }) {
                   />
                 )}
               </View>
-              <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 2 }}>
+              <Text style={{ fontSize: fs(13), color: colors.textMuted, marginTop: 2 }}>
                 {userRole === "officer" && userPosition ? userPosition : "Member"}
               </Text>
               {isEmailVisible && (
@@ -792,18 +912,18 @@ export default function HomeScreen({ navigation, route }) {
           {userRole === "officer" && (
             <>
               {/* Loan Status Card */}
-            <Animated.View style={{ height: 150, marginBottom: 4, width: "100%", opacity: cardAnims[0].opacity, transform: [{ translateY: cardAnims[0].translateY }] }}>
+            <Animated.View style={{ height: 150, marginBottom: s(4), width: "100%", opacity: cardAnims[0].opacity, transform: [{ translateY: cardAnims[0].translateY }] }}>
               {/* FRONT: PRIVACY STATE */}
               <Animated.View 
                 pointerEvents={isLoanHidden ? "none" : "auto"} 
                 style={[styles.loanHubCard, { position: "absolute", top: 0, left: 0, right: 0, height: "100%", backfaceVisibility: "hidden", backgroundColor: colors.cardBg, borderColor: "rgba(13,31,69,0.15)", borderWidth: 1, padding: 0, transform: [{ rotateY: frontInterpolate }], overflow: "hidden" }]}
               >
                 <TouchableOpacity activeOpacity={0.8} onPress={toggleLoanPrivacy} style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 16 }}>
-                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: "rgba(13,31,69,0.06)", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
-                    <Image source={ICONS.document} style={{ width: 24, height: 24, tintColor: C.blue }} resizeMode="contain" />
+                  <View style={{ width: s(48), height: s(48), borderRadius: s(24), backgroundColor: "rgba(13,31,69,0.06)", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                    <Image source={ICONS.document} style={{ width: s(24), height: s(24), tintColor: C.blue }} resizeMode="contain" />
                   </View>
-                  <Text style={{ fontSize: 16, fontWeight: "700", color: C.textDark, marginBottom: 4 }}> Loan Status Update</Text>
-                  <Text style={{ fontSize: 13, color: C.textMuted }}>Tap to reveal details</Text>
+                  <Text style={{ fontSize: fs(16), fontWeight: "700", color: C.textDark, marginBottom: 4 }}> Loan Status Update</Text>
+                  <Text style={{ fontSize: fs(13), color: C.textMuted }}>Tap to reveal details</Text>
                 </TouchableOpacity>
               </Animated.View>
 
@@ -814,7 +934,7 @@ export default function HomeScreen({ navigation, route }) {
               >
                 <TouchableOpacity activeOpacity={0.9} onPress={toggleLoanPrivacy} style={{ flex: 1, padding: 16 }}>
                   <View style={styles.loanHubHeader}>
-                    <Image source={ICONS.document} style={{ width: 18, height: 26, tintColor: "#FFF" }} resizeMode="contain" />
+                    <Image source={ICONS.document} style={{ width: s(18), height: s(26), tintColor: "#FFF" }} resizeMode="contain" />
                     <Text style={styles.loanHubTitle}>My Loan Status</Text>
                   </View>
                   <View style={styles.loanHubBody}>
@@ -847,7 +967,7 @@ export default function HomeScreen({ navigation, route }) {
                         })()}
                       </Text>
                       {nextPaymentDate && (
-                        <Text style={{ fontSize: 13, color: "rgba(255,255,255,0.7)" }}> | Status: <Text style={{ color: "#FFF", fontWeight: "700" }}>Pending</Text></Text>
+                        <Text style={{ fontSize: fs(13), color: "rgba(255,255,255,0.7)" }}> | Status: <Text style={{ color: "#FFF", fontWeight: "700" }}>Pending</Text></Text>
                       )}
                     </Text>
                   </View>
@@ -859,19 +979,19 @@ export default function HomeScreen({ navigation, route }) {
           )}
 
             {/* Savings Card — visible to ALL roles */}
-            <Animated.View style={{ height: 90, width: "100%", marginBottom: 14, opacity: cardAnims[2].opacity, transform: [{ translateY: cardAnims[2].translateY }] }}>
+            <Animated.View style={{ height: 90, width: "100%", marginBottom: s(14), opacity: cardAnims[2].opacity, transform: [{ translateY: cardAnims[2].translateY }] }}>
               {/* FRONT: PRIVACY STATE */}
               <Animated.View pointerEvents={isSavingsHidden ? "none" : "auto"} style={[styles.statCard, { position: "absolute", top: 0, left: 0, right: 0, height: "100%", width: "100%", padding: 0, backfaceVisibility: "hidden", transform: [{ rotateY: savingsFrontInt }] }]}>
-                <TouchableOpacity activeOpacity={0.8} onPress={toggleSavingsPrivacy} style={{ flex: 1, padding: 14, flexDirection: "row", alignItems: "center", justifyContent: "center" }}>
-                  <View style={[styles.statIconBg, { marginBottom: 0, marginRight: 12, backgroundColor: "rgba(52,199,89,0.1)" }]}>
+                <TouchableOpacity activeOpacity={0.8} onPress={toggleSavingsPrivacy} style={{ flex: 1, padding: s(14), flexDirection: "row", alignItems: "center", justifyContent: "center" }}>
+                  <View style={[styles.statIconBg, { marginBottom: 0, marginRight: s(12), backgroundColor: "rgba(52,199,89,0.1)" }]}>
                     <Image source={ICONS.wallet} style={[styles.statIcon, { tintColor: "#34C759" }]} resizeMode="contain" />
                   </View>
-                  <Text style={{ fontSize: 16, fontWeight: "700", color: colors.textDark }}>My Savings</Text>
+                  <Text style={{ fontSize: fs(16), fontWeight: "700", color: colors.textDark }}>My Savings</Text>
                 </TouchableOpacity>
               </Animated.View>
               {/* BACK: DATA STATE */}
               <Animated.View pointerEvents={!isSavingsHidden ? "none" : "auto"} style={[styles.statCard, { position: "absolute", top: 0, left: 0, right: 0, height: "100%", width: "100%", padding: 0, backfaceVisibility: "hidden", transform: [{ rotateY: savingsBackInt }] }]}>
-                <TouchableOpacity activeOpacity={0.7} onPress={toggleSavingsPrivacy} style={{ flex: 1, padding: 14, flexDirection: "row", alignItems: "center" }}>
+                <TouchableOpacity activeOpacity={0.7} onPress={toggleSavingsPrivacy} style={{ flex: 1, padding: s(14), flexDirection: "row", alignItems: "center" }}>
                   <View style={[styles.statIconBg, { marginBottom: 0, marginRight: 16 }]}>
                     <Image source={ICONS.wallet} style={[styles.statIcon, { tintColor: "#34C759" }]} resizeMode="contain" />
                   </View>
@@ -879,60 +999,235 @@ export default function HomeScreen({ navigation, route }) {
                     <Text style={[styles.cardLabel, { color: colors.textMuted, marginBottom: 2 }]}>My Savings</Text>
                     <Text style={[styles.cardValue, { color: colors.textDark, fontSize: 24 }]}>₱{totalSavings.toLocaleString()}</Text>
                   </View>
-                  <TouchableOpacity onPress={() => navWithEmail("Savings")} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.05)", alignItems: "center", justifyContent: "center" }}>
+                  <TouchableOpacity onPress={() => navWithEmail("Savings")} style={{ width: 28, height: 28, borderRadius: s(14), backgroundColor: "rgba(0,0,0,0.05)", alignItems: "center", justifyContent: "center" }}>
                     <Text style={[styles.arrowText, { top: -1 }]}>→</Text>
                   </TouchableOpacity>
                 </TouchableOpacity>
               </Animated.View>
             </Animated.View>
 
-          <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 14, width: "100%" }}>
-            {/* Attendance Card */}
-              <Animated.View style={{ height: 130, width: "48%", opacity: cardAnims[3].opacity, transform: [{ translateY: cardAnims[3].translateY }] }}>
-                {/* FRONT: PRIVACY STATE */}
-                <Animated.View pointerEvents={isAttendanceHidden ? "none" : "auto"} style={[styles.statCard, { position: "absolute", top: 0, left: 0, right: 0, width: "100%", height: "100%", backfaceVisibility: "hidden", transform: [{ rotateY: attendanceFrontInt }] }]}>
-                  <TouchableOpacity activeOpacity={0.8} onPress={toggleAttendancePrivacy} style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-                    <View style={styles.statIconBg}>
-                      <Image source={ICONS.attendance} style={styles.statIcon} resizeMode="contain" />
-                    </View>
-                    <Text style={[styles.cardLabel, { textAlign: "center" }]}>Attendance</Text>
-                  </TouchableOpacity>
-                </Animated.View>
-                {/* BACK: DATA STATE */}
-                <Animated.View pointerEvents={!isAttendanceHidden ? "none" : "auto"} style={[styles.statCard, { position: "absolute", top: 0, left: 0, right: 0, width: "100%", height: "100%", backfaceVisibility: "hidden", transform: [{ rotateY: attendanceBackInt }] }]}>
-                  <TouchableOpacity activeOpacity={0.8} onPress={toggleAttendancePrivacy} style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-                    <View style={styles.statIconBg}>
-                      <Image source={ICONS.attendance} style={styles.statIcon} resizeMode="contain" />
-                    </View>
-                    <Text style={[styles.cardLabel, { color: colors.textMuted }]}>Attendance Checks</Text>
-                    <Text style={[styles.cardValue, { color: colors.textDark }]}>{attendanceCount}</Text>
-                  </TouchableOpacity>
-                </Animated.View>
-              </Animated.View>
+          {/* Combined Attendance & Giving Card */}
+          <Animated.View style={{ width: "100%", marginBottom: s(14), opacity: cardAnims[3].opacity, transform: [{ translateY: cardAnims[3].translateY }] }}>
+            <View style={[styles.statCard, { width: "100%", padding: s(16), backgroundColor: colors.cardBg, borderColor: colors.cardBorder, borderWidth: 1, borderRadius: 20 }]}>
+              {/* Header with Title and Time Period Dropdown Button */}
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: s(14) }}>
+                <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>Attendance & Giving</Text>
 
-              {/* Donations Card */}
-              <Animated.View style={{ height: 130, width: "48%", opacity: cardAnims[4].opacity, transform: [{ translateY: cardAnims[4].translateY }] }}>
-                {/* FRONT: PRIVACY STATE */}
-                <Animated.View pointerEvents={isDonationsHidden ? "none" : "auto"} style={[styles.statCard, { position: "absolute", top: 0, left: 0, right: 0, width: "100%", height: "100%", backfaceVisibility: "hidden", transform: [{ rotateY: donationsFrontInt }] }]}>
-                  <TouchableOpacity activeOpacity={0.8} onPress={toggleDonationsPrivacy} style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-                    <View style={[styles.statIconBg, { backgroundColor: "rgba(52,199,89,0.1)" }]}>
-                      <Image source={ICONS.heart} style={[styles.statIcon, { tintColor: "#34C759" }]} resizeMode="contain" />
-                    </View>
-                    <Text style={[styles.cardLabel, { textAlign: "center" }]}>Donations</Text>
-                  </TouchableOpacity>
-                </Animated.View>
-                {/* BACK: DATA STATE */}
-                <Animated.View pointerEvents={!isDonationsHidden ? "none" : "auto"} style={[styles.statCard, { position: "absolute", top: 0, left: 0, right: 0, width: "100%", height: "100%", backfaceVisibility: "hidden", transform: [{ rotateY: donationsBackInt }] }]}>
-                  <TouchableOpacity activeOpacity={0.8} onPress={toggleDonationsPrivacy} style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-                    <View style={[styles.statIconBg, { backgroundColor: "rgba(52,199,89,0.1)" }]}>
-                      <Image source={ICONS.heart} style={[styles.statIcon, { tintColor: "#34C759" }]} resizeMode="contain" />
-                    </View>
-                    <Text style={[styles.cardLabel, { color: colors.textMuted }]}>Total Donated</Text>
-                    <Text style={[styles.cardValue, { color: colors.textDark }]}>₱{totalDonated.toLocaleString()}</Text>
-                  </TouchableOpacity>
-                </Animated.View>
-              </Animated.View>
+                {/* Dropdown Time Picker Trigger Button */}
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => setTimePickerVisible(true)}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: s(6),
+                    backgroundColor: colors.isDark ? "rgba(255,255,255,0.08)" : "rgba(13,31,69,0.06)",
+                    paddingHorizontal: s(12),
+                    paddingVertical: s(6),
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: colors.cardBorder || "rgba(0,0,0,0.08)",
+                  }}
+                >
+                  <Text style={{ fontSize: fs(12), fontWeight: "700", color: colors.textDark }}>
+                    {activityFilter === "month"
+                      ? `${MONTH_SHORT_NAMES[selectedMonth]} ${selectedYear}`
+                      : `${selectedYear}`}
+                  </Text>
+                  <Text style={{ fontSize: fs(9), color: colors.textMuted }}>▼</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* 2 Column Stats Layout (No icons, visible divider line) */}
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                {/* Attendance Checks Column */}
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => navWithEmail("Branch")}
+                  style={{ flex: 1, paddingRight: s(8) }}
+                >
+                  <Text style={[styles.cardLabel, { color: colors.textMuted, fontSize: fs(12), marginBottom: 4 }]}>Attendance Checks</Text>
+                  <Text style={[styles.cardValue, { color: colors.textDark, fontSize: fs(20), fontWeight: "800" }]}>{displayAttendanceCount}</Text>
+                  <Text style={{ fontSize: fs(10), color: colors.textMuted, marginTop: 2 }}>
+                    {activityFilter === "month"
+                      ? `${MONTH_SHORT_NAMES[selectedMonth]} ${selectedYear}`
+                      : `Year ${selectedYear}`}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Highly Visible Vertical Divider Line */}
+                <View style={{ width: 1.5, height: s(48), backgroundColor: colors.isDark ? "rgba(255,255,255,0.22)" : "rgba(13,31,69,0.22)", marginHorizontal: s(12) }} />
+
+                {/* Total Donated Column */}
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => navWithEmail("Donations")}
+                  style={{ flex: 1, paddingLeft: s(8) }}
+                >
+                  <Text style={[styles.cardLabel, { color: colors.textMuted, fontSize: fs(12), marginBottom: 4 }]}>Total Donated</Text>
+                  <Text
+                    style={[styles.cardValue, { color: colors.textDark, fontSize: fs(20), fontWeight: "800" }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.7}
+                  >
+                    ₱{displayDonatedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Text>
+                  <Text style={{ fontSize: fs(10), color: colors.textMuted, marginTop: 2 }}>
+                    {activityFilter === "month"
+                      ? `${MONTH_SHORT_NAMES[selectedMonth]} ${selectedYear}`
+                      : `Year ${selectedYear}`}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
+          </Animated.View>
+
+          {/* Time Picker Filter Modal */}
+          <Modal
+            visible={timePickerVisible}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => setTimePickerVisible(false)}
+          >
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => setTimePickerVisible(false)}
+              style={{
+                flex: 1,
+                backgroundColor: "rgba(0,0,0,0.55)",
+                justifyContent: "center",
+                alignItems: "center",
+                padding: s(20),
+              }}
+            >
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={(e) => e.stopPropagation && e.stopPropagation()}
+                style={{
+                  width: "100%",
+                  maxWidth: s(330),
+                  backgroundColor: colors.cardBg,
+                  borderRadius: 24,
+                  padding: s(20),
+                  borderWidth: 1,
+                  borderColor: colors.cardBorder,
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 12,
+                  elevation: 10,
+                }}
+              >
+                {/* Modal Header */}
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: s(16) }}>
+                  <Text style={{ fontSize: fs(16), fontWeight: "700", color: colors.textDark }}>Select Timeframe</Text>
+                  <TouchableOpacity onPress={() => setTimePickerVisible(false)} style={{ padding: 4 }}>
+                    <Text style={{ fontSize: fs(16), fontWeight: "700", color: colors.textMuted }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Filter Mode Switcher (Per Month / Per Year) */}
+                <View style={{ flexDirection: "row", backgroundColor: colors.inputBg || "rgba(0,0,0,0.05)", borderRadius: 12, padding: 3, marginBottom: s(16) }}>
+                  <TouchableOpacity
+                    onPress={() => setActivityFilter("month")}
+                    style={{
+                      flex: 1,
+                      paddingVertical: s(8),
+                      alignItems: "center",
+                      borderRadius: 9,
+                      backgroundColor: activityFilter === "month" ? (colors.blue || "#0D1F45") : "transparent",
+                    }}
+                  >
+                    <Text style={{ fontSize: fs(12), fontWeight: "700", color: activityFilter === "month" ? "#FFFFFF" : colors.textMuted }}>Per Month</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setActivityFilter("year")}
+                    style={{
+                      flex: 1,
+                      paddingVertical: s(8),
+                      alignItems: "center",
+                      borderRadius: 9,
+                      backgroundColor: activityFilter === "year" ? (colors.blue || "#0D1F45") : "transparent",
+                    }}
+                  >
+                    <Text style={{ fontSize: fs(12), fontWeight: "700", color: activityFilter === "year" ? "#FFFFFF" : colors.textMuted }}>Per Year</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Year Selector */}
+                <Text style={{ fontSize: fs(12), fontWeight: "600", color: colors.textMuted, marginBottom: s(8) }}>Select Year</Text>
+                <View style={{ flexDirection: "row", gap: s(8), marginBottom: s(16) }}>
+                  {AVAILABLE_YEARS.map((yr) => (
+                    <TouchableOpacity
+                      key={yr}
+                      onPress={() => setSelectedYear(yr)}
+                      style={{
+                        flex: 1,
+                        paddingVertical: s(8),
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: selectedYear === yr ? (colors.blue || "#0D1F45") : (colors.cardBorder || "rgba(0,0,0,0.1)"),
+                        backgroundColor: selectedYear === yr ? (colors.blue || "#0D1F45") : "transparent",
+                        alignItems: "center",
+                      }}
+                    >
+                      <Text style={{ fontSize: fs(12), fontWeight: "700", color: selectedYear === yr ? "#FFFFFF" : colors.textDark }}>
+                        {yr}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Month Selector (Visible when activityFilter === "month") */}
+                {activityFilter === "month" && (
+                  <>
+                    <Text style={{ fontSize: fs(12), fontWeight: "600", color: colors.textMuted, marginBottom: s(8) }}>Select Month</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: s(6), marginBottom: s(16) }}>
+                      {MONTH_SHORT_NAMES.map((mn, idx) => {
+                        const isFutureMonth = selectedYear === new Date().getFullYear() && idx > new Date().getMonth();
+                        const isSelected = selectedMonth === idx;
+                        return (
+                          <TouchableOpacity
+                            key={mn}
+                            onPress={() => setSelectedMonth(idx)}
+                            style={{
+                              width: "23%",
+                              paddingVertical: s(8),
+                              borderRadius: 10,
+                              borderWidth: 1,
+                              borderColor: isSelected ? (colors.blue || "#0D1F45") : (colors.cardBorder || "rgba(0,0,0,0.1)"),
+                              backgroundColor: isSelected ? (colors.blue || "#0D1F45") : "transparent",
+                              alignItems: "center",
+                              opacity: isFutureMonth ? 0.45 : 1,
+                            }}
+                          >
+                            <Text style={{ fontSize: fs(11), fontWeight: "700", color: isSelected ? "#FFFFFF" : colors.textDark }}>
+                              {mn}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </>
+                )}
+
+                {/* Apply Button */}
+                <TouchableOpacity
+                  onPress={() => setTimePickerVisible(false)}
+                  style={{
+                    backgroundColor: colors.blue || "#0D1F45",
+                    paddingVertical: s(12),
+                    borderRadius: 14,
+                    alignItems: "center",
+                    marginTop: s(4),
+                  }}
+                >
+                  <Text style={{ fontSize: fs(14), fontWeight: "700", color: "#FFFFFF" }}>Apply Filter</Text>
+                </TouchableOpacity>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Modal>
         </View>
         )}
 
@@ -1005,15 +1300,15 @@ export default function HomeScreen({ navigation, route }) {
           return (
             <View style={[styles.section, { marginBottom: 18 }]}>
               {/* Section Header */}
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14, paddingHorizontal: 2 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: s(14), paddingHorizontal: 2 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                   <Text style={[styles.sectionTitle, { color: colors.textDark, marginBottom: 0 }]}>Announcements</Text>
-                  <View style={{ backgroundColor: C.red, width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center" }}>
-                    <Text style={{ color: "#FFF", fontSize: 11, fontWeight: "700" }}>{visibleAnns.length}</Text>
+                  <View style={{ backgroundColor: C.red, width: s(22), height: s(22), borderRadius: 11, alignItems: "center", justifyContent: "center" }}>
+                    <Text style={{ color: "#FFF", fontSize: fs(11), fontWeight: "700" }}>{visibleAnns.length}</Text>
                   </View>
                 </View>
                 <TouchableOpacity onPress={() => navigation.navigate("Announcements", { email: userEmail })} activeOpacity={0.6}>
-                  <Text style={{ color: C.blue, fontSize: 13, fontWeight: "600" }}>See all →</Text>
+                  <Text style={{ color: C.blue, fontSize: fs(13), fontWeight: "600" }}>See all →</Text>
                 </TouchableOpacity>
               </View>
 
@@ -1047,7 +1342,7 @@ export default function HomeScreen({ navigation, route }) {
                         </View>
                       ) : null}
 
-                      <View style={{ padding: 18, paddingTop: ann.image ? 14 : 18 }}>
+                      <View style={{ padding: s(18), paddingTop: ann.image ? 14 : 18 }}>
                         {/* Category Pill */}
                         <View style={styles.carouselCategoryPill}>
                           <Text style={styles.carouselCategoryText} numberOfLines={1}>
@@ -1057,27 +1352,27 @@ export default function HomeScreen({ navigation, route }) {
 
                         <View style={{ flexDirection: "column" }}>
                           {dateInfo.day ? (
-                            <View style={{ flexDirection: "row", alignItems: "baseline", marginBottom: 4, gap: 5 }}>
+                            <View style={{ flexDirection: "row", alignItems: "baseline", marginBottom: s(4), gap: 5 }}>
                               <Text style={{ fontSize: 30, fontWeight: "800", color: colors.textDark }}>{dateInfo.day}</Text>
-                              <Text style={{ fontSize: 13, fontWeight: "700", color: colors.textMuted }}>{dateInfo.month}</Text>
+                              <Text style={{ fontSize: fs(13), fontWeight: "700", color: colors.textMuted }}>{dateInfo.month}</Text>
                             </View>
                           ) : null}
-                          <Text style={{ fontSize: 16, fontWeight: "700", color: colors.textDark, marginBottom: 4 }} numberOfLines={1}>{ann.title}</Text>
-                          <Text style={{ fontSize: 12, color: colors.textMuted, lineHeight: 17, marginBottom: 10 }} numberOfLines={3}>
+                          <Text style={{ fontSize: fs(16), fontWeight: "700", color: colors.textDark, marginBottom: 4 }} numberOfLines={1}>{ann.title}</Text>
+                          <Text style={{ fontSize: fs(12), color: colors.textMuted, lineHeight: 17, marginBottom: 10 }} numberOfLines={3}>
                             {ann.description || ann.message}
                           </Text>
                           {/* Location & Time */}
                           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
                             {ann.location ? (
                               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                                <Text style={{ fontSize: 12, color: colors.textMuted }}>📍</Text>
-                                <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: "500" }}>{ann.location}</Text>
+                                <Text style={{ fontSize: fs(12), color: colors.textMuted }}>📍</Text>
+                                <Text style={{ fontSize: fs(11), color: colors.textMuted, fontWeight: "500" }}>{ann.location}</Text>
                               </View>
                             ) : null}
                             {ann.time ? (
                               <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                                <Text style={{ fontSize: 12, color: colors.textMuted }}>🕐</Text>
-                                <Text style={{ fontSize: 11, color: colors.textMuted, fontWeight: "500" }}>{ann.time}</Text>
+                                <Text style={{ fontSize: fs(12), color: colors.textMuted }}>🕐</Text>
+                                <Text style={{ fontSize: fs(11), color: colors.textMuted, fontWeight: "500" }}>{ann.time}</Text>
                               </View>
                             ) : null}
                           </View>
@@ -1090,9 +1385,9 @@ export default function HomeScreen({ navigation, route }) {
 
               {/* Dot indicators */}
               {visibleAnns.length > 1 && (
-                <View style={{ flexDirection: "row", justifyContent: "center", marginTop: 12, gap: 6 }}>
+                <View style={{ flexDirection: "row", justifyContent: "center", marginTop: s(12), gap: 6 }}>
                   {visibleAnns.map((_, i) => (
-                    <View key={i} style={{ width: carouselIndex === i ? 20 : 8, height: 8, borderRadius: 4, backgroundColor: carouselIndex === i ? C.blue : "rgba(46,107,240,0.2)" }} />
+                    <View key={i} style={{ width: carouselIndex === i ? 20 : 8, height: 8, borderRadius: s(4), backgroundColor: carouselIndex === i ? C.blue : "rgba(46,107,240,0.2)" }} />
                   ))}
                 </View>
               )}
@@ -1107,9 +1402,9 @@ export default function HomeScreen({ navigation, route }) {
           <View style={[styles.activityWrap, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
             {recentActivity.length === 0 ? (
               <View style={{ paddingVertical: 30, alignItems: "center" }}>
-                <Image source={ICONS.clock} style={{ width: 32, height: 32, tintColor: colors.textMuted, marginBottom: 10, opacity: 0.5 }} resizeMode="contain" />
-                <Text style={{ fontSize: 14, fontWeight: "600", color: colors.textDark, marginBottom: 4 }}>No Recent Activity</Text>
-                <Text style={{ fontSize: 13, color: colors.textMuted, textAlign: "center", paddingHorizontal: 20 }}>Your recent transactions and activities will appear here.</Text>
+                <Image source={ICONS.clock} style={{ width: 32, height: 32, tintColor: colors.textMuted, marginBottom: s(10), opacity: 0.5 }} resizeMode="contain" />
+                <Text style={{ fontSize: fs(14), fontWeight: "600", color: colors.textDark, marginBottom: 4 }}>No Recent Activity</Text>
+                <Text style={{ fontSize: fs(13), color: colors.textMuted, textAlign: "center", paddingHorizontal: 20 }}>Your recent transactions and activities will appear here.</Text>
               </View>
             ) : recentActivity.map((activity, idx) => (
               <View
@@ -1159,7 +1454,7 @@ export default function HomeScreen({ navigation, route }) {
               onPress={() => navigation.navigate("Announcements", { email: userEmail })}
             >
               <View style={[styles.featureIconBox, { backgroundColor: "rgba(46,107,240,0.1)" }]}>
-                <Image source={ICONS.notification} style={{ width: 22, height: 22, tintColor: "#0D1F45" }} resizeMode="contain" />
+                <Image source={ICONS.notification} style={{ width: s(22), height: s(22), tintColor: "#0D1F45" }} resizeMode="contain" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.featureTitle, { color: colors.textDark }]}>Announcements</Text>
@@ -1175,7 +1470,7 @@ export default function HomeScreen({ navigation, route }) {
               onPress={() => navigation.navigate("PrayerWall", { email: userEmail })}
             >
               <View style={[styles.featureIconBox, { backgroundColor: "rgba(175,82,222,0.1)" }]}>
-                <Image source={ICONS.heart} style={{ width: 22, height: 22, tintColor: "#AF52DE" }} resizeMode="contain" />
+                <Image source={ICONS.heart} style={{ width: s(22), height: s(22), tintColor: "#AF52DE" }} resizeMode="contain" />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.featureTitle, { color: colors.textDark }]}>Prayer Wall</Text>
@@ -1188,6 +1483,9 @@ export default function HomeScreen({ navigation, route }) {
 
         <View style={styles.bottomPad} />
       </ScrollView>
+
+      {/* Offline Banner — shown when device loses internet connectivity */}
+      <OfflineBanner />
 
       {/* Floating draggable chat button */}
       <DraggableChatButton onPress={() => setChatbotOpen(true)} />
@@ -1241,77 +1539,13 @@ export default function HomeScreen({ navigation, route }) {
         </View>
       </Modal>
 
-      {/* Bottom tab bar with VISIBLE animations */}
-      <View style={[styles.tabBar, { backgroundColor: colors.tabBg }]}>
-        <Animated.View
-          style={[
-            styles.tabIndicator,
-            {
-              width: TAB_WIDTH,
-              transform: [{ translateX: indicatorPosition }],
-            },
-          ]}
-        />
-
-        {TAB_ITEMS.map((tab) => {
-          const isActive = activeTab === tab.key;
-          const allIndex = ALL_TAB_ITEMS.findIndex(t => t.key === tab.key);
-          const visibleIndex = TAB_ITEMS.findIndex(t => t.key === tab.key);
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={styles.tabItem}
-              onPress={() => {
-                setActiveTab(tab.key);
-                if (tab.key === "Home") return;
-                navWithEmail(tab.key); // pass email always
-              }}
-              activeOpacity={0.7}
-            >
-              <Animated.View
-                style={[
-                  styles.tabBgCircle,
-                  {
-                    opacity: tabAnimations[allIndex].bgOpacity,
-                  },
-                ]}
-              />
-
-              <Animated.View
-                style={{ transform: [{ scale: tabAnimations[allIndex].scale }] }}
-              >
-                <Image
-                  source={tab.icon}
-                  style={[
-                    styles.tabIcon,
-                    {
-                      tintColor: isActive ? colors.tabActive : colors.tabInactive,
-
-                      opacity: isActive ? 1 : 0.6,
-                    },
-                  ]}
-                  resizeMode="contain"
-                />
-              </Animated.View>
-
-              <Text
-                style={[
-                  styles.tabLabel,
-                  {
-                    color: isActive ? colors.tabActive : colors.tabInactive,
-
-                    fontWeight: isActive ? "700" : "500",
-                    fontSize: isActive ? 11 : 10,
-                    opacity: isActive ? 1 : 0.7,
-                  },
-                ]}
-              >
-                {tab.key}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+            {/* Floating Bottom Tab Bar */}
+      <FloatingNavBar
+        activeTab="Home"
+        navigation={navigation}
+        userEmail={userEmail}
+        userRole={userRole}
+      />
 
       {/* Sidebar overlay */}
       {sidebarOpen ? (
@@ -1445,17 +1679,17 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.navBg,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 22,
-    paddingTop: Platform.OS === "ios" ? 56 : 42,
+    paddingHorizontal: s(22),
+    paddingTop: Platform.OS === "ios" ? s(56) : s(42),
     paddingBottom: 14,
     zIndex: 1,
   },
   hamburgerBtn: { padding: 4, justifyContent: "center", gap: 5 },
-  hLine: { width: 25, height: 3, backgroundColor: C.textDark, borderRadius: 1.2 },
+  hLine: { width: 25, height: s(3), backgroundColor: C.textDark, borderRadius: 1.2 },
   topTitle: {
     flex: 1,
     textAlign: "center",
-    fontSize: 20,
+    fontSize: fs(20),
     fontWeight: "800",
     color: C.textDark,
   },
@@ -1464,8 +1698,8 @@ const getStyles = (C) => StyleSheet.create({
     position: "relative",
   },
   notificationIcon: {
-    width: 24,
-    height: 24,
+    width: s(24),
+    height: s(24),
     tintColor: C.textDark,
   },
   notificationDot: {
@@ -1481,75 +1715,76 @@ const getStyles = (C) => StyleSheet.create({
     zIndex: 10,
   },
 
-  scroll: { flex: 1, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 100, zIndex: 1 },
+  scroll: { flex: 1, paddingHorizontal: s(20), paddingTop: 12, paddingBottom: 100, zIndex: 1 },
   welcomeTitle: {
-    fontSize: 22,
+    fontSize: fs(22),
     fontWeight: "700",
     color: C.textDark,
-    marginBottom: 4,
+    marginBottom: s(4),
     marginTop: 6,
   },
   welcomeSub: {
-    fontSize: 14.5,
+    fontSize: fs(14),
     color: C.textMuted,
-    lineHeight: 20,
-    marginBottom: 14,
+    lineHeight: fs(20),
+    marginBottom: s(14),
   },
-  bottomPad: { height: 32 },
+  bottomPad: { height: 110 },
 
   /* ✅ Member card */
   memberCard: {
     backgroundColor: C.cardBg,
     borderWidth: 1,
     borderColor: C.cardBorder,
-    borderRadius: 32,
-    padding: 20,
+    borderRadius: s(32),
+    padding: s(20),
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 12,
+    marginBottom: s(12),
     shadowColor: '#64748B',
     shadowOpacity: 0.08,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 12 },
     elevation: 8,
   },
-  memberLeft: { flexDirection: "row", alignItems: "center", gap: 14, flex: 1 },
+  memberLeft: { flexDirection: "row", alignItems: "center", gap: s(14), flex: 1 },
   memberAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: s(48),
+    height: s(48),
+    borderRadius: s(24),
     backgroundColor: "rgba(46,107,240,0.12)",
     alignItems: "center",
     justifyContent: "center",
   },
-  memberAvatarIcon: { width: 22, height: 22, tintColor: C.blue },
-  memberName: { fontSize: 17, fontWeight: "800", color: C.textDark },
-  memberEmail: { fontSize: 13, color: C.textMuted, marginTop: 2, fontWeight: "500" },
+  memberAvatarIcon: { width: s(22), height: s(22), tintColor: C.blue },
+  memberName: { fontSize: fs(17), fontWeight: "800", color: C.textDark },
+  memberEmail: { fontSize: fs(13), color: C.textMuted, marginTop: 2, fontWeight: "500" },
   memberPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: s(12),
+    paddingVertical: s(8),
     borderRadius: 999,
     backgroundColor: "rgba(52,199,89,0.1)",
     borderWidth: 1,
     borderColor: "rgba(52,199,89,0.15)",
   },
-  memberPillText: { fontSize: 12, color: C.green, fontWeight: "800" },
+  memberPillText: { fontSize: fs(12), color: C.green, fontWeight: "800" },
 
   /* ✅ Stats Grid */
   statsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
-    marginBottom: 6,
+    justifyContent: "space-between",
+    rowGap: s(12),
+    marginBottom: s(6),
   },
   statCard: {
     width: "48%",
     backgroundColor: C.cardBg,
     borderWidth: 1,
     borderColor: C.cardBorder,
-    borderRadius: 24,
-    padding: 16,
+    borderRadius: s(24),
+    padding: s(16),
     shadowColor: '#64748B',
     shadowOpacity: 0.06,
     shadowRadius: 18,
@@ -1557,35 +1792,35 @@ const getStyles = (C) => StyleSheet.create({
     elevation: 6,
   },
   statIconBg: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
+    width: s(44),
+    height: s(44),
+    borderRadius: s(16),
     backgroundColor: "rgba(46,107,240,0.08)",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 12,
+    marginBottom: s(12),
   },
-  statIcon: { width: 22, height: 22, tintColor: C.blue },
+  statIcon: { width: s(22), height: s(22), tintColor: C.blue },
 
-  cardLabel: { fontSize: 13, color: C.textMuted, marginBottom: 4, fontWeight: "500" },
-  cardValue: { fontSize: 22, fontWeight: "800", color: C.textDark, letterSpacing: -0.5 },
-  cardDue: { fontSize: 12, color: C.red, marginTop: 2, fontWeight: "500" },
+  cardLabel: { fontSize: fs(13), color: C.textMuted, marginBottom: s(4), fontWeight: "500" },
+  cardValue: { fontSize: fs(22), fontWeight: "800", color: C.textDark, letterSpacing: -0.5 },
+  cardDue: { fontSize: fs(12), color: C.red, marginTop: 2, fontWeight: "500" },
 
-  section: { marginTop: 22, marginBottom: 6 },
+  section: { marginTop: s(22), marginBottom: 6 },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: s(12),
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: fs(20),
     fontWeight: "700",
     color: C.textDark,
-    marginBottom: 12,
+    marginBottom: s(12),
   },
   viewAllText: {
-    fontSize: 13.5,
+    fontSize: fs(13),
     color: C.blue,
     fontWeight: "700",
   },
@@ -1593,15 +1828,16 @@ const getStyles = (C) => StyleSheet.create({
   quickActionsGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 14,
+    justifyContent: "space-between",
+    rowGap: s(14),
   },
   quickActionCard: {
     width: "48%",
     backgroundColor: C.cardBg,
     borderWidth: 1,
     borderColor: C.cardBorder,
-    borderRadius: 24,
-    padding: 18,
+    borderRadius: s(24),
+    padding: s(18),
     position: "relative",
     shadowColor: '#64748B',
     shadowOpacity: 0.05,
@@ -1610,25 +1846,25 @@ const getStyles = (C) => StyleSheet.create({
     elevation: 4,
   },
   quickActionIconBg: {
-    width: 48,
-    height: 48,
-    borderRadius: 18,
+    width: s(48),
+    height: s(48),
+    borderRadius: s(18),
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 14,
+    marginBottom: s(14),
   },
-  quickActionIcon: { width: 24, height: 24 },
+  quickActionIcon: { width: s(24), height: 24 },
   quickActionTitle: {
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "700",
     color: C.textDark,
-    marginBottom: 4,
+    marginBottom: s(4),
   },
   quickActionSubtitle: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: C.textMuted,
-    marginBottom: 8,
-    lineHeight: 16,
+    marginBottom: s(8),
+    lineHeight: fs(16),
     fontWeight: "500",
   },
   arrowCircle: {
@@ -1637,20 +1873,20 @@ const getStyles = (C) => StyleSheet.create({
     right: 12,
     width: 28,
     height: 28,
-    borderRadius: 14,
-    backgroundColor: "rgba(0,0,0,0.03)",
+    borderRadius: s(14),
+    backgroundColor: C.arrowCircleBg,
     alignItems: "center",
     justifyContent: "center",
   },
-  arrowText: { fontSize: 16, color: C.blue, fontWeight: "800" },
+  arrowText: { fontSize: fs(16), color: C.blue, fontWeight: "800" },
 
   paymentCard: {
     backgroundColor: C.cardBg,
     borderWidth: 1,
     borderColor: C.cardBorder,
-    borderRadius: 24,
-    padding: 18,
-    marginBottom: 14,
+    borderRadius: s(24),
+    padding: s(18),
+    marginBottom: s(14),
     flexDirection: "row",
     alignItems: "center",
     shadowColor: '#64748B',
@@ -1660,46 +1896,46 @@ const getStyles = (C) => StyleSheet.create({
     elevation: 4,
   },
   paymentIconBg: {
-    width: 46,
-    height: 46,
-    borderRadius: 16,
+    width: s(46),
+    height: s(46),
+    borderRadius: s(16),
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 14,
+    marginRight: s(14),
   },
-  paymentIcon: { width: 22, height: 22 },
+  paymentIcon: { width: s(22), height: 22 },
   paymentInfo: { flex: 1 },
   paymentId: {
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "700",
     color: C.textDark,
     marginBottom: 2,
   },
-  paymentType: { fontSize: 13, color: C.textMuted, marginBottom: 2 },
-  paymentDue: { fontSize: 12, color: C.red, fontWeight: "600" },
+  paymentType: { fontSize: fs(13), color: C.textMuted, marginBottom: 2 },
+  paymentDue: { fontSize: fs(12), color: C.red, fontWeight: "600" },
   paymentRight: { alignItems: "flex-end" },
   paymentAmount: {
-    fontSize: 18,
+    fontSize: fs(18),
     fontWeight: "800",
     color: C.textDark,
-    marginBottom: 8,
+    marginBottom: s(8),
   },
   payNowBtn: {
     backgroundColor: C.blue,
-    borderRadius: 12,
-    paddingHorizontal: 16,
+    borderRadius: s(12),
+    paddingHorizontal: s(16),
     paddingVertical: 9,
   },
-  payNowText: { fontSize: 13, fontWeight: "700", color: "#FFFFFF" },
+  payNowText: { fontSize: fs(13), fontWeight: "700", color: "#FFFFFF" },
 
   /* ✅ Activity in a card wrapper */
   activityWrap: {
     backgroundColor: C.cardBg,
     borderWidth: 1,
     borderColor: C.cardBorder,
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderRadius: s(24),
+    paddingHorizontal: s(16),
+    paddingVertical: s(8),
     shadowColor: '#64748B',
     shadowOpacity: 0.05,
     shadowRadius: 18,
@@ -1708,35 +1944,35 @@ const getStyles = (C) => StyleSheet.create({
   },
   activityItem: {
     flexDirection: "row",
-    paddingVertical: 14,
+    paddingVertical: s(14),
     borderBottomWidth: 1,
     borderBottomColor: C.cardBorder,
   },
   activityIconBg: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
+    width: s(44),
+    height: s(44),
+    borderRadius: s(16),
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 14,
+    marginRight: s(14),
   },
-  activityIcon: { width: 22, height: 22 },
+  activityIcon: { width: s(22), height: 22 },
   activityContent: { flex: 1, justifyContent: "center" },
   activityTitle: {
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: "700",
     color: C.textDark,
-    marginBottom: 4,
+    marginBottom: s(4),
   },
-  activitySubtitle: { fontSize: 13, color: C.textMuted, marginBottom: 4 },
-  activityTime: { fontSize: 12, color: C.textDimmed, fontWeight: "500" },
+  activitySubtitle: { fontSize: fs(13), color: C.textMuted, marginBottom: 4 },
+  activityTime: { fontSize: fs(12), color: C.textDimmed, fontWeight: "500" },
 
   chatBtn: {
     position: "absolute",
     bottom: 100,
     right: 20,
-    width: 52,
-    height: 52,
+    width: s(52),
+    height: s(52),
     borderRadius: 26,
     backgroundColor: C.blue,
     alignItems: "center",
@@ -1748,7 +1984,7 @@ const getStyles = (C) => StyleSheet.create({
     elevation: 5,
     zIndex: 2,
   },
-  chatIcon: { width: 24, height: 24, tintColor: "#FFFFFF" },
+  chatIcon: { width: s(24), height: s(24), tintColor: "#FFFFFF" },
 
   tabBar: {
     flexDirection: "row",
@@ -1756,7 +1992,7 @@ const getStyles = (C) => StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "rgba(100,140,200,0.15)",
     paddingTop: 10,
-    paddingBottom: Platform.OS === "ios" ? 22 : 10,
+    paddingBottom: Platform.OS === "ios" ? s(22) : s(10),
     position: "relative",
   },
   tabItem: {
@@ -1774,7 +2010,7 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: "rgba(46,107,240,0.15)",
     top: -8,
   },
-  tabIcon: { width: 26, height: 26 },
+  tabIcon: { width: s(26), height: 26 },
   tabLabel: { fontSize: 10 },
 
   overlay: {
@@ -1784,7 +2020,8 @@ const getStyles = (C) => StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: C.overlay,
-    zIndex: 10,
+    zIndex: 998,
+    elevation: 998,
   },
 
   sidebar: {
@@ -1792,81 +2029,82 @@ const getStyles = (C) => StyleSheet.create({
     top: 0,
     left: 0,
     bottom: 0,
-    width: 260,
+    width: SIDEBAR_WIDTH,
     backgroundColor: C.bg,
-    zIndex: 11,
+    zIndex: 1000,
+    elevation: 1000,
     flexDirection: "column",
   },
   sidebarHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingTop: Platform.OS === "ios" ? 58 : 44,
+    gap: s(12),
+    paddingTop: Platform.OS === "ios" ? s(58) : s(44),
     paddingBottom: 22,
-    paddingHorizontal: 20,
+    paddingHorizontal: s(20),
   },
-  sidebarLogo: { width: 46, height: 46, borderRadius: 45 },
-  sidebarTitle: { fontSize: 18, fontWeight: "700", color: "#FFF" },
-  sidebarRole: { fontSize: 12, color: "#FFF", marginTop: 1 },
+  sidebarLogo: { width: s(46), height: s(46), borderRadius: 45 },
+  sidebarTitle: { fontSize: fs(18), fontWeight: "700", color: "#FFF" },
+  sidebarRole: { fontSize: fs(12), color: "#FFF", marginTop: 1 },
 
   sidebarNav: { flex: 1, paddingHorizontal: 12 },
   sidebarItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
-    paddingVertical: 13,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    marginBottom: 6,
+    gap: s(14),
+    paddingVertical: s(13),
+    paddingHorizontal: s(14),
+    borderRadius: s(12),
+    marginBottom: s(6),
   },
   sidebarItemActive: { backgroundColor: "rgba(46,107,240,0.1)" },
-  sidebarIcon: { width: 20, height: 20 },
-  sidebarItemText: { fontSize: 15, color: C.textMuted, fontWeight: "600" },
+  sidebarIcon: { width: s(20), height: 20 },
+  sidebarItemText: { fontSize: fs(15), color: C.textMuted, fontWeight: "600" },
   sidebarItemTextActive: { color: C.blue },
 
   sidebarFooter: {
     borderTopWidth: 1,
     borderTopColor: C.cardBorder,
-    paddingHorizontal: 18,
-    paddingTop: 16,
-    paddingBottom: Platform.OS === "ios" ? 34 : 18,
+    paddingHorizontal: s(18),
+    paddingTop: s(16),
+    paddingBottom: Platform.OS === "ios" ? s(34) : s(18),
   },
   sidebarUserRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    marginBottom: 16,
+    gap: s(12),
+    marginBottom: s(16),
   },
   sidebarAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: s(36),
+    height: s(36),
+    borderRadius: s(18),
     backgroundColor: "rgba(31, 102, 255, 0.93)",
     alignItems: "center",
     justifyContent: "center",
   },
-  sidebarAvatarIcon: { width: 18, height: 18, tintColor: "#FFFFFF" },
-  sidebarUserName: { fontSize: 14, fontWeight: "700", color: "#FFF" },
+  sidebarAvatarIcon: { width: s(18), height: s(18), tintColor: "#FFFFFF" },
+  sidebarUserName: { fontSize: fs(14), fontWeight: "700", color: "#FFF" },
   sidebarUserEmail: {
-    fontSize: 11,
+    fontSize: fs(11),
     color: C.textMuted,
     marginTop: 1,
   },
   signOutRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: s(10),
     paddingVertical: 6,
   },
-  signOutIcon: { width: 30, height: 40, tintColor: C.red },
-  signOutText: { fontSize: 14, color: C.red, fontWeight: "700" },
+  signOutIcon: { width: 30, height: s(40), tintColor: C.red },
+  signOutText: { fontSize: fs(14), color: C.red, fontWeight: "700" },
 
   tabIndicator: {
     position: "absolute",
     bottom: 0,
     left: 0,
     width: SCREEN_WIDTH / 5,
-    height: 3,
+    height: s(3),
     backgroundColor: C.tabActive,
   },
 
@@ -1876,12 +2114,12 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.6)",
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: s(24),
   },
   confirmDialog: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 28,
+    backgroundColor: C.cardBg,
+    borderRadius: s(20),
+    padding: s(28),
     width: "100%",
     maxWidth: 340,
     alignItems: "center",
@@ -1892,13 +2130,13 @@ const getStyles = (C) => StyleSheet.create({
     elevation: 10,
   },
   confirmIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: s(64),
+    height: s(64),
+    borderRadius: s(32),
     backgroundColor: "rgba(231, 76, 60, 0.1)",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 20,
+    marginBottom: s(20),
   },
   confirmIcon: {
     width: 32,
@@ -1906,47 +2144,47 @@ const getStyles = (C) => StyleSheet.create({
     tintColor: C.red,
   },
   confirmTitle: {
-    fontSize: 22,
+    fontSize: fs(22),
     fontWeight: "800",
     color: C.textDark,
-    marginBottom: 12,
+    marginBottom: s(12),
     textAlign: "center",
   },
   confirmMessage: {
-    fontSize: 15,
+    fontSize: fs(15),
     color: C.textMuted,
     textAlign: "center",
-    lineHeight: 22,
+    lineHeight: fs(22),
     marginBottom: 28,
   },
   confirmButtons: {
     flexDirection: "row",
-    gap: 12,
+    gap: s(12),
     width: "100%",
   },
   confirmBtnCancel: {
     flex: 1,
-    backgroundColor: "#F0F2F5",
-    borderRadius: 12,
-    paddingVertical: 14,
+    backgroundColor: C.secondaryBtnBg,
+    borderRadius: s(12),
+    paddingVertical: s(14),
     alignItems: "center",
     justifyContent: "center",
   },
   confirmBtnCancelText: {
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "700",
     color: C.textDark,
   },
   confirmBtnSignOut: {
     flex: 1,
     backgroundColor: C.red,
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: s(12),
+    paddingVertical: s(14),
     alignItems: "center",
     justifyContent: "center",
   },
   confirmBtnSignOutText: {
-    fontSize: 15,
+    fontSize: fs(15),
     fontWeight: "700",
     color: "#FFFFFF",
   },
@@ -1956,18 +2194,18 @@ const getStyles = (C) => StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 16,
-    marginHorizontal: 20,
-    marginTop: 12,
+    borderRadius: s(14),
+    padding: s(16),
+    marginHorizontal: s(20),
+    marginTop: s(12),
   },
   verifTitle: {
-    fontSize: 14,
+    fontSize: fs(14),
     fontWeight: "700",
-    marginBottom: 4,
+    marginBottom: s(4),
   },
   verifSub: {
-    fontSize: 12,
+    fontSize: fs(12),
     color: "#647485",
     lineHeight: 17,
   },
@@ -1976,10 +2214,10 @@ const getStyles = (C) => StyleSheet.create({
   featureCard: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 18,
-    borderRadius: 24,
+    padding: s(18),
+    borderRadius: s(24),
     borderWidth: 1,
-    gap: 16,
+    gap: s(16),
     shadowColor: '#64748B',
     shadowOpacity: 0.04,
     shadowRadius: 16,
@@ -1987,39 +2225,39 @@ const getStyles = (C) => StyleSheet.create({
     elevation: 3,
   },
   featureIconBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
+    width: s(48),
+    height: s(48),
+    borderRadius: s(16),
     alignItems: "center",
     justifyContent: "center",
   },
   featureTitle: {
-    fontSize: 16,
+    fontSize: fs(16),
     fontWeight: "700",
-    marginBottom: 4,
+    marginBottom: s(4),
   },
   featureSubtitle: {
-    fontSize: 13.5,
+    fontSize: fs(13),
   },
 
   // My Loan Hub
   loanHubCard: {
-    width: "100%", borderRadius: 28, marginBottom: 4,
+    width: "100%", borderRadius: s(28), marginBottom: s(4),
     shadowColor: '#64748B', shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.08, shadowRadius: 24, elevation: 8
   },
-  loanHubHeader: { flexDirection: "row", alignItems: "center", gap: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.2)" },
-  loanHubTitle: { color: "#FFF", fontSize: 15, fontWeight: "800" },
+  loanHubHeader: { flexDirection: "row", alignItems: "center", gap: s(10), paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.2)" },
+  loanHubTitle: { color: "#FFF", fontSize: fs(15), fontWeight: "800" },
   loanHubBody: { flexDirection: "row", paddingTop: 6, paddingBottom: 0, alignItems: "center" },
-  loanHubLabel: { color: "rgba(255,255,255,0.7)", fontSize: 13, marginBottom: 4, textTransform: "uppercase", fontWeight: "700", letterSpacing: 0.5, textAlign: "left" },
-  loanHubValue: { color: "#FFF", fontSize: 22, fontWeight: "800", letterSpacing: -0.5, textAlign: "left" },
-  loanHubDivider: { width: 1, height: 40, backgroundColor: "rgba(255,255,255,0.2)", marginHorizontal: 12 },
+  loanHubLabel: { color: "rgba(255,255,255,0.7)", fontSize: fs(13), marginBottom: s(4), textTransform: "uppercase", fontWeight: "700", letterSpacing: 0.5, textAlign: "left" },
+  loanHubValue: { color: "#FFF", fontSize: fs(22), fontWeight: "800", letterSpacing: -0.5, textAlign: "left" },
+  loanHubDivider: { width: 1, height: s(40), backgroundColor: "rgba(255,255,255,0.2)", marginHorizontal: 12 },
   loanHubFooter: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.15)" },
-  loanHubFooterText: { color: "rgba(255,255,255,0.7)", fontSize: 13, fontWeight: "600" },
+  loanHubFooterText: { color: "rgba(255,255,255,0.7)", fontSize: fs(13), fontWeight: "600" },
 
   // Church Events Carousel
   carouselCard: {
-    borderRadius: 20,
+    borderRadius: s(20),
     borderWidth: 1,
     marginRight: 16,
     shadowColor: "#64748B",
@@ -2033,14 +2271,14 @@ const getStyles = (C) => StyleSheet.create({
     alignSelf: "flex-start",
     backgroundColor: "rgba(46,107,240,0.1)",
     paddingVertical: 4,
-    paddingHorizontal: 12,
+    paddingHorizontal: s(12),
     borderRadius: 6,
-    marginBottom: 10,
+    marginBottom: s(10),
   },
   carouselCategoryText: {
-    fontSize: 10,
+    fontSize: fs(10),
     fontWeight: "700",
-    color: "#0D1F45",
+    color: C.blue,
     letterSpacing: 0.5,
   },
   carouselImageWrap: {

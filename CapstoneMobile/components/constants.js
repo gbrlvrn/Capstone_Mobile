@@ -9,7 +9,7 @@ export const ICONS = {
   clock: require("../assets/icons/clock.png"),
   heart: require("../assets/icons/heart.png"),
   chat: require("../assets/icons/chat.png"),
-  home: require("../assets/icons/home.png"),
+  home: require("../assets/icons/home-v3.png"),
   loans: require("../assets/icons/loans.png"),
   donations: require("../assets/icons/donations.png"),
   attendance: require("../assets/icons/attendance.png"),
@@ -36,6 +36,7 @@ export const TAB_ITEMS = [
 
 export const SIDEBAR_ITEMS = [
   { key: "Announcements", icon: ICONS.notification },
+  { key: "Savings", icon: ICONS.wallet },
   { key: "Profile", icon: ICONS.profile },
   { key: "Settings", icon: ICONS.settings },
 ];

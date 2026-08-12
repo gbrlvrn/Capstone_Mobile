@@ -14,10 +14,17 @@ import {
   Alert,
   Pressable,
   ActivityIndicator,
+  Dimensions,
 } from "react-native";
-import { signupUser, getBranches } from "../services/AuthService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { signupUser, getBranches, saveUserData } from "../services/AuthService";
 import { useAlert } from "../components/AlertContext";
 import { useTheme } from "../components/ThemeContext";
+
+const { width: _SW } = Dimensions.get("window");
+const _WR = Math.min(_SW / 375, 1.3);
+const s = (v) => Math.round(v * _WR);
+const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
 
 const LOGO = require("../assets/puac_logo.png");
 
@@ -452,6 +459,19 @@ export default function SignupScreen({ navigation }) {
       }
 
       await signupUser(payload);
+
+      try {
+        await saveUserData({
+          email: form.email.trim().toLowerCase(),
+          firstName: form.firstName.trim(),
+          lastName: form.lastName.trim(),
+          fullName: `${form.firstName.trim()} ${form.lastName.trim()}`,
+          role: form.role,
+          position: form.position || "",
+        });
+      } catch (err) {
+        console.log("Failed to cache signup user data:", err);
+      }
 
       navigation.navigate("VerifyOTP", {
         email: form.email.trim().toLowerCase(),
@@ -924,7 +944,7 @@ export default function SignupScreen({ navigation }) {
             >
               {modalField === "branch" ? (
                 loadingBranches ? (
-                  <View style={{ padding: 40, alignItems: 'center' }}>
+                  <View style={{ padding: s(40), alignItems: 'center' }}>
                     <ActivityIndicator size="large" color="#0D1F45" />
                     <Text style={{ marginTop: 12, color: colors.textMuted }}>Loading communities...</Text>
                   </View>
@@ -1189,7 +1209,7 @@ const getStyles = (C) => StyleSheet.create({
     width: "100%",
     backgroundColor: C.cardBg,
     borderRadius: 32,
-    padding: 28,
+    padding: s(28),
     shadowColor: '#64748B',
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.08,
@@ -1200,7 +1220,7 @@ const getStyles = (C) => StyleSheet.create({
     zIndex: 5,
   },
 
-  logo: { width: 64, height: 64, alignSelf: "center", marginBottom: 16, borderRadius: 32 },
+  logo: { width: s(64), height: s(64), alignSelf: "center", marginBottom: 16, borderRadius: 32 },
   title: {
     fontSize: 26,
     fontWeight: "800",
@@ -1260,7 +1280,7 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.inputBg,
     borderWidth: 1.5,
     borderColor: C.inputBorder,
-    borderRadius: 8,
+    borderRadius: s(8),
     paddingVertical: 12,
     paddingHorizontal: 12,
     flexDirection: "column",
@@ -1288,7 +1308,7 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: "#1937fcff",
   },
   genderRadioText: {
-    fontSize: 13.5,
+    fontSize: fs(13),
     color: "gray",
     flexShrink: 1,
   },
@@ -1304,7 +1324,7 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: "#F9FAFB",
     borderWidth: 1,
     borderColor: C.inputBorder,
-    borderRadius: 10,
+    borderRadius: s(10),
     padding: 12,
     marginTop: 2,
     marginBottom: 12,
@@ -1351,7 +1371,7 @@ const getStyles = (C) => StyleSheet.create({
   checkbox: {
     width: 22,
     height: 22,
-    borderRadius: 4,
+    borderRadius: s(4),
     borderWidth: 1.5,
     borderColor: C.checkboxBorder,
     alignItems: "center",
@@ -1362,7 +1382,7 @@ const getStyles = (C) => StyleSheet.create({
   },
   checkboxChecked: { backgroundColor: C.checkboxBg, borderColor: C.checkboxBg },
   checkmark: { fontSize: 12, color: "#FFF", fontWeight: "700" },
-  termsText: { fontSize: 12, color: C.textMuted, lineHeight: 18, flex: 1 },
+  termsText: { fontSize: 12, color: C.textMuted, lineHeight: fs(18), flex: 1 },
   termsLink: { color: C.linkBlue, fontWeight: "500" },
 
   createBtn: {
@@ -1398,7 +1418,7 @@ const getStyles = (C) => StyleSheet.create({
   },
   modalHandle: {
     width: 40,
-    height: 4,
+    height: s(4),
     borderRadius: 2,
     backgroundColor: C.inputBorder,
     alignSelf: "center",
@@ -1439,7 +1459,7 @@ const getStyles = (C) => StyleSheet.create({
   modalDivider: {
     height: 1,
     backgroundColor: C.modalDivider,
-    marginHorizontal: 20,
+    marginHorizontal: s(20),
   },
 
   docSheet: {

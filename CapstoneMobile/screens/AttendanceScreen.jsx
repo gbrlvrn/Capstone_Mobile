@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   View,
@@ -21,6 +22,8 @@ import DraggableChatButton from "../components/DraggableChatButton";
 import { SkeletonStatCard } from "../components/SkeletonLoader";
 import { useTheme } from "../components/ThemeContext";
 import { useToast } from "../components/ToastContext";
+import FloatingNavBar from "../components/FloatingNavBar";
+import OfflineBanner from "../components/OfflineBanner";
 import { scanQRAttendance, getAttendanceHistory, getAttendanceStats } from "../services/AuthService";
 
 
@@ -92,7 +95,7 @@ const SIDEBAR_ITEMS = [
   { key: "Settings", icon: ICONS.settings },
 ];
 
-const UPCOMING_SERVICES = [];
+
 
 // Attendance history and stats are fetched from the backend
 
@@ -347,6 +350,7 @@ export default function AttendanceScreen({ navigation, route }) {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <OfflineBanner />
       <View style={styles.circleTopRight} />
       <View style={styles.circleBottomLeft} />
 
@@ -361,7 +365,7 @@ export default function AttendanceScreen({ navigation, route }) {
           <View style={styles.menuLine} />
           <View style={styles.menuLine} />
         </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: 36, height: 36 }} resizeMode="contain" /></View>
+        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: 36, height: 36, borderRadius: 18 }} resizeMode="cover" /></View>
         <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: 22, height: 22, tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
       </View>
 
@@ -521,41 +525,7 @@ export default function AttendanceScreen({ navigation, route }) {
           </View>
         </View>
 
-        {/* Upcoming Services */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textDark }]}>Upcoming Services</Text>
 
-          {UPCOMING_SERVICES.map((service) => (
-            <View key={service.id} style={[styles.serviceCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-              <View style={styles.serviceIconBox}>
-                <Image
-                  source={ICONS.calendar}
-                  style={styles.serviceIcon}
-                  resizeMode="contain"
-                />
-              </View>
-              <View style={styles.serviceContent}>
-                <Text style={[styles.serviceName, { color: colors.textDark }]}>{service.name}</Text>
-                <View style={styles.serviceDetailRow}>
-                  <Image
-                    source={ICONS.clock}
-                    style={styles.serviceDetailIcon}
-                    resizeMode="contain"
-                  />
-                  <Text style={styles.serviceDetail}>{service.date}</Text>
-                </View>
-                <View style={styles.serviceDetailRow}>
-                  <Image
-                    source={ICONS.location}
-                    style={styles.serviceDetailIcon}
-                    resizeMode="contain"
-                  />
-                  <Text style={styles.serviceDetail}>{service.location}</Text>
-                </View>
-              </View>
-            </View>
-          ))}
-        </View>
 
         {/* Attendance History */}
         <View style={styles.section}>
@@ -625,70 +595,7 @@ export default function AttendanceScreen({ navigation, route }) {
         onClose={() => setChatbotOpen(false)}
       />
 
-      {/* Bottom tab bar */}
-      <View style={[styles.tabBar, { backgroundColor: colors.tabBg }]}>
-        <Animated.View
-          style={[
-            styles.tabIndicator,
-            { transform: [{ translateX: indicatorPosition }] },
-          ]}
-        />
-
-        {TAB_ITEMS.map((tab) => {
-          const isActive = activeTab === tab.key;
-          const allIndex = ALL_TAB_ITEMS.findIndex(t => t.key === tab.key);
-
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={styles.tabItem}
-              onPress={() => {
-                setActiveTab(tab.key);
-                if (tab.key === "Attendance") return;
-                navWithEmail(tab.key);
-              }}
-              activeOpacity={0.7}
-            >
-              <Animated.View
-                style={[
-                  styles.tabBgCircle,
-                  { opacity: tabAnimations[allIndex].bgOpacity },
-                ]}
-              />
-
-              <Animated.View
-                style={{ transform: [{ scale: tabAnimations[allIndex].scale }] }}
-              >
-                <Image
-                  source={tab.icon}
-                  style={[
-                    styles.tabIcon,
-                    {
-                      tintColor: isActive ? C.tabActive : colors.tabInactive,
-                      opacity: isActive ? 1 : 0.6,
-                    },
-                  ]}
-                  resizeMode="contain"
-                />
-              </Animated.View>
-
-              <Text
-                style={[
-                  styles.tabLabel,
-                  {
-                    color: isActive ? C.tabActive : colors.tabInactive,
-                    fontWeight: isActive ? "700" : "500",
-                    fontSize: isActive ? 11 : 10,
-                    opacity: isActive ? 1 : 0.7,
-                  },
-                ]}
-              >
-                {tab.key}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      <FloatingNavBar activeTab="Attendance" navigation={navigation} userEmail={userEmail} userRole={userRole} />
 
       {/* Sidebar overlay */}
       {sidebarOpen ? (
@@ -709,7 +616,7 @@ export default function AttendanceScreen({ navigation, route }) {
             style={styles.sidebarLogo}
             resizeMode="contain"
           />
-          <Text style={styles.sidebarTitle}>PUAC</Text>
+          <Text style={styles.sidebarTitle}>IsangDiwa</Text>
         </View>
 
         <View style={styles.sidebarNav}>
@@ -843,7 +750,7 @@ export default function AttendanceScreen({ navigation, route }) {
             <View style={styles.scannerHeader}>
               <Text style={styles.scannerTitle}>Scan Service QR</Text>
               <TouchableOpacity onPress={() => setShowQRCode(false)} style={styles.scannerCloseIcon}>
-                <Text style={styles.scannerCloseText}>âœ*</Text>
+                <Ionicons name="close" size={20} color={colors.textDark || "#1A2744"} />
               </TouchableOpacity>
             </View>
             
@@ -1018,7 +925,7 @@ const getStyles = (C) => StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 14,
-    backgroundColor: "#FFF",
+    backgroundColor: C.cardBg,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1033,7 +940,7 @@ const getStyles = (C) => StyleSheet.create({
   qrSubtitle: { fontSize: 13, color: C.textMuted, lineHeight: 18 },
 
   tipBox: {
-    backgroundColor: "#E8F4FD",
+    backgroundColor: C.blueLight,
     borderRadius: 12,
     padding: 14,
     flexDirection: "row",
@@ -1101,7 +1008,7 @@ const getStyles = (C) => StyleSheet.create({
   },
   tableHeader: {
     flexDirection: "row",
-    backgroundColor: "#F8F9FB",
+    backgroundColor: C.inputBg,
     paddingVertical: 14,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
@@ -1200,7 +1107,7 @@ const getStyles = (C) => StyleSheet.create({
     left: 0,
     bottom: 0,
     width: 260,
-    backgroundColor: "#0D1F45",
+    backgroundColor: C.sidebarBg,
     zIndex: 11,
     flexDirection: "column",
   },
@@ -1284,7 +1191,7 @@ const getStyles = (C) => StyleSheet.create({
     paddingHorizontal: 24,
   },
   confirmDialog: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: C.cardBg,
     borderRadius: 20,
     padding: 28,
     width: "100%",
@@ -1331,7 +1238,7 @@ const getStyles = (C) => StyleSheet.create({
   },
   confirmBtnCancel: {
     flex: 1,
-    backgroundColor: "#F0F2F5",
+    backgroundColor: C.secondaryBtnBg,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: "center",
@@ -1395,7 +1302,7 @@ const getStyles = (C) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 16,
-    backgroundColor: "#F0F2F5",
+    backgroundColor: C.secondaryBtnBg,
   },
   scannerCloseText: {
     fontSize: 16,

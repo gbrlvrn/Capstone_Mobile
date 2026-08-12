@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   View,
@@ -19,11 +20,18 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import ChatbotModal from "./ChatbotModal";
 import DraggableChatButton from "../components/DraggableChatButton";
+import FloatingNavBar from "../components/FloatingNavBar";
 import { useTheme } from "../components/ThemeContext";
 import { getPrayerRequests, createPrayerRequest, prayForRequest } from "../services/AuthService";
 import * as Haptics from "expo-haptics";
+import OfflineBanner from "../components/OfflineBanner";
+import { SkeletonPrayerCard } from "../components/SkeletonLoader";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
+const s = (v) => Math.round(v * _WR);
+const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
+const SIDEBAR_WIDTH = s(260);
 
 const LOGO = require("../assets/puac_logo.png");
 
@@ -121,7 +129,7 @@ export default function PrayerWallScreen({ navigation, route }) {
   const [submitting, setSubmitting] = useState(false);
 
   const indicatorPosition = useRef(new Animated.Value(0)).current;
-  const slideX = useRef(new Animated.Value(-260)).current;
+  const slideX = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const tabAnimations = useRef(ALL_TAB_ITEMS.map(() => ({ scale: new Animated.Value(1), bgOpacity: new Animated.Value(0) }))).current;
   const modalSlide = useRef(new Animated.Value(SCREEN_WIDTH)).current;
 
@@ -187,7 +195,7 @@ export default function PrayerWallScreen({ navigation, route }) {
   }, [slideX]);
 
   const closeSidebar = useCallback(() => {
-    Animated.timing(slideX, { toValue: -260, duration: 250, useNativeDriver: true }).start(() => setSidebarOpen(false));
+    Animated.timing(slideX, { toValue: -SIDEBAR_WIDTH, duration: 250, useNativeDriver: true }).start(() => setSidebarOpen(false));
   }, [slideX]);
 
   useEffect(() => {
@@ -221,7 +229,18 @@ export default function PrayerWallScreen({ navigation, route }) {
   };
 
   const handleSubmit = async () => {
-    if (!requestText.trim() || !userEmail) return;
+    if (!requestText.trim()) {
+      showAlert("Error", "Please enter your prayer request before submitting.");
+      return;
+    }
+    if (requestText.length > 300) {
+      showAlert("Error", "Prayer requests cannot exceed 300 characters.");
+      return;
+    }
+    if (!userEmail) {
+      showAlert("Error", "Account email not found. Please log in again.");
+      return;
+    }
     setSubmitting(true);
     try {
       await createPrayerRequest({
@@ -233,8 +252,10 @@ export default function PrayerWallScreen({ navigation, route }) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       closeModal();
       await loadPrayers();
+      showAlert("Submitted", "Your prayer request has been posted.");
     } catch (err) {
       console.log("Submit prayer error:", err);
+      showAlert("Error", "Failed to submit prayer request. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -262,15 +283,16 @@ export default function PrayerWallScreen({ navigation, route }) {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <OfflineBanner />
       <View style={styles.circleTopRight} />
       <View style={styles.circleBottomLeft} />
 
       <View style={[styles.topBar, { backgroundColor: "transparent" }]}>
-        <TouchableOpacity style={styles.menuBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home', { email: userEmail })} activeOpacity={0.6}>
-          <Text style={{color: '#FFF', fontSize: 28, paddingHorizontal: 4}}>â†</Text>
+                <TouchableOpacity style={styles.menuBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home', { email: userEmail })} activeOpacity={0.6}>
+          <Ionicons name="arrow-back" size={24} color={colors.textDark} />
         </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: 36, height: 36 }} resizeMode="contain" /></View>
-        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: 22, height: 22, tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
+        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: s(36), height: 36, borderRadius: 18 }} resizeMode="cover" /></View>
+        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: s(22), height: s(22), tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
       </View>
 
       <ScrollView
@@ -288,15 +310,15 @@ export default function PrayerWallScreen({ navigation, route }) {
         {/* Stats */}
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-            <View style={{width: 40, height: 40, borderRadius: 20, backgroundColor: C.blueLight, alignItems: 'center', justifyContent: 'center', marginBottom: 8}}>
-               <Image source={ICONS.document} style={{width: 20, height: 20, tintColor: C.blue}} resizeMode="contain" />
+            <View style={{width: s(40), height: s(40), borderRadius: s(20), backgroundColor: C.blueLight, alignItems: 'center', justifyContent: 'center', marginBottom: 8}}>
+               <Image source={ICONS.document} style={{width: s(20), height: s(20), tintColor: C.blue}} resizeMode="contain" />
             </View>
             <Text style={[styles.statValue, { color: colors.textDark }]}>{prayers.length}</Text>
             <Text style={[styles.statLabel, { color: colors.textMuted }]}>Requests</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-            <View style={{width: 40, height: 40, borderRadius: 20, backgroundColor: C.purpleLight, alignItems: 'center', justifyContent: 'center', marginBottom: 8}}>
-               <Image source={ICONS.heart} style={{width: 20, height: 20, tintColor: C.purple}} resizeMode="contain" />
+            <View style={{width: s(40), height: s(40), borderRadius: s(20), backgroundColor: C.purpleLight, alignItems: 'center', justifyContent: 'center', marginBottom: 8}}>
+               <Image source={ICONS.heart} style={{width: s(20), height: s(20), tintColor: C.purple}} resizeMode="contain" />
             </View>
             <Text style={[styles.statValue, { color: colors.textDark }]}>{prayers.reduce((s, p) => s + (p.prayerCount || 0), 0)}</Text>
             <Text style={[styles.statLabel, { color: colors.textMuted }]}>Prayers Lifted</Text>
@@ -305,19 +327,20 @@ export default function PrayerWallScreen({ navigation, route }) {
 
         {/* Submit button */}
         <TouchableOpacity style={styles.submitBtn} onPress={openModal} activeOpacity={0.85}>
-          <Image source={ICONS.send} style={{width: 18, height: 18, tintColor: '#FFF'}} resizeMode="contain" />
+          <Image source={ICONS.send} style={{width: s(18), height: s(18), tintColor: '#FFF'}} resizeMode="contain" />
           <Text style={styles.submitBtnText}>Share a Prayer Request</Text>
         </TouchableOpacity>
 
         {/* Prayer list */}
         {loading ? (
-          <View style={{ padding: 40, alignItems: "center" }}>
-            <ActivityIndicator size="large" color={C.blue} />
-            <Text style={[styles.loadingText, { color: colors.textMuted }]}>Loading prayers...</Text>
+          <View>
+            <SkeletonPrayerCard />
+            <SkeletonPrayerCard />
+            <SkeletonPrayerCard />
           </View>
         ) : prayers.length === 0 ? (
           <View style={[styles.emptyCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-            <Image source={ICONS.document} style={{width: 48, height: 48, tintColor: colors.textMuted, marginBottom: 12, opacity: 0.5}} resizeMode="contain"/>
+            <Image source={ICONS.document} style={{width: s(48), height: s(48), tintColor: colors.textMuted, marginBottom: s(12), opacity: 0.5}} resizeMode="contain"/>
             <Text style={[styles.emptyTitle, { color: colors.textDark }]}>No Prayer Requests Yet</Text>
             <Text style={[styles.emptySub, { color: colors.textMuted }]}>
               Be the first to share a prayer request
@@ -381,11 +404,12 @@ export default function PrayerWallScreen({ navigation, route }) {
         >
           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
             <View style={[styles.modalTopBar, { backgroundColor: "transparent" }]}>
-              <TouchableOpacity onPress={closeModal} style={styles.modalBackBtn} activeOpacity={0.6}>
-                <Text style={styles.modalBackText}>â†</Text>
+              <TouchableOpacity onPress={closeModal} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.2)' }} activeOpacity={0.7}>
+                <Ionicons name="arrow-back" size={20} color="#FFF" />
+                <Text style={{ color: '#FFF', fontSize: fs(14), fontWeight: '700' }}>Back</Text>
               </TouchableOpacity>
               <Text style={styles.modalTitle}>New Prayer Request</Text>
-              <View style={styles.topSpacer} />
+              <View style={{ width: 60 }} />
             </View>
 
             <ScrollView style={[styles.modalBody, { backgroundColor: colors.bg }]} showsVerticalScrollIndicator={false}>
@@ -398,10 +422,16 @@ export default function PrayerWallScreen({ navigation, route }) {
                     placeholderTextColor={colors.textMuted}
                     multiline
                     numberOfLines={6}
+                    maxLength={300}
                     textAlignVertical="top"
                     value={requestText}
                     onChangeText={setRequestText}
                   />
+                  <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 6, marginBottom: 12 }}>
+                    <Text style={{ fontSize: fs(12), color: requestText.length >= 300 ? '#E74C3C' : colors.textMuted, fontWeight: '600' }}>
+                      {requestText.length}/300 characters
+                    </Text>
+                  </View>
 
                   <View style={styles.anonymousRow}>
                     <View>
@@ -417,41 +447,57 @@ export default function PrayerWallScreen({ navigation, route }) {
                   </View>
                 </View>
 
-                <TouchableOpacity
-                  style={[styles.modalSubmitBtn, (!requestText.trim() || submitting) && { opacity: 0.5 }]}
-                  onPress={handleSubmit}
-                  activeOpacity={0.85}
-                  disabled={!requestText.trim() || submitting}
-                >
-                  {submitting ? (
-                    <ActivityIndicator color="#FFF" size="small" />
-                  ) : (
-                    <Text style={styles.modalSubmitText}>Submit Prayer Request</Text>
-                  )}
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: s(10), marginTop: s(16), marginBottom: s(24) }}>
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      backgroundColor: colors.cardBg,
+                      borderWidth: 1.5,
+                      borderColor: colors.cardBorder,
+                      borderRadius: s(12),
+                      paddingVertical: s(14),
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexDirection: 'row',
+                      gap: 6,
+                    }}
+                    onPress={closeModal}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="arrow-back" size={18} color={colors.textDark} />
+                    <Text style={{ fontSize: fs(15), fontWeight: '700', color: colors.textDark }}>Back</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalSubmitBtn,
+                      { flex: 1.6, marginTop: 0 },
+                      (!requestText.trim() || submitting) && { opacity: 0.5 }
+                    ]}
+                    onPress={handleSubmit}
+                    activeOpacity={0.85}
+                    disabled={!requestText.trim() || submitting}
+                  >
+                    {submitting ? (
+                      <ActivityIndicator color="#FFF" size="small" />
+                    ) : (
+                      <Text style={styles.modalSubmitText}>Submit Request</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
             </ScrollView>
           </KeyboardAvoidingView>
         </Animated.View>
       )}
 
-      {/* Bottom tab bar */}
-      <View style={[styles.tabBar, { backgroundColor: colors.tabBg }]}>
-        <Animated.View style={[styles.tabIndicator, { transform: [{ translateX: indicatorPosition }] }]} />
-        {(userRole !== "officer" ? ALL_TAB_ITEMS.filter(t => t.key !== "Loans") : ALL_TAB_ITEMS).map((tab) => {
-          const isActive = activeTab === tab.key;
-          const ai = ALL_TAB_ITEMS.findIndex(t => t.key === tab.key);
-          return (
-            <TouchableOpacity key={tab.key} style={styles.tabItem} onPress={() => { setActiveTab(tab.key); navWithEmail(tab.key); }} activeOpacity={0.7}>
-              <Animated.View style={[styles.tabBgCircle, { opacity: tabAnimations[ai].bgOpacity }]} />
-              <Animated.View style={{ transform: [{ scale: tabAnimations[ai].scale }] }}>
-                <Image source={tab.icon} style={[styles.tabIcon, { tintColor: isActive ? C.tabActive : colors.tabInactive, opacity: isActive ? 1 : 0.6 }]} resizeMode="contain" />
-              </Animated.View>
-              <Text style={[styles.tabLabel, { color: isActive ? C.tabActive : colors.tabInactive, fontWeight: isActive ? "700" : "500", fontSize: isActive ? 11 : 10, opacity: isActive ? 1 : 0.7 }]}>{tab.key}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      {/* Floating Bottom Tab Bar */}
+      <FloatingNavBar
+        activeTab="Prayer Wall"
+        navigation={navigation}
+        userEmail={userEmail}
+        userRole={userRole}
+      />
 
       {/* Sidebar overlay */}
       {sidebarOpen && <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={closeSidebar} />}
@@ -460,7 +506,7 @@ export default function PrayerWallScreen({ navigation, route }) {
       <Animated.View style={[styles.sidebar, { transform: [{ translateX: slideX }] }]}>
         <View style={styles.sidebarHeader}>
           <Image source={LOGO} style={styles.sidebarLogo} resizeMode="contain" />
-          <Image source={LOGO} style={{ width: 40, height: 40, tintColor: "#fff" }} resizeMode="contain" />
+          <Image source={LOGO} style={{ width: s(40), height: s(40), tintColor: "#fff" }} resizeMode="contain" />
         </View>
         <View style={styles.sidebarNav}>
           {SIDEBAR_ITEMS.map((item) => (
@@ -498,98 +544,100 @@ const getStyles = (C) => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg  },
   circleTopRight: { position: 'absolute', top: -120, right: -120, width: 350, height: 350, borderRadius: 175, backgroundColor: '#0D1F45', opacity: 0.04, zIndex: 0 },
   circleBottomLeft: { position: 'absolute', bottom: -150, left: -150, width: 450, height: 450, borderRadius: 225, backgroundColor: '#00C3FF', opacity: 0.04, zIndex: 0 },
-  topBar: { backgroundColor: C.navBg, flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingTop: Platform.OS === "ios" ? 56 : 42, paddingBottom: 14 },
+  topBar: { backgroundColor: C.navBg, flexDirection: "row", alignItems: "center", paddingHorizontal: s(18), paddingTop: Platform.OS === "ios" ? s(56) : s(42), paddingBottom: 14 },
   menuBtn: { padding: 4, justifyContent: "center", gap: 5 },
-  menuLine: { width: 22, height: 2.2, backgroundColor: C.textDark, borderRadius: 1.2 },
-  topTitle: { flex: 1, textAlign: "center", fontSize: 20, fontWeight: "600", color: C.textDark },
+  menuLine: { width: s(22), height: 2.2, backgroundColor: C.textDark, borderRadius: 1.2 },
+  topTitle: { flex: 1, textAlign: "center", fontSize: fs(20), fontWeight: "600", color: C.textDark },
   topSpacer: { width: 28 },
   scroll: { flex: 1 },
-  header: { paddingHorizontal: 18, paddingTop: 20, paddingBottom: 16 },
-  headerTitle: { fontSize: 26, fontWeight: "700", marginBottom: 4 },
-  headerSubtitle: { fontSize: 14, lineHeight: 20 },
+  header: { paddingHorizontal: s(18), paddingTop: s(20), paddingBottom: 16 },
+  headerTitle: { fontSize: fs(26), fontWeight: "700", marginBottom: 4 },
+  headerSubtitle: { fontSize: fs(14), lineHeight: 20 },
 
   // Stats
-  statsRow: { flexDirection: "row", paddingHorizontal: 18, gap: 12, marginBottom: 20 },
-  statCard: { flex: 1, borderRadius: 16, padding: 16, borderWidth: 1, alignItems: "center" },
-  statValue: { fontSize: 24, fontWeight: "700", marginBottom: 2 },
-  statLabel: { fontSize: 12, fontWeight: "600" },
+  statsRow: { flexDirection: "row", paddingHorizontal: s(18), gap: s(12), marginBottom: 20 },
+  statCard: { flex: 1, borderRadius: s(16), padding: s(16), borderWidth: 1, alignItems: "center" },
+  statValue: { fontSize: fs(24), fontWeight: "700", marginBottom: 2 },
+  statLabel: { fontSize: fs(12), fontWeight: "600" },
 
   // Submit button
-  submitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, marginHorizontal: 18, backgroundColor: C.blue, paddingVertical: 16, borderRadius: 14, marginBottom: 20, shadowColor: C.blue, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4 },
+  submitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: s(10), marginHorizontal: s(18), backgroundColor: C.blue, paddingVertical: s(16), borderRadius: s(14), marginBottom: s(20), shadowColor: C.blue, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4 },
   submitBtnEmoji: { fontSize: 18 },
-  submitBtnText: { color: "#FFF", fontSize: 16, fontWeight: "700" },
+  submitBtnText: { color: "#FFF", fontSize: fs(16), fontWeight: "700" },
 
   // Prayer list
-  prayerList: { paddingHorizontal: 18, gap: 14 },
-  prayerCard: { borderRadius: 16, padding: 18, borderWidth: 1 },
+  prayerList: { paddingHorizontal: s(18), gap: 14 },
+  prayerCard: { borderRadius: s(16), padding: s(18), borderWidth: 1 },
   prayerHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
   prayerUser: { flexDirection: "row", alignItems: "center", gap: 10 },
-  prayerAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  prayerName: { fontSize: 14, fontWeight: "700" },
-  prayerTime: { fontSize: 11, marginTop: 2 },
-  prayerText: { fontSize: 15, lineHeight: 22, marginBottom: 14 },
+  prayerAvatar: { width: s(36), height: s(36), borderRadius: s(18), alignItems: "center", justifyContent: "center" },
+  prayerName: { fontSize: fs(14), fontWeight: "700" },
+  prayerTime: { fontSize: fs(11), marginTop: 2 },
+  prayerText: { fontSize: fs(15), lineHeight: fs(22), marginBottom: 14 },
   prayerActions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  prayBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 10, backgroundColor: C.bg },
+  prayBtn: { flexDirection: "row", alignItems: "center", gap: s(6), paddingVertical: s(8), paddingHorizontal: s(16), borderRadius: s(10), backgroundColor: C.bg },
   prayBtnActive: { backgroundColor: C.greenLight },
-  prayBtnText: { fontSize: 13, fontWeight: "600", color: C.textMuted },
+  prayBtnText: { fontSize: fs(13), fontWeight: "600", color: C.textMuted },
   prayBtnTextActive: { color: C.green, fontWeight: "700" },
-  prayCount: { fontSize: 13, fontWeight: "600" },
+  prayCount: { fontSize: fs(13), fontWeight: "600" },
 
   // Loading / empty
-  loadingText: { marginTop: 12, fontSize: 14 },
-  emptyCard: { marginHorizontal: 18, borderRadius: 18, padding: 40, borderWidth: 1, alignItems: "center" },
-  emptyTitle: { fontSize: 16, fontWeight: "700", marginBottom: 4 },
-  emptySub: { fontSize: 14, textAlign: "center" },
-  bottomPad: { height: 100 },
+  loadingText: { marginTop: s(12), fontSize: 14 },
+  emptyCard: { marginHorizontal: s(18), borderRadius: s(18), padding: s(40), borderWidth: 1, alignItems: "center" },
+  emptyTitle: { fontSize: fs(16), fontWeight: "700", marginBottom: 4 },
+  emptySub: { fontSize: fs(14), textAlign: "center" },
+  bottomPad: { height: 110 },
 
   // Modal
   modalContainer: {
     position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, backgroundColor: "#FFF",
   },
-  modalTopBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingTop: Platform.OS === "ios" ? 56 : 42, paddingBottom: 14 },
+  modalTopBar: { flexDirection: "row", alignItems: "center", paddingHorizontal: s(18), paddingTop: Platform.OS === "ios" ? s(56) : s(42), paddingBottom: 14 },
   modalBackBtn: { padding: 4 },
-  modalBackText: { fontSize: 24, color: "#FFF", fontWeight: "600" },
-  modalTitle: { flex: 1, textAlign: "center", fontSize: 18, fontWeight: "600", color: "#FFF" },
+  modalBackText: { fontSize: fs(24), color: "#FFF", fontWeight: "600" },
+  modalTitle: { flex: 1, textAlign: "center", fontSize: fs(18), fontWeight: "600", color: "#FFF" },
   modalBody: { flex: 1 },
   modalContent: { padding: 18 },
-  modalCard: { borderRadius: 16, padding: 20, borderWidth: 1, marginBottom: 20 },
-  modalLabel: { fontSize: 16, fontWeight: "700", marginBottom: 14 },
-  modalInput: { borderWidth: 1, borderRadius: 12, padding: 14, fontSize: 15, lineHeight: 22, minHeight: 140, marginBottom: 18 },
+  modalCard: { borderRadius: s(16), padding: s(20), borderWidth: 1, marginBottom: 20 },
+  modalLabel: { fontSize: fs(16), fontWeight: "700", marginBottom: 14 },
+  modalInput: { borderWidth: 1, borderRadius: s(12), padding: s(14), fontSize: fs(15), lineHeight: fs(22), minHeight: 140, marginBottom: 18 },
   anonymousRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  anonymousLabel: { fontSize: 15, fontWeight: "600", marginBottom: 3 },
+  anonymousLabel: { fontSize: fs(15), fontWeight: "600", marginBottom: 3 },
   anonymousSub: { fontSize: 12 },
-  modalSubmitBtn: { backgroundColor: C.blue, paddingVertical: 16, borderRadius: 14, alignItems: "center" },
-  modalSubmitText: { color: "#FFF", fontSize: 16, fontWeight: "700" },
+  modalSubmitBtn: { backgroundColor: C.blue, paddingVertical: s(16), borderRadius: s(14), alignItems: "center" },
+  modalSubmitText: { color: "#FFF", fontSize: fs(16), fontWeight: "700" },
 
   // Tab bar
-  tabBar: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", backgroundColor: C.tabBg, borderTopWidth: 1, borderTopColor: "rgba(100,140,200,0.2)", paddingVertical: 15, paddingBottom: Platform.OS === "ios" ? 30 : 10 },
-  tabIndicator: { position: "absolute", bottom: 0, width: SCREEN_WIDTH / 5, height: 3, backgroundColor: C.tabActive, borderRadius: 2 },
+  tabBar: { position: "absolute", bottom: 0, left: 0, right: 0, flexDirection: "row", backgroundColor: C.tabBg, borderTopWidth: 1, borderTopColor: "rgba(100,140,200,0.2)", paddingVertical: s(15), paddingBottom: Platform.OS === "ios" ? 30 : 10 },
+  tabIndicator: { position: "absolute", bottom: 0, width: SCREEN_WIDTH / 5, height: s(3), backgroundColor: C.tabActive, borderRadius: 2 },
   tabItem: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, position: "relative" },
   tabBgCircle: { position: "absolute", width: 75, height: 62, borderRadius: 15, backgroundColor: "rgba(46,107,240,0.15)", top: -14 },
-  tabIcon: { width: 26, height: 26 },
+  tabIcon: { width: s(26), height: 26 },
   tabLabel: { fontSize: 10 },
 
   // Sidebar
-  overlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.overlay, zIndex: 10 },
-  sidebar: { position: "absolute", top: 0, left: 0, bottom: 0, width: 260, backgroundColor: "#0D1F45", zIndex: 20, paddingTop: Platform.OS === "ios" ? 60 : 44, paddingHorizontal: 18, justifyContent: "space-between" },
-  sidebarHeader: { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 30 },
-  sidebarLogo: { width: 40, height: 40, borderRadius: 20 },
-  sidebarTitle: { fontSize: 20, fontWeight: "700", color: "#FFF" },
+  overlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.overlay, zIndex: 998, elevation: 998 },
+  sidebar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: SIDEBAR_WIDTH,
+    backgroundColor: C.sidebarBg, zIndex: 1000, elevation: 1000, paddingTop: Platform.OS === "ios" ? s(60) : s(44), paddingHorizontal: s(18), justifyContent: "space-between" },
+  sidebarHeader: { flexDirection: "row", alignItems: "center", gap: s(14), marginBottom: 30 },
+  sidebarLogo: { width: s(40), height: s(40), borderRadius: 20 },
+  sidebarTitle: { fontSize: fs(20), fontWeight: "700", color: "#FFF" },
   sidebarNav: { flex: 1, gap: 4 },
-  sidebarItem: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 12, paddingHorizontal: 12, borderRadius: 12 },
-  sidebarIcon: { width: 20, height: 20 },
-  sidebarItemText: { fontSize: 15, color: C.textMuted, fontWeight: "600" },
-  sidebarFooter: { paddingBottom: Platform.OS === "ios" ? 30 : 16, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.1)", paddingTop: 16 },
-  sidebarUserRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 16 },
-  sidebarAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" },
-  sidebarAvatarIcon: { width: 18, height: 18, tintColor: "#FFF" },
-  sidebarUserName: { fontSize: 14, fontWeight: "600", color: "#FFF" },
-  sidebarUserEmail: { fontSize: 12, color: "rgba(255,255,255,0.5)" },
-  signOutRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10 },
-  signOutIcon: { width: 18, height: 18, tintColor: "#E74C3C" },
-  signOutText: { fontSize: 14, fontWeight: "500", color: "#E74C3C" },
+  sidebarItem: { flexDirection: "row", alignItems: "center", gap: s(14), paddingVertical: s(12), paddingHorizontal: s(12), borderRadius: 12 },
+  sidebarIcon: { width: s(20), height: 20 },
+  sidebarItemText: { fontSize: fs(15), color: C.textMuted, fontWeight: "600" },
+  sidebarFooter: { paddingBottom: Platform.OS === "ios" ? s(30) : s(16), borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.1)", paddingTop: 16 },
+  sidebarUserRow: { flexDirection: "row", alignItems: "center", gap: s(12), marginBottom: 16 },
+  sidebarAvatar: { width: s(36), height: s(36), borderRadius: s(18), backgroundColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" },
+  sidebarAvatarIcon: { width: s(18), height: s(18), tintColor: "#FFF" },
+  sidebarUserName: { fontSize: fs(14), fontWeight: "600", color: "#FFF" },
+  sidebarUserEmail: { fontSize: fs(12), color: "rgba(255,255,255,0.5)" },
+  signOutRow: { flexDirection: "row", alignItems: "center", gap: s(12), paddingVertical: 10 },
+  signOutIcon: { width: s(18), height: s(18), tintColor: "#E74C3C" },
+  signOutText: { fontSize: fs(14), fontWeight: "500", color: "#E74C3C" },
 });
-
-
-
-

@@ -1,5 +1,10 @@
 import React, { useEffect, useRef, useMemo } from "react";
-import { View, Text, StyleSheet, Animated, Image } from "react-native";
+import { View, Text, StyleSheet, Animated, Image, Dimensions } from "react-native";
+
+const { width: _SW } = Dimensions.get("window");
+const _WR = Math.min(_SW / 375, 1.3);
+const s = (v) => Math.round(v * _WR);
+const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getToken } from "../services/AuthService";
 import { useTheme } from "../components/ThemeContext";
@@ -56,7 +61,7 @@ export default function SplashScreen({ navigation }) {
             if (!token) {
               // Session exists but no token (old login) → force re-login
               await AsyncStorage.removeItem(SESSION_KEY);
-              navigation.replace("PUAC");
+              navigation.replace("Start");
               return;
             }
 
@@ -76,7 +81,7 @@ export default function SplashScreen({ navigation }) {
       }
 
       // No valid session → StartScreen
-      navigation.replace("PUAC");
+      navigation.replace("Start");
     }, 2000);
 
     return () => clearTimeout(timer);
@@ -111,19 +116,19 @@ const getStyles = (C) => StyleSheet.create({
     justifyContent: "center",
   },
   logo: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    marginBottom: 20,
+    width: s(110),
+    height: s(110),
+    borderRadius: s(55),
+    marginBottom: s(20),
   },
   title: {
-    fontSize: 34,
+    fontSize: fs(34),
     fontWeight: "700",
     textAlign: "center",
-    marginBottom: 6,
+    marginBottom: s(6),
   },
   subtitle: {
-    fontSize: 15,
+    fontSize: fs(15),
     textAlign: "center",
   },
 });

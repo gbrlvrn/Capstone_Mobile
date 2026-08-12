@@ -183,7 +183,7 @@ export default function ChatbotModal({ visible, onClose }) {
         keyboardVerticalOffset={0}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: colors.sidebarBg }]}>
           <View style={styles.headerContent}>
             <View style={styles.logoContainer}>
               <Image
@@ -240,7 +240,7 @@ export default function ChatbotModal({ visible, onClose }) {
 
               {msg.type === "user" && (
                 <View style={styles.userMessageContainer}>
-                  <View style={styles.userMessageBubble}>
+                  <View style={[styles.userMessageBubble, { backgroundColor: colors.blue }]}>
                     <Text style={styles.userMessageText}>{msg.text}</Text>
                   </View>
                 </View>
@@ -306,7 +306,7 @@ export default function ChatbotModal({ visible, onClose }) {
               editable={!isTyping}
             />
             <TouchableOpacity
-              style={[styles.sendButton, isTyping && { opacity: 0.5 }]}
+              style={[styles.sendButton, { backgroundColor: colors.blue }, isTyping && { opacity: 0.5 }]}
               onPress={handleSendMessage}
               activeOpacity={0.7}
               disabled={isTyping}

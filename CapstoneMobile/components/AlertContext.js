@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useRef } from "react";
+import * as Haptics from "expo-haptics";
 import {
   View,
   Text,
@@ -28,6 +29,18 @@ export function AlertProvider({ children }) {
   const C = colors;
 
   const showAlert = useCallback((title, message, buttons) => {
+    // Trigger haptic feedback based on alert type/title
+    if (title && typeof title === "string") {
+      const lower = title.toLowerCase();
+      if (lower.includes("error") || lower.includes("invalid") || lower.includes("failed") || lower.includes("cannot")) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      } else if (lower.includes("success") || lower.includes("submitted") || lower.includes("approved") || lower.includes("done")) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      } else {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      }
+    }
+
     // If no buttons are provided, default to an "OK" button
     const defaultButtons = [{ text: "OK", onPress: () => {} }];
     const finalButtons = buttons && buttons.length > 0 ? buttons : defaultButtons;

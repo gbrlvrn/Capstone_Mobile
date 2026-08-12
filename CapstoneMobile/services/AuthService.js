@@ -1,24 +1,116 @@
 import { API_CONFIG } from "./config";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 
 const TOKEN_KEY = "@faithly_token";
+// SecureStore keys must be alphanumeric + underscore/hyphen only
+const SECURE_TOKEN_KEY = "faithly_jwt_token";
 
 // ── Token Management ────────────────────────────────────────────────
+// JWT is stored in expo-secure-store (device Keychain on iOS, Keystore on Android).
+// This prevents the token from being readable by other apps or on rooted devices.
+// Falls back to AsyncStorage only if SecureStore is unavailable (rare).
 
 export async function saveToken(token) {
-  await AsyncStorage.setItem(TOKEN_KEY, token);
+  try {
+    await SecureStore.setItemAsync(SECURE_TOKEN_KEY, token);
+    // Remove legacy AsyncStorage token if it exists (one-time migration)
+    await AsyncStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // SecureStore unavailable (e.g. iOS simulator edge case) — fall back
+    await AsyncStorage.setItem(TOKEN_KEY, token);
+  }
 }
 
 export async function getToken() {
-  return AsyncStorage.getItem(TOKEN_KEY);
+  try {
+    const secureToken = await SecureStore.getItemAsync(SECURE_TOKEN_KEY);
+    if (secureToken) return secureToken;
+    // One-time migration: read from old AsyncStorage location and re-save securely
+    const legacyToken = await AsyncStorage.getItem(TOKEN_KEY);
+    if (legacyToken) {
+      await saveToken(legacyToken); // migrate to secure store
+      return legacyToken;
+    }
+    return null;
+  } catch {
+    return AsyncStorage.getItem(TOKEN_KEY);
+  }
 }
 
 export async function clearToken() {
+  try {
+    await SecureStore.deleteItemAsync(SECURE_TOKEN_KEY);
+  } catch {}
+  // Always also clear legacy AsyncStorage location
   await AsyncStorage.removeItem(TOKEN_KEY);
+}
+
+// ── Auth Invalidation Event ──────────────────────────────────────────
+// Lightweight pub/sub so App.js can auto-navigate to Login on 401.
+const _authListeners = new Set();
+
+export function onAuthInvalidated(callback) {
+  _authListeners.add(callback);
+  return () => _authListeners.delete(callback); // unsubscribe
+}
+
+function _fireAuthInvalidated() {
+  _authListeners.forEach((cb) => {
+    try { cb(); } catch {}
+  });
+}
+
+// ── Secure User Data Helpers ─────────────────────────────────────────
+// Sensitive profile data (email, name, role) stored in SecureStore.
+// Falls back to AsyncStorage for backward compat.
+const SECURE_USER_KEY = "faithly_user_secure";
+
+export async function saveUserData(userData) {
+  const json = JSON.stringify(userData);
+  try {
+    await SecureStore.setItemAsync(SECURE_USER_KEY, json);
+    // Keep AsyncStorage copy in sync for screens that still read it directly
+    await AsyncStorage.setItem("faithly_user", json);
+  } catch {
+    await AsyncStorage.setItem("faithly_user", json);
+  }
+}
+
+export async function getUserData() {
+  try {
+    const secure = await SecureStore.getItemAsync(SECURE_USER_KEY);
+    if (secure) return JSON.parse(secure);
+    // Migrate from legacy AsyncStorage
+    const legacy = await AsyncStorage.getItem("faithly_user");
+    if (legacy) {
+      const parsed = JSON.parse(legacy);
+      await saveUserData(parsed); // migrate
+      return parsed;
+    }
+    return {};
+  } catch {
+    const fallback = await AsyncStorage.getItem("faithly_user");
+    return fallback ? JSON.parse(fallback) : {};
+  }
+}
+
+export async function clearUserData() {
+  try { await SecureStore.deleteItemAsync(SECURE_USER_KEY); } catch {}
+  await AsyncStorage.removeItem("faithly_user");
+  await AsyncStorage.removeItem("@faithly_session");
 }
 
 // ── JWT Role Decoder ─────────────────────────────────────────────────
 // Role is NOT returned from /me — it lives in the JWT payload only.
+//
+// SECURITY NOTE: The JWT payload is decoded client-side WITHOUT signature
+// verification. This is intentional — signature verification requires the
+// server secret, which must never be embedded in client code. The server
+// validates the full JWT on every authenticated request (the real security
+// boundary). The decoded payload here is used ONLY for UI display (e.g.
+// showing "Officer" vs "Member" labels). Never use client-decoded role
+// data for access control decisions — always rely on server responses.
 export function decodeTokenRole() {
   try {
     const token = AsyncStorage.getItem(TOKEN_KEY); // sync-ish via cache
@@ -49,7 +141,7 @@ export async function getTokenPayload() {
 
 // ── HTTP Helpers ────────────────────────────────────────────────────
 
-async function request(method, path, body, requiresAuth = false) {
+async function request(method, path, body, requiresAuth = false, retries = 1) {
   const url = `${API_CONFIG.CUSTOM_BACKEND.BASE_URL}${path}`;
   const headers = { "Content-Type": "application/json" };
 
@@ -58,35 +150,48 @@ async function request(method, path, body, requiresAuth = false) {
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout for cold starts
 
-  try {
-    const res = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+    try {
+      const res = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
 
-    const text = await res.text();
-    let data = {};
-    try { data = JSON.parse(text); } catch {}
+      const text = await res.text();
+      let data = {};
+      try { data = JSON.parse(text); } catch {}
 
-    // 401 — token expired or invalid → clear + throw so screens can redirect
-    if (res.status === 401) {
-      await AsyncStorage.removeItem(TOKEN_KEY);
-      throw new Error("Invalid or expired token");
+      if (res.status === 401) {
+        // Only trigger session-expired auto-logout for authenticated requests.
+        // Public endpoints (login, signup, OTP) return 401 for wrong credentials
+        // — that is NOT a session expiry.
+        if (requiresAuth) {
+          await clearToken();
+          _fireAuthInvalidated();
+          throw new Error("Invalid or expired token");
+        }
+        throw new Error(data?.message || "Invalid credentials");
+      }
+
+      if (!res.ok) throw new Error(data?.message || text || "Request failed");
+      return data;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (attempt < retries && (error.name === "AbortError" || error.message?.includes("Network") || error.message?.includes("fetch"))) {
+        console.log(`[Network] Retrying ${path} (Attempt ${attempt + 2})...`);
+        await new Promise(res => setTimeout(res, 1000));
+        continue;
+      }
+      if (error.name === "AbortError")
+        throw new Error("Network request timed out. Server may be spinning up, please try again.");
+      throw error;
     }
-
-    if (!res.ok) throw new Error(data?.message || text || "Request failed");
-    return data;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === "AbortError")
-      throw new Error("Network request timed out. Please check your connection.");
-    throw error;
   }
 }
 
@@ -95,82 +200,102 @@ async function get(path, requiresAuth = false) {
 }
 
 // ── Web Backend Helper (faithlyweb server, port 5000) ────────────────
-// Used for endpoints that only exist on the web backend:
-//   /attendance/my-attendance, /notifications/feed
-async function webGet(path, requiresAuth = false) {
+async function webGet(path, requiresAuth = false, retries = 1) {
   const url = `${API_CONFIG.WEB_BACKEND.BASE_URL}${path}`;
   const headers = { "Content-Type": "application/json" };
   if (requiresAuth) {
     const token = await getToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
-  try {
-    const res = await fetch(url, { method: "GET", headers, signal: controller.signal });
-    clearTimeout(timeoutId);
-    const text = await res.text();
-    let data = {};
-    try { data = JSON.parse(text); } catch {}
-    if (res.status === 401) { await AsyncStorage.removeItem(TOKEN_KEY); throw new Error("Invalid or expired token"); }
-    if (!res.ok) throw new Error(data?.message || text || "Request failed");
-    return data;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === "AbortError") throw new Error("Network request timed out.");
-    throw error;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    try {
+      const res = await fetch(url, { method: "GET", headers, signal: controller.signal });
+      clearTimeout(timeoutId);
+      const text = await res.text();
+      let data = {};
+      try { data = JSON.parse(text); } catch {}
+      if (res.status === 401) { await clearToken(); _fireAuthInvalidated(); throw new Error("Invalid or expired token"); }
+      if (!res.ok) throw new Error(data?.message || text || "Request failed");
+      return data;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (attempt < retries && (error.name === "AbortError" || error.message?.includes("Network") || error.message?.includes("fetch"))) {
+        console.log(`[Web Network] Retrying ${path}...`);
+        await new Promise(res => setTimeout(res, 1000));
+        continue;
+      }
+      if (error.name === "AbortError") throw new Error("Network request timed out.");
+      throw error;
+    }
   }
 }
 
-// POST helper for the web backend (port 5000 / faithlyweb)
-async function webPost(path, body, requiresAuth = true) {
+async function webPost(path, body, requiresAuth = true, retries = 1) {
   const url = `${API_CONFIG.WEB_BACKEND.BASE_URL}${path}`;
   const headers = { "Content-Type": "application/json" };
   if (requiresAuth) {
     const token = await getToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
-  try {
-    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: controller.signal });
-    clearTimeout(timeoutId);
-    const text = await res.text();
-    let data = {};
-    try { data = JSON.parse(text); } catch {}
-    if (res.status === 401) { await AsyncStorage.removeItem(TOKEN_KEY); throw new Error("Invalid or expired token"); }
-    if (!res.ok) throw new Error(data?.message || text || "Request failed");
-    return data;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === "AbortError") throw new Error("Network request timed out.");
-    throw error;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    try {
+      const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: controller.signal });
+      clearTimeout(timeoutId);
+      const text = await res.text();
+      let data = {};
+      try { data = JSON.parse(text); } catch {}
+      if (res.status === 401) { await clearToken(); _fireAuthInvalidated(); throw new Error("Invalid or expired token"); }
+      if (!res.ok) throw new Error(data?.message || text || "Request failed");
+      return data;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (attempt < retries && (error.name === "AbortError" || error.message?.includes("Network") || error.message?.includes("fetch"))) {
+        console.log(`[Web Network] Retrying POST ${path}...`);
+        await new Promise(res => setTimeout(res, 1000));
+        continue;
+      }
+      if (error.name === "AbortError") throw new Error("Network request timed out.");
+      throw error;
+    }
   }
 }
 
-// PUT helper for the web backend
-async function webPut(path, body, requiresAuth = true) {
+async function webPut(path, body, requiresAuth = true, retries = 1) {
   const url = `${API_CONFIG.WEB_BACKEND.BASE_URL}${path}`;
   const headers = { "Content-Type": "application/json" };
   if (requiresAuth) {
     const token = await getToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
-  try {
-    const res = await fetch(url, { method: "PUT", headers, body: JSON.stringify(body), signal: controller.signal });
-    clearTimeout(timeoutId);
-    const text = await res.text();
-    let data = {};
-    try { data = JSON.parse(text); } catch {}
-    if (res.status === 401) { await AsyncStorage.removeItem(TOKEN_KEY); throw new Error("Invalid or expired token"); }
-    if (!res.ok) throw new Error(data?.message || text || "Request failed");
-    return data;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === "AbortError") throw new Error("Network request timed out.");
-    throw error;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    try {
+      const res = await fetch(url, { method: "PUT", headers, body: JSON.stringify(body), signal: controller.signal });
+      clearTimeout(timeoutId);
+      const text = await res.text();
+      let data = {};
+      try { data = JSON.parse(text); } catch {}
+      if (res.status === 401) { await clearToken(); _fireAuthInvalidated(); throw new Error("Invalid or expired token"); }
+      if (!res.ok) throw new Error(data?.message || text || "Request failed");
+      return data;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (attempt < retries && (error.name === "AbortError" || error.message?.includes("Network") || error.message?.includes("fetch"))) {
+        console.log(`[Web Network] Retrying PUT ${path}...`);
+        await new Promise(res => setTimeout(res, 1000));
+        continue;
+      }
+      if (error.name === "AbortError") throw new Error("Network request timed out.");
+      throw error;
+    }
   }
 }
 
@@ -324,7 +449,7 @@ export async function uploadProfilePhoto(photoUri) {
   const text = await res.text();
   let data = {};
   try { data = JSON.parse(text); } catch {}
-  if (res.status === 401) { await clearToken(); throw new Error("Invalid or expired token"); }
+  if (res.status === 401) { await clearToken(); _fireAuthInvalidated(); throw new Error("Invalid or expired token"); }
   if (!res.ok) throw new Error(data?.message || text || "Upload failed");
   return data;
 }
@@ -672,4 +797,9 @@ export function savePaymentAccount(accountData) {
 
 export function rsvpEvent(eventId, email, headcount = 1) {
   return request("POST", `/events/${eventId}/rsvp`, { email, headcount });
+}
+
+
+export async function changePassword(currentPassword, newPassword) {
+  return await webPost("/auth/change-password", { currentPassword, newPassword });
 }

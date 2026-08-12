@@ -65,7 +65,7 @@ export default function OnboardingScreen({ navigation, route }) {
         routes: [{ name: "Home", params: { email, source: "signup" } }],
       });
     } else {
-      navigation.replace("PUAC");
+      navigation.replace("Start");
     }
   };
 

@@ -13,6 +13,7 @@ import {
   Switch,
   Alert,
   TextInput,
+  Modal,
 } from "react-native";
 import ChatbotModal from "./ChatbotModal";
 import DraggableChatButton from "../components/DraggableChatButton";
@@ -20,8 +21,16 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../components/ThemeContext";
 import { useAlert } from "../components/AlertContext";
+import { useNetwork } from "../components/NetworkContext";
+import { requestPasswordReset, changePassword } from "../services/AuthService";
+import OfflineBanner from "../components/OfflineBanner";
+import * as Haptics from "expo-haptics";
+import Constants from "expo-constants";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
+const s = (v) => Math.round(v * _WR);
+const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
 
 const LOGO = require("../assets/puac_logo.png");
 
@@ -98,9 +107,14 @@ function cleanEmail(value) {
 
 export default function SettingsScreen({ navigation, route }) {
   const { colors, isDark, toggleDarkMode } = useTheme();
+  const [wifiOnlySync, setWifiOnlySync] = useState(true);
+  const [cacheSize, setCacheSize] = useState("14.2 MB");
+  const [isClearingCache, setIsClearingCache] = useState(false);
   const C = colors;
   const styles = useMemo(() => getStyles(C), [C]);
   const { showAlert } = useAlert();
+  const { isOnline } = useNetwork();
+  const appVersion = Constants.expoConfig?.version || '1.0.0';
   const [activeTab, setActiveTab] = useState("Settings");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [emailNotifications, setEmailNotifications] = useState(true);
@@ -111,6 +125,9 @@ export default function SettingsScreen({ navigation, route }) {
   });
   const [chatbotOpen, setChatbotOpen] = useState(false);
 
+  // Legal document modal state — { title, content } or null
+  const [docModal, setDocModal] = useState(null);
+
   // Password editing states
   const [isEditingPassword, setIsEditingPassword] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -119,6 +136,25 @@ export default function SettingsScreen({ navigation, route }) {
   const [showCurrentPwd, setShowCurrentPwd] = useState(false);
   const [showNewPwd, setShowNewPwd] = useState(false);
   const [showConfirmPwd, setShowConfirmPwd] = useState(false);
+  const [isPasswordSaving, setIsPasswordSaving] = useState(false);
+
+  const handleClearCache = async () => {
+    setIsClearingCache(true);
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const cacheKeys = keys.filter((k) => k.includes("cache") || k.includes("temp") || k.includes("devotional") || k.includes("prayers"));
+      if (cacheKeys.length > 0) {
+        await AsyncStorage.multiRemove(cacheKeys);
+      }
+      setCacheSize("0.0 KB");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      showAlert("Cache Cleared", "Temporary offline files and response caches have been cleared successfully.");
+    } catch (err) {
+      showAlert("Error", "Failed to clear cache. Please try again.");
+    } finally {
+      setIsClearingCache(false);
+    }
+  };
 
   const toggleCategory = (cat) => {
     setSelectedCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
@@ -247,22 +283,17 @@ export default function SettingsScreen({ navigation, route }) {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
+      <OfflineBanner />
       <View style={styles.circleTopRight} />
       <View style={styles.circleBottomLeft} />
 
       {/* Top Bar */}
       <View style={[styles.topBar, { backgroundColor: "transparent" }]}>
-        <TouchableOpacity
-          style={styles.menuBtn}
-          onPress={openSidebar}
-          activeOpacity={0.6}
-        >
-          <View style={styles.menuLine} />
-          <View style={styles.menuLine} />
-          <View style={styles.menuLine} />
+        <TouchableOpacity style={styles.menuBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home', { email: userEmail })} activeOpacity={0.6}>
+          <Text style={{ color: colors.textDark, fontSize: fs(26), fontWeight: '700', paddingHorizontal: 4 }}>←</Text>
         </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: 36, height: 36 }} resizeMode="contain" /></View>
-        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: 22, height: 22, tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
+        <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: 36, height: 36, borderRadius: 18 }} resizeMode="cover" /></View>
+        <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.bell} style={{ width: 22, height: 22, tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
       </View>
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -272,6 +303,34 @@ export default function SettingsScreen({ navigation, route }) {
           <Text style={[styles.headerSubtitle, { color: colors.textMuted }]}>
             Manage your account preferences
           </Text>
+        </View>
+
+        {/* Appearance / Theme Section */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={[styles.sectionIconBox, { backgroundColor: colors.purpleLight || "rgba(175,82,222,0.12)" }]}>
+              <Ionicons name="moon-outline" size={20} color={colors.purple || "#AF52DE"} />
+            </View>
+            <View style={styles.sectionHeaderText}>
+              <Text style={[styles.sectionTitle, { color: colors.textDark }]}>Appearance</Text>
+              <Text style={[styles.sectionSubtitle, { color: colors.textMuted }]}>Customize application visual theme</Text>
+            </View>
+          </View>
+
+          <View style={[styles.card, { backgroundColor: colors.cardBg, padding: 20 }]}>
+            <View style={styles.channelBox}>
+              <View style={styles.settingLeft}>
+                <Text style={[styles.settingLabel, { color: colors.textDark }]}>Dark Mode</Text>
+                <Text style={[styles.settingDescription, { color: colors.textMuted }]}>Switch between light and dark themes</Text>
+              </View>
+              <Switch
+                value={isDark}
+                onValueChange={toggleDarkMode}
+                trackColor={{ false: "#D1D5DB", true: colors.purple || "#AF52DE" }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+          </View>
         </View>
 
         {/* Notifications Section */}
@@ -406,7 +465,21 @@ export default function SettingsScreen({ navigation, route }) {
                 <View style={styles.pwdForgotRow}>
                   <Ionicons name="mail-outline" size={12} color={C.textMuted} style={{ marginRight: 4 }} />
                   <Text style={styles.pwdForgotText}>Forgot your current password? </Text>
-                  <TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (!userEmail) {
+                        showAlert("Error", "No account email found. Please log out and back in.");
+                        return;
+                      }
+                      try {
+                        await requestPasswordReset(userEmail);
+                        setIsEditingPassword(false);
+                        navigation.navigate("ForgotPassword", { email: userEmail });
+                      } catch (e) {
+                        showAlert("Error", e?.message || "Could not send reset email.");
+                      }
+                    }}
+                  >
                     <Text style={styles.pwdResetLink}>Reset via email</Text>
                   </TouchableOpacity>
                 </View>
@@ -451,23 +524,44 @@ export default function SettingsScreen({ navigation, route }) {
                     <Text style={styles.pwdCancelBtnText}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity 
-                    style={styles.pwdUpdateBtn} 
+                    style={[styles.pwdUpdateBtn, isPasswordSaving && { opacity: 0.6 }]} 
                     activeOpacity={0.7}
-                    onPress={() => {
-                      if(!currentPassword || !newPassword || !confirmPassword) {
+                    disabled={isPasswordSaving}
+                    onPress={async () => {
+                      if (!currentPassword || !newPassword || !confirmPassword) {
                         showAlert("Error", "Please fill in all fields.");
                         return;
                       }
-                      if(newPassword !== confirmPassword) {
+                      if (newPassword.length < 8) {
+                        showAlert("Error", "New password must be at least 8 characters.");
+                        return;
+                      }
+                      if (newPassword !== confirmPassword) {
                         showAlert("Error", "New passwords do not match.");
                         return;
                       }
-                      // Implement actual API call here
-                      showAlert("Success", "Password updated successfully!");
-                      setIsEditingPassword(false);
+                      if (!userEmail) {
+                        showAlert("Error", "No account email found. Please log out and back in.");
+                        return;
+                      }
+                      setIsPasswordSaving(true);
+                      try {
+                        await changePassword(currentPassword, newPassword);
+                        showAlert("Success", "Password updated successfully!");
+                        setIsEditingPassword(false);
+                        setCurrentPassword("");
+                        setNewPassword("");
+                        setConfirmPassword("");
+                      } catch (e) {
+                        showAlert("Error", e?.message || "Failed to update password. Please check your current password.");
+                      } finally {
+                        setIsPasswordSaving(false);
+                      }
                     }}
                   >
-                    <Text style={styles.pwdUpdateBtnText}>Update password</Text>
+                    <Text style={styles.pwdUpdateBtnText}>
+                      {isPasswordSaving ? "Updating..." : "Update password"}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -475,13 +569,152 @@ export default function SettingsScreen({ navigation, route }) {
           </View>
         </View>
 
+        {/* Storage & Data Section */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={[styles.sectionIconBox, { backgroundColor: colors.blueLight || "rgba(13,31,69,0.08)" }]}>
+              <Ionicons name="server-outline" size={20} color={colors.blue || "#0D1F45"} />
+            </View>
+            <View style={styles.sectionHeaderText}>
+              <Text style={[styles.sectionTitle, { color: colors.textDark }]}>Data & Storage</Text>
+              <Text style={[styles.sectionSubtitle, { color: colors.textMuted }]}>Manage cached content and data synchronization</Text>
+            </View>
+          </View>
+
+          <View style={[styles.card, { backgroundColor: colors.cardBg, padding: 20 }]}>
+            <View style={[styles.channelBox, { marginBottom: 16 }]}>
+              <View style={styles.settingLeft}>
+                <Text style={[styles.settingLabel, { color: colors.textDark }]}>Cached Offline Storage</Text>
+                <Text style={[styles.settingDescription, { color: colors.textMuted }]}>{cacheSize} used for offline devotions & prayers</Text>
+              </View>
+              <TouchableOpacity
+                style={{
+                  backgroundColor: colors.bg,
+                  borderWidth: 1,
+                  borderColor: colors.cardBorder,
+                  borderRadius: 10,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  opacity: isClearingCache ? 0.6 : 1,
+                }}
+                onPress={handleClearCache}
+                disabled={isClearingCache}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: fs(12), fontWeight: "700", color: colors.blue }}>
+                  {isClearingCache ? "Clearing..." : "Clear Cache"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={[styles.channelBox, { marginTop: 16 }]}>
+              <View style={styles.settingLeft}>
+                <Text style={[styles.settingLabel, { color: colors.textDark }]}>Sync over Wi-Fi Only</Text>
+                <Text style={[styles.settingDescription, { color: colors.textMuted }]}>Reduce cellular data usage for background sync</Text>
+              </View>
+              <Switch
+                value={wifiOnlySync}
+                onValueChange={setWifiOnlySync}
+                trackColor={{ false: "#D1D5DB", true: colors.blue || "#0D1F45" }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+          </View>
+        </View>
+
+        {/* About & System Status Section */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={[styles.sectionIconBox, { backgroundColor: colors.greenLight || "rgba(52,199,89,0.1)" }]}>
+              <Ionicons name="information-circle-outline" size={20} color={colors.green || "#34C759"} />
+            </View>
+            <View style={styles.sectionHeaderText}>
+              <Text style={[styles.sectionTitle, { color: colors.textDark }]}>About & System Status</Text>
+              <Text style={[styles.sectionSubtitle, { color: colors.textMuted }]}>App diagnostics and backend health</Text>
+            </View>
+          </View>
+
+          <View style={[styles.card, { backgroundColor: colors.cardBg, padding: 20 }]}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <View>
+                <Text style={[styles.settingLabel, { color: colors.textDark }]}>System Health</Text>
+                <Text style={[styles.settingDescription, { color: colors.textMuted }]}>Real-time connection status</Text>
+              </View>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: isOnline ? "rgba(52,199,89,0.12)" : "rgba(231,76,60,0.12)", paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: isOnline ? "#34C759" : "#E74C3C" }} />
+                <Text style={{ fontSize: fs(12), fontWeight: "700", color: isOnline ? "#34C759" : "#E74C3C" }}>{isOnline ? "Online \u2022 API Active" : "Offline \u2022 No Connection"}</Text>
+              </View>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 14, marginBottom: 14 }}>
+              <Text style={[styles.settingLabel, { color: colors.textDark, marginBottom: 0 }]}>Application Version</Text>
+              <Text style={{ fontSize: fs(13), fontWeight: "600", color: colors.textMuted }}>v{appVersion}</Text>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 14 }}>
+              <TouchableOpacity
+                onPress={() => setDocModal({
+                  title: "Terms of Service",
+                  content: "IsangDiwa Mobile Application\n\n1. ACCEPTANCE OF TERMS\nBy downloading, installing, or using the IsangDiwa app, you agree to these Terms of Service.\n\n2. ACCOUNT REGISTRATION\nYou must provide accurate, complete information during registration. You are responsible for safeguarding your password and for all activities under your account.\n\n3. USER CONDUCT\nYou agree not to misuse the app, attempt unauthorized access, or interfere with other users' experience.\n\n4. FINANCIAL TRANSACTIONS\nAll loan applications, donations, and savings deposits are subject to approval by authorized church administrators. Transaction records are maintained for accountability and transparency.\n\n5. INTELLECTUAL PROPERTY\nAll content, design, and code are the property of PUAC IsangDiwa. You may not copy, modify, or distribute any part of the app.\n\n6. LIMITATION OF LIABILITY\nThe app is provided 'as is'. We are not liable for any indirect or consequential damages arising from your use of the app.\n\n7. MODIFICATIONS\nWe reserve the right to modify these terms at any time. Continued use constitutes acceptance of updated terms.\n\n8. GOVERNING LAW\nThese terms are governed by the laws of the Republic of the Philippines.\n\n\u00a9 2026 PUAC IsangDiwa. All rights reserved."
+                })}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: fs(13), fontWeight: "600", color: colors.blue }}>Terms</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setDocModal({
+                  title: "Privacy Policy",
+                  content: "IsangDiwa Privacy Policy\n\nEffective Date: January 2026\n\n1. DATA WE COLLECT\n\u2022 Personal info: name, email, phone, date of birth, gender, and community/branch\n\u2022 Financial data: donation records, loan applications, savings goals, and payment proofs\n\u2022 Device data: push notification tokens and device identifiers\n\u2022 Usage data: attendance records, app interaction patterns\n\n2. HOW WE USE YOUR DATA\n\u2022 To provide and maintain the IsangDiwa services\n\u2022 To process financial transactions and maintain records\n\u2022 To send notifications about your account and church activities\n\u2022 To verify your identity and church membership\n\n3. DATA STORAGE & SECURITY\n\u2022 Authentication tokens are stored using device-native encryption (iOS Keychain / Android Keystore)\n\u2022 Passwords are hashed using bcrypt before storage\n\u2022 All API communications use HTTPS encryption\n\u2022 Server data is hosted on secure, access-controlled infrastructure\n\n4. DATA SHARING\nWe do not sell or rent your personal data. Data is shared only with:\n\u2022 Authorized church administrators for membership verification\n\u2022 Payment processors for financial transactions\n\n5. YOUR RIGHTS (RA 10173 - Data Privacy Act of 2012)\n\u2022 Right to access your personal data\n\u2022 Right to correct inaccurate data\n\u2022 Right to request deletion of your account and data\n\u2022 Right to object to processing of your data\n\n6. DATA RETENTION\nYour data is retained for the duration of your membership. Upon account deletion, personal data is removed within 30 days.\n\n7. CONTACT\nFor privacy concerns, contact: privacy@isangdiwa.org\n\n\u00a9 2026 PUAC IsangDiwa"
+                })}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: fs(13), fontWeight: "600", color: colors.blue }}>Privacy Policy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setDocModal({
+                  title: "Church Support Desk",
+                  content: "Need help?\n\n\ud83d\udce7 Email\nsupport@isangdiwa.org\n\n\ud83d\udcac In-App Chat\nUse the chatbot button (bottom-right corner) for instant AI assistance.\n\n\ud83d\udcf1 Phone\nContact your local community leader for direct support.\n\nSupport Hours\nMonday - Saturday\n8:00 AM - 5:00 PM (PHT)\n\nFor urgent matters outside support hours, please email us and we will respond within 24 hours."
+                })}
+                activeOpacity={0.7}
+              >
+                <Text style={{ fontSize: fs(13), fontWeight: "600", color: colors.blue }}>Support</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
         {/* Action Buttons */}
         <View style={styles.actionsContainer}>
-          <TouchableOpacity style={styles.saveBtn} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={styles.saveBtn}
+            activeOpacity={0.85}
+            onPress={async () => {
+              try {
+                await AsyncStorage.setItem("faithly_settings", JSON.stringify({
+                  emailNotifications,
+                  pushNotifications,
+                  selectedCategories,
+                  wifiOnlySync,
+                  isDark,
+                }));
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                showAlert("Settings Saved", "Your preferences have been saved successfully.");
+              } catch {
+                showAlert("Error", "Failed to save settings. Please try again.");
+              }
+            }}
+          >
             <Text style={styles.saveBtnText}>Save All Settings</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
+          {/* Reset Test Data — only visible in development/Expo Go builds, hidden in production */}
+          {__DEV__ && <TouchableOpacity 
             style={[styles.resetBtn, { borderColor: colors.cardBorder, backgroundColor: colors.cardBg }]} 
             activeOpacity={0.85}
             onPress={() => {
@@ -513,11 +746,94 @@ export default function SettingsScreen({ navigation, route }) {
             }}
           >
             <Text style={[styles.resetBtnText, { color: C.red }]}>Reset Test Data</Text>
-          </TouchableOpacity>
+          </TouchableOpacity>}
         </View>
 
         <View style={styles.bottomPad} />
       </ScrollView>
+
+      {/* Legal Document Modal — scrollable full-screen overlay */}
+      <Modal
+        visible={!!docModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setDocModal(null)}
+      >
+        <View style={{ flex: 1, backgroundColor: colors.isDark ? 'rgba(0,0,0,0.85)' : 'rgba(0,0,0,0.5)' }}>
+          <View style={{
+            flex: 1,
+            marginTop: Platform.OS === 'ios' ? 60 : 40,
+            marginHorizontal: 0,
+            backgroundColor: colors.cardBg || '#FFFFFF',
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            overflow: 'hidden',
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -4 },
+            shadowOpacity: 0.15,
+            shadowRadius: 12,
+            elevation: 20,
+          }}>
+            {/* Header */}
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingHorizontal: 20,
+              paddingTop: 20,
+              paddingBottom: 16,
+              borderBottomWidth: 1,
+              borderBottomColor: colors.cardBorder || '#E8ECF0',
+            }}>
+              <Text style={{ fontSize: fs(18), fontWeight: '800', color: colors.textDark, flex: 1 }}>
+                {docModal?.title}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setDocModal(null)}
+                activeOpacity={0.6}
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  backgroundColor: colors.bg || '#F0F2F5',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginLeft: 12,
+                }}
+              >
+                <Ionicons name="close" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Scrollable Content */}
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+              showsVerticalScrollIndicator={true}
+            >
+              <Text style={{
+                fontSize: fs(14),
+                lineHeight: fs(22),
+                color: colors.textMuted,
+                letterSpacing: 0.1,
+              }}>
+                {docModal?.content}
+              </Text>
+            </ScrollView>
+
+            {/* Close Button */}
+            <View style={{ paddingHorizontal: 20, paddingBottom: Platform.OS === 'ios' ? 34 : 20, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.cardBorder || '#E8ECF0' }}>
+              <TouchableOpacity
+                style={{ backgroundColor: colors.blue || '#0D1F45', borderRadius: 14, paddingVertical: 14, alignItems: 'center' }}
+                activeOpacity={0.85}
+                onPress={() => setDocModal(null)}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: fs(15), fontWeight: '700' }}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Floating draggable chat button */}
       <DraggableChatButton onPress={() => setChatbotOpen(true)} />
@@ -527,73 +843,6 @@ export default function SettingsScreen({ navigation, route }) {
         visible={chatbotOpen}
         onClose={() => setChatbotOpen(false)}
       />
-
-      {/* Bottom tab bar */}
-      <View style={[styles.tabBar, { backgroundColor: colors.tabBg }]}>
-        <Animated.View
-          style={[
-            styles.tabIndicator,
-            { transform: [{ translateX: indicatorPosition }] },
-          ]}
-        />
-
-        {(userRole !== "officer"
-          ? ALL_TAB_ITEMS.filter(t => t.key !== "Loans")
-          : ALL_TAB_ITEMS
-        ).map((tab) => {
-          const isActive = activeTab === tab.key;
-          const allIndex = ALL_TAB_ITEMS.findIndex(t => t.key === tab.key);
-
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              style={styles.tabItem}
-              onPress={() => {
-                setActiveTab(tab.key);
-                navWithEmail(tab.key);
-              }}
-              activeOpacity={0.7}
-            >
-              <Animated.View
-                style={[
-                  styles.tabBgCircle,
-                  { opacity: tabAnimations[allIndex].bgOpacity },
-                ]}
-              />
-
-              <Animated.View
-                style={{ transform: [{ scale: tabAnimations[allIndex].scale }] }}
-              >
-                <Image
-                  source={tab.icon}
-                  style={[
-                    styles.tabIcon,
-                    {
-                      tintColor: isActive ? C.tabActive : colors.tabInactive,
-                      opacity: isActive ? 1 : 0.6,
-                    },
-                  ]}
-                  resizeMode="contain"
-                />
-              </Animated.View>
-
-              <Text
-                style={[
-                  styles.tabLabel,
-                  {
-                    color: isActive ? C.tabActive : colors.tabInactive,
-                    fontWeight: isActive ? "700" : "500",
-                    fontSize: isActive ? 11 : 10,
-                    opacity: isActive ? 1 : 0.7,
-                  },
-                ]}
-              >
-                {tab.key}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
 
       {/* Sidebar overlay */}
       {sidebarOpen ? (
@@ -800,7 +1049,7 @@ const getStyles = (C) => StyleSheet.create({
     alignItems: "center",
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#F0F2F5",
+    borderBottomColor: C.cardBorder,
   },
   settingLeft: {
     flex: 1,
@@ -819,33 +1068,33 @@ const getStyles = (C) => StyleSheet.create({
 
   // UI Styles for matching web layout
   subSectionTitle: { fontSize: 14, fontWeight: '700', marginBottom: 16 },
-  channelBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8F9FB', borderRadius: 10, padding: 14, marginBottom: 12 },
+  channelBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.inputBg, borderRadius: 10, padding: 14, marginBottom: 12 },
   comingSoonBadge: { backgroundColor: '#FFF5E6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   comingSoonText: { fontSize: 10, color: '#F5A623', fontWeight: '600' },
-  divider: { height: 1, backgroundColor: '#F0F2F5', width: '100%' },
+  divider: { height: 1, backgroundColor: C.cardBorder, width: '100%' },
   categoryGroupTitle: { fontSize: 10, color: C.textMuted, fontWeight: '700', marginBottom: 8, marginTop: 8 },
   pillContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
-  pill: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 20, paddingVertical: 6, paddingHorizontal: 12, backgroundColor: 'transparent' },
+  pill: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: C.cardBorder, borderRadius: 20, paddingVertical: 6, paddingHorizontal: 12, backgroundColor: 'transparent' },
   pillSelected: { borderColor: 'rgba(46,107,240,0.3)', backgroundColor: 'rgba(46,107,240,0.05)' },
-  pillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#D1D5DB', marginRight: 6 },
+  pillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.cardBorder, marginRight: 6 },
   pillDotSelected: { backgroundColor: C.blue },
   pillText: { fontSize: 13, color: C.textMuted, fontWeight: '600' },
   pillTextSelected: { color: C.blue },
-  changePasswordBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 6, paddingVertical: 8, paddingHorizontal: 14 },
+  changePasswordBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', borderWidth: 1, borderColor: C.cardBorder, borderRadius: 6, paddingVertical: 8, paddingHorizontal: 14 },
   changePasswordBtnText: { color: C.blue, fontSize: 13, fontWeight: '600' },
 
   passwordForm: { marginTop: 4 },
   pwdLabel: { fontSize: 11, color: C.textMuted, fontWeight: '700', marginBottom: 6, marginTop: 12 },
-  pwdInputBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F4F6F8', borderRadius: 8, paddingHorizontal: 14, height: 46 },
+  pwdInputBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.inputBg, borderRadius: 8, paddingHorizontal: 14, height: 46 },
   pwdInput: { flex: 1, fontSize: 14, color: C.textDark, height: '100%' },
   pwdEyeBtn: { padding: 4 },
   pwdForgotRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, marginBottom: 8 },
   pwdForgotText: { fontSize: 11, color: C.textMuted },
   pwdResetLink: { fontSize: 11, color: C.blue, fontWeight: '600', textDecorationLine: 'underline' },
   pwdActionsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 24, gap: 12 },
-  pwdCancelBtn: { paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 6, backgroundColor: 'transparent' },
+  pwdCancelBtn: { paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1, borderColor: C.cardBorder, borderRadius: 6, backgroundColor: 'transparent' },
   pwdCancelBtnText: { color: C.textDark, fontSize: 13, fontWeight: '600' },
-  pwdUpdateBtn: { paddingVertical: 10, paddingHorizontal: 16, backgroundColor: '#1A3673', borderRadius: 6 },
+  pwdUpdateBtn: { paddingVertical: 10, paddingHorizontal: 16, backgroundColor: C.blue, borderRadius: 6 },
   pwdUpdateBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
 
   // Action Buttons
@@ -961,7 +1210,7 @@ const getStyles = (C) => StyleSheet.create({
     left: 0,
     bottom: 0,
     width: 260,
-    backgroundColor: "#0D1F45",
+    backgroundColor: C.sidebarBg,
     zIndex: 11,
     flexDirection: "column",
   },

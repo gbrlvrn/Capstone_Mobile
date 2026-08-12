@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useMemo } from "react";
+import React, { useEffect, useRef, useMemo } from "react";
 import { View, Text, StyleSheet, Animated } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useTheme } from "../components/ThemeContext";
@@ -54,9 +54,11 @@ export default function VerificationSuccessScreen({ navigation, route }) {
             SESSION_KEY,
             JSON.stringify({ email })
           );
+          const oldUser = await AsyncStorage.getItem("faithly_user");
+          const parsedUser = oldUser ? JSON.parse(oldUser) : {};
           await AsyncStorage.setItem(
             "faithly_user",
-            JSON.stringify({ email })
+            JSON.stringify({ ...parsedUser, email })
           );
         } catch (err) {
           console.log("Session save error:", err);
@@ -73,9 +75,11 @@ export default function VerificationSuccessScreen({ navigation, route }) {
             SESSION_KEY,
             JSON.stringify({ email })
           );
+          const oldUser = await AsyncStorage.getItem("faithly_user");
+          const parsedUser = oldUser ? JSON.parse(oldUser) : {};
           await AsyncStorage.setItem(
             "faithly_user",
-            JSON.stringify({ email })
+            JSON.stringify({ ...parsedUser, email })
           );
         } catch (err) {
           console.log("Session save error:", err);
