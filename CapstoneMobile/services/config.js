@@ -39,26 +39,32 @@ function getDevIP() {
 // Must be FALSE for any public release / capstone defense APK.
 const USE_LOCAL_FOR_PRODUCTION = false;
 const LOCAL_IP = "192.168.1.110"; // Hardcoded fallback for local-only APK builds
-const PRODUCTION_URL = "https://faithly-server.onrender.com/api";
+const PRODUCTION_URL = "https://api.puacfaithly.com/api";
 
 function getBaseUrl() {
-  if (__DEV__) {
-    const ip = getDevIP();
-    if (ip) {
-      console.log(`[Config] Auto-detected dev IP: ${ip}`);
+  // Production APK (eas build) — always use deployed URL
+  if (!__DEV__) {
+    if (USE_LOCAL_FOR_PRODUCTION) {
+      const ip = getDevIP() || LOCAL_IP;
       return `http://${ip}:${BACKEND_PORT}/api`;
     }
-    // Absolute last resort — should rarely hit this
-    console.warn("[Config] Could not auto-detect IP. Using localhost.");
-    return `http://localhost:${BACKEND_PORT}/api`;
+    return PRODUCTION_URL;
   }
 
-  // Production APK
-  if (USE_LOCAL_FOR_PRODUCTION) {
-    const ip = getDevIP() || LOCAL_IP;
-    return `http://${ip}:${BACKEND_PORT}/api`;
+  // Expo Go / dev client — ALSO use production URL so login/register work.
+  // The local backend (port 5001) is only a subset of routes and lacks
+  // /login, /register, /notifications/feed, etc. which live on the web server.
+  // Override this ONLY if you are actively developing local backend routes.
+  const FORCE_LOCAL_IN_DEV = false;
+  if (FORCE_LOCAL_IN_DEV) {
+    const ip = getDevIP();
+    if (ip) {
+      console.log(`[Config] Dev mode: using local backend at ${ip}:${BACKEND_PORT}`);
+      return `http://${ip}:${BACKEND_PORT}/api`;
+    }
   }
 
+  console.log(`[Config] Dev mode: using production URL (${PRODUCTION_URL})`);
   return PRODUCTION_URL;
 }
 
@@ -67,16 +73,18 @@ function getBaseUrl() {
 const WEB_BACKEND_PORT = 5000;
 
 function getWebBaseUrl() {
-  if (__DEV__) {
-    const ip = getDevIP();
-    if (ip) return `http://${ip}:${WEB_BACKEND_PORT}/api`;
-    return `http://localhost:${WEB_BACKEND_PORT}/api`;
+  // Web backend always uses the same production URL as the main backend.
+  // Both CUSTOM_BACKEND and WEB_BACKEND point to faithly-server.onrender.com
+  // since all routes (/login, /register, /notifications/feed, /loans, etc.)
+  // are served from the same Render deployment.
+  if (!__DEV__) {
+    if (USE_LOCAL_FOR_PRODUCTION) {
+      const ip = getDevIP() || LOCAL_IP;
+      return `http://${ip}:${WEB_BACKEND_PORT}/api`;
+    }
+    return PRODUCTION_URL;
   }
-  // In production, use same strategy as main backend
-  if (USE_LOCAL_FOR_PRODUCTION) {
-    const ip = getDevIP() || LOCAL_IP;
-    return `http://${ip}:${WEB_BACKEND_PORT}/api`;
-  }
+  // Dev mode: also use production (see getBaseUrl rationale above)
   return PRODUCTION_URL;
 }
 

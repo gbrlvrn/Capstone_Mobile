@@ -34,11 +34,11 @@ export function verifyOTP(email, otp) {
 }
 
 export function sendForgotPasswordOTP(email) {
-  return post("/auth/forgot-password", { email: String(email || "").trim().toLowerCase() });
+  return post("/reset-password-request", { email: String(email || "").trim().toLowerCase() });
 }
 
 export function resetPassword(email, otp, newPassword) {
-  return post("/auth/reset-password", {
+  return post("/reset-password-update", {
     email: String(email || "").trim().toLowerCase(),
     otp: String(otp || "").trim(),
     newPassword: String(newPassword || "").trim(),

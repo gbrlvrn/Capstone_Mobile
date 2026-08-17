@@ -291,7 +291,7 @@ export default function EventsScreen({ navigation, route }) {
 
       <View style={[styles.topBar, { backgroundColor: "transparent" }]}>
         <TouchableOpacity style={styles.menuBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home', { email: userEmail })} activeOpacity={0.6}>
-          <Text style={{color: '#FFF', fontSize: fs(28), paddingHorizontal: 4}}>â†</Text>
+          <Text style={{color: '#FFF', fontSize: fs(28), paddingHorizontal: 4}}>←</Text>
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: s(36), height: 36, borderRadius: 18 }} resizeMode="cover" /></View>
         <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: s(22), height: s(22), tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
@@ -393,7 +393,7 @@ export default function EventsScreen({ navigation, route }) {
                       disabled={isRsvped}
                     >
                       <Text style={[styles.rsvpBtnText, isRsvped && styles.rsvpBtnTextDone]}>
-                        {isRsvped ? "âœ“ RSVP'd" : "RSVP"}
+                        {isRsvped ? "✓ RSVP'd" : "RSVP"}
                       </Text>
                     </TouchableOpacity>
 

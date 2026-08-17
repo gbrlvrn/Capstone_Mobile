@@ -780,7 +780,7 @@ export default function ProfileScreen({ navigation, route }) {
                   </View>
                   <View style={styles.faqItem}>
                     <Text style={styles.faqQuestion}>How long does loan approval take?</Text>
-                    <Text style={styles.faqAnswer}>Loan applications are typically reviewed within 1â€“3 business days. You will receive a notification once your loan status is updated.</Text>
+                    <Text style={styles.faqAnswer}>Loan applications are typically reviewed within 1–3 business days. You will receive a notification once your loan status is updated.</Text>
                   </View>
                 </>
               )}

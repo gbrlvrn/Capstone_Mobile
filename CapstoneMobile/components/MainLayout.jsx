@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
-import { getVerificationStatus } from "../services/AuthService";
+import { getVerificationStatus, clearSavedCredentials } from "../services/AuthService";
 import { clearToken } from "../services/AuthService";
 import { useTheme } from "./ThemeContext";
 import { ICONS, TAB_ITEMS, SIDEBAR_ITEMS, LOGO } from "./constants";
@@ -153,6 +153,8 @@ export default function MainLayout({
     try {
       await AsyncStorage.removeItem("faithly_user");
       await AsyncStorage.removeItem("@faithly_session");
+      // Clear saved credentials so silent re-auth doesn't log user back in
+      await clearSavedCredentials();
       await clearToken();
       setShowSignOutConfirm(false);
       closeSidebar();

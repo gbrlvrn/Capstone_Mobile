@@ -919,7 +919,7 @@ export default function BranchScreen({ navigation, route }) {
               >
                 All Regions
               </Text>
-              {!selectedRegion && <Text style={styles.regionModalCheck}>âœ“</Text>}
+              {!selectedRegion && <Text style={styles.regionModalCheck}>✓</Text>}
             </TouchableOpacity>
             {REGIONS.map((region) => (
               <TouchableOpacity
@@ -943,7 +943,7 @@ export default function BranchScreen({ navigation, route }) {
                   {region}
                 </Text>
                 {selectedRegion === region && (
-                  <Text style={styles.regionModalCheck}>âœ“</Text>
+                  <Text style={styles.regionModalCheck}>✓</Text>
                 )}
               </TouchableOpacity>
             ))}
@@ -1052,7 +1052,7 @@ export default function BranchScreen({ navigation, route }) {
                 style={styles.weeklyModalClose}
                 onPress={() => setWeeklyServicesOpen(false)}
               >
-                <Text style={styles.weeklyModalCloseText}>âœ*</Text>
+                <Text style={styles.weeklyModalCloseText}>✕</Text>
               </TouchableOpacity>
             </View>
 

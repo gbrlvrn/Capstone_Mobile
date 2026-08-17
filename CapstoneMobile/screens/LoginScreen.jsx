@@ -56,6 +56,7 @@ export default function LoginScreen({ navigation, route }) {
   const [loading, setLoading] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(!!(route?.params?.passwordResetSuccess));
   const [sessionExpired, setSessionExpired] = useState(!!(route?.params?.sessionExpired));
+  const [registrationSuccess, setRegistrationSuccess] = useState(!!(route?.params?.registrationSuccess));
 
   // lockout
   const [attempts, setAttempts] = useState(0);
@@ -210,6 +211,16 @@ export default function LoginScreen({ navigation, route }) {
         >
           <View style={[styles.circleTopRight, { opacity: colors.circleOpacity }]} />
           <View style={[styles.circleBottomLeft, { opacity: colors.circleOpacity }]} />
+
+          {/* Account verified banner */}
+          {registrationSuccess && (
+            <View style={styles.successBanner}>
+              <Text style={styles.successBannerText}>✓ Account verified! Please sign in.</Text>
+              <TouchableOpacity onPress={() => setRegistrationSuccess(false)} style={{ marginLeft: 8 }}>
+                <Text style={{ color: '#166534', fontWeight: '700', fontSize: 13 }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Password reset success banner */}
           {resetSuccess && (

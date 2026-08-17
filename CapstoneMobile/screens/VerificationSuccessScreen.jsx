@@ -48,25 +48,11 @@ export default function VerificationSuccessScreen({ navigation, route }) {
       }
 
       if (source === "signup") {
-        // Save session + go to Home directly
-        try {
-          await AsyncStorage.setItem(
-            SESSION_KEY,
-            JSON.stringify({ email })
-          );
-          const oldUser = await AsyncStorage.getItem("faithly_user");
-          const parsedUser = oldUser ? JSON.parse(oldUser) : {};
-          await AsyncStorage.setItem(
-            "faithly_user",
-            JSON.stringify({ ...parsedUser, email })
-          );
-        } catch (err) {
-          console.log("Session save error:", err);
-        }
-
+        // Web server's /verify-otp does NOT return a JWT — the user must log in.
+        // Redirect to Login with a success banner so they know to sign in.
         navigation.reset({
           index: 0,
-          routes: [{ name: "Home", params: { email, source, ...(user ? { user } : {}) } }],
+          routes: [{ name: "Login", params: { registrationSuccess: true } }],
         });
       } else {
         // Existing user (login) → save session + go to Home

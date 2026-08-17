@@ -101,6 +101,80 @@ export async function clearUserData() {
   await AsyncStorage.removeItem("@faithly_session");
 }
 
+// ── Secure Credential Storage (for silent re-auth) ────────────────────
+// Stores email + password encrypted in the device Keychain / Keystore.
+// This enables background re-login when the 1-hour JWT expires, so
+// the user never sees a forced logout during normal app use.
+//
+// SECURITY NOTE: Credentials are stored using expo-secure-store which
+// uses iOS Keychain (hardware-backed on modern devices) and Android
+// EncryptedSharedPreferences / Keystore. This is the same mechanism
+// used by banking apps for biometric-protected credential storage.
+const SECURE_CREDS_KEY = "faithly_creds_secure";
+
+export async function saveCredentials(email, password) {
+  try {
+    const payload = JSON.stringify({ email, password });
+    await SecureStore.setItemAsync(SECURE_CREDS_KEY, payload);
+  } catch {
+    // SecureStore unavailable — skip (re-auth won't be available, user will
+    // see the session-expired screen on token expiry)
+  }
+}
+
+export async function getSavedCredentials() {
+  try {
+    const raw = await SecureStore.getItemAsync(SECURE_CREDS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw); // { email, password }
+  } catch {
+    return null;
+  }
+}
+
+export async function clearSavedCredentials() {
+  try { await SecureStore.deleteItemAsync(SECURE_CREDS_KEY); } catch {}
+}
+
+// ── Silent Re-authentication ──────────────────────────────────────────
+// Called automatically when any API request receives a 401.
+// Returns true if re-login succeeded (new token saved), false otherwise.
+let _silentReloginInProgress = false; // prevent concurrent re-login storms
+
+export async function silentRelogin() {
+  if (_silentReloginInProgress) {
+    // Another request already triggered re-login — wait briefly then return
+    await new Promise(r => setTimeout(r, 2000));
+    return !!(await getToken()); // true if the concurrent re-login succeeded
+  }
+
+  _silentReloginInProgress = true;
+  try {
+    const creds = await getSavedCredentials();
+    if (!creds || !creds.email || !creds.password) return false;
+
+    // loginUser will call saveToken internally on success
+    await loginUser(creds.email, creds.password);
+    console.log("[Auth] Silent re-login successful");
+    return true;
+  } catch (e) {
+    console.log("[Auth] Silent re-login failed:", e.message);
+    return false;
+  } finally {
+    _silentReloginInProgress = false;
+  }
+}
+
+// Called from all 401 handlers: try silent re-login first, log out only if it fails.
+async function _handle401(requiresAuth) {
+  if (!requiresAuth) return; // public endpoints — don't touch session
+  const reloggedIn = await silentRelogin();
+  if (!reloggedIn) {
+    await clearToken();
+    _fireAuthInvalidated();
+  }
+}
+
 // ── JWT Role Decoder ─────────────────────────────────────────────────
 // Role is NOT returned from /me — it lives in the JWT payload only.
 //
@@ -139,6 +213,16 @@ export async function getTokenPayload() {
   }
 }
 
+// Extract the most useful error message from any server response shape:
+//   { message: "..." }           — standard API errors
+//   { errors: [{ msg: "..." }] } — express-validator validation failures
+//   raw HTML/text               — unexpected server errors
+function extractError(data, fallbackText) {
+  if (data?.message) return data.message;
+  if (Array.isArray(data?.errors) && data.errors[0]?.msg) return data.errors[0].msg;
+  return fallbackText || "Request failed";
+}
+
 // ── HTTP Helpers ────────────────────────────────────────────────────
 
 async function request(method, path, body, requiresAuth = false, retries = 1) {
@@ -152,7 +236,7 @@ async function request(method, path, body, requiresAuth = false, retries = 1) {
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout for cold starts
+    const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s timeout for Render cold starts / slow mobile networks
 
     try {
       const res = await fetch(url, {
@@ -168,18 +252,17 @@ async function request(method, path, body, requiresAuth = false, retries = 1) {
       try { data = JSON.parse(text); } catch {}
 
       if (res.status === 401) {
-        // Only trigger session-expired auto-logout for authenticated requests.
+        // Authenticated requests: try silent re-login before logging user out.
         // Public endpoints (login, signup, OTP) return 401 for wrong credentials
-        // — that is NOT a session expiry.
+        // — that is NOT a session expiry, so just surface the error message.
         if (requiresAuth) {
-          await clearToken();
-          _fireAuthInvalidated();
+          await _handle401(true);
           throw new Error("Invalid or expired token");
         }
         throw new Error(data?.message || "Invalid credentials");
       }
 
-      if (!res.ok) throw new Error(data?.message || text || "Request failed");
+      if (!res.ok) throw new Error(extractError(data, text));
       return data;
     } catch (error) {
       clearTimeout(timeoutId);
@@ -210,15 +293,15 @@ async function webGet(path, requiresAuth = false, retries = 1) {
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
       const res = await fetch(url, { method: "GET", headers, signal: controller.signal });
       clearTimeout(timeoutId);
       const text = await res.text();
       let data = {};
       try { data = JSON.parse(text); } catch {}
-      if (res.status === 401) { await clearToken(); _fireAuthInvalidated(); throw new Error("Invalid or expired token"); }
-      if (!res.ok) throw new Error(data?.message || text || "Request failed");
+      if (res.status === 401) { await _handle401(requiresAuth); throw new Error("Invalid or expired token"); }
+      if (!res.ok) throw new Error(extractError(data, text));
       return data;
     } catch (error) {
       clearTimeout(timeoutId);
@@ -243,15 +326,15 @@ async function webPost(path, body, requiresAuth = true, retries = 1) {
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
       const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: controller.signal });
       clearTimeout(timeoutId);
       const text = await res.text();
       let data = {};
       try { data = JSON.parse(text); } catch {}
-      if (res.status === 401) { await clearToken(); _fireAuthInvalidated(); throw new Error("Invalid or expired token"); }
-      if (!res.ok) throw new Error(data?.message || text || "Request failed");
+      if (res.status === 401) { await _handle401(requiresAuth); throw new Error("Invalid or expired token"); }
+      if (!res.ok) throw new Error(extractError(data, text));
       return data;
     } catch (error) {
       clearTimeout(timeoutId);
@@ -276,15 +359,15 @@ async function webPut(path, body, requiresAuth = true, retries = 1) {
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
       const res = await fetch(url, { method: "PUT", headers, body: JSON.stringify(body), signal: controller.signal });
       clearTimeout(timeoutId);
       const text = await res.text();
       let data = {};
       try { data = JSON.parse(text); } catch {}
-      if (res.status === 401) { await clearToken(); _fireAuthInvalidated(); throw new Error("Invalid or expired token"); }
-      if (!res.ok) throw new Error(data?.message || text || "Request failed");
+      if (res.status === 401) { await _handle401(requiresAuth); throw new Error("Invalid or expired token"); }
+      if (!res.ok) throw new Error(extractError(data, text));
       return data;
     } catch (error) {
       clearTimeout(timeoutId);
@@ -325,6 +408,8 @@ function normalizeRole(user) {
 
 export async function signupUser(payload) {
   const data = await request("POST", "/register", payload);
+  // Web server does NOT return a token on /register — OTP verification is required first.
+  // The token guard below is safe (no-ops if undefined).
   if (data.token) await saveToken(data.token);
   return data;
 }
@@ -332,9 +417,21 @@ export async function signupUser(payload) {
 export async function loginUser(email, password) {
   const data = await request("POST", "/login", { email, password });
   if (data && data.user) {
+    // Web server returns fullName (single field). Split into firstName / lastName
+    // so ProfileScreen, HomeScreen, and other screens that read these fields work.
+    if (data.user.fullName && !data.user.firstName) {
+      const parts = (data.user.fullName || "").trim().split(" ");
+      data.user.firstName = parts[0] || "";
+      data.user.lastName = parts.slice(1).join(" ") || "";
+    }
     data.user = normalizeRole(data.user);
   }
-  if (data.token) await saveToken(data.token);
+  if (data.token) {
+    await saveToken(data.token);
+    // Bug 1 fix: save credentials securely for silent re-auth when the
+    // 1-hour JWT expires. Re-login happens transparently in background.
+    await saveCredentials(email, password);
+  }
   return data;
 }
 
@@ -364,9 +461,19 @@ export function updatePassword(email, otp, newPassword) {
 }
 
 // GET /api/me — returns current authenticated user profile
+// Web server wraps response in { success: true, user: {...} } — unwrap it.
 // NOTE: role is NOT in this response — decode JWT with getTokenPayload() for role
 export async function getProfile() {
-  return get("/me", true);
+  const data = await get("/me", true);
+  // Unwrap web server envelope: { success: true, user: {...} }
+  const user = (data && data.success && data.user) ? data.user : data;
+  // Web server stores fullName (not firstName/lastName) — split for mobile compat
+  if (user && user.fullName && !user.firstName) {
+    const parts = (user.fullName || "").trim().split(" ");
+    user.firstName = parts[0] || "";
+    user.lastName = parts.slice(1).join(" ") || "";
+  }
+  return user;
 }
 
 // PUT /api/update-profile — update editable profile fields
@@ -449,7 +556,7 @@ export async function uploadProfilePhoto(photoUri) {
   const text = await res.text();
   let data = {};
   try { data = JSON.parse(text); } catch {}
-  if (res.status === 401) { await clearToken(); _fireAuthInvalidated(); throw new Error("Invalid or expired token"); }
+  if (res.status === 401) { await _handle401(true); throw new Error("Invalid or expired token"); }
   if (!res.ok) throw new Error(data?.message || text || "Upload failed");
   return data;
 }
@@ -740,14 +847,23 @@ export function prayForRequest(requestId, email) {
 
 export async function getNotificationsFeed() {
   try {
-    // Notifications feed lives on the web backend (port 5000 / faithlyweb)
+    // Bug 3 fix: GET /api/notifications/feed — lives on the web backend
+    // (faithly-server.onrender.com). Requires Authorization: Bearer <token>.
+    // Route is in profile.js on the server, NOT notifications.js.
     return await webGet("/notifications/feed", true);
   } catch (e) {
     console.error("Notifications feed error:", e.message);
+    // Return an empty shape that matches the real API response format
     return {
+      success: false,
       readIds: [],
-      loans: [], payments: [], donations: [],
-      attendance: [], savings: [], announcements: [],
+      payments: [],
+      loans: [],
+      donations: [],
+      attendance: [],
+      savings: [],
+      announcements: [],
+      securityNotifications: [],
     };
   }
 }

@@ -145,14 +145,6 @@ const QUICK_ACTIONS = [
     iconColor: "#1A2744",
     screen: null,
   },
-  {
-    title: "My Savings",
-    subtitle: "Goals & deposits",
-    icon: ICONS.wallet,
-    bgColor: "rgba(52,199,89,0.1)",
-    iconColor: "#34C759",
-    screen: "Savings",
-  },
 ];
 
 const UPCOMING_PAYMENTS = [];
@@ -1273,8 +1265,8 @@ export default function HomeScreen({ navigation, route }) {
                     resizeMode="contain"
                   />
                 </View>
-                <Text style={[styles.quickActionTitle, { color: colors.textDark }]}>{action.title}</Text>
-                <Text style={[styles.quickActionSubtitle, { color: colors.textMuted }]}>
+                <Text style={[styles.quickActionTitle, { color: colors.textDark }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{action.title}</Text>
+                <Text style={[styles.quickActionSubtitle, { color: colors.textMuted }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                   {action.subtitle}
                 </Text>
                 <View style={styles.arrowCircle}>
@@ -1844,6 +1836,8 @@ const getStyles = (C) => StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
     elevation: 4,
+    minHeight: s(138),
+    justifyContent: "space-between",
   },
   quickActionIconBg: {
     width: s(48),

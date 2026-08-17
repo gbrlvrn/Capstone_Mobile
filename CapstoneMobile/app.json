@@ -42,6 +42,7 @@
     ],
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.puac.app",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "This app needs access to your photos to upload your ID and selfie.",
         "NSCameraUsageDescription": "This app needs access to your camera to take a selfie.",

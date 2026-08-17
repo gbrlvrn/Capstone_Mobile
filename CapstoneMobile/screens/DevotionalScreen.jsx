@@ -246,7 +246,7 @@ export default function DevotionalScreen({ navigation, route }) {
       {/* Top Bar */}
       <View style={[styles.topBar, { backgroundColor: "transparent" }]}>
         <TouchableOpacity style={styles.menuBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home', { email: userEmail })} activeOpacity={0.6}>
-          <Text style={{color: '#FFF', fontSize: fs(28), paddingHorizontal: 4}}>â†</Text>
+          <Text style={{color: '#FFF', fontSize: fs(28), paddingHorizontal: 4}}>←</Text>
         </TouchableOpacity>
         <View style={{ flex: 1, alignItems: "center" }}><Image source={LOGO} style={{ width: s(36), height: 36, borderRadius: 18 }} resizeMode="cover" /></View>
         <TouchableOpacity onPress={() => navigation.navigate("Notifications", { email: userEmail })} style={{ padding: 4 }} activeOpacity={0.6}><Image source={ICONS.notification} style={{ width: s(22), height: s(22), tintColor: colors.textDark }} resizeMode="contain" /></TouchableOpacity>
@@ -290,7 +290,7 @@ export default function DevotionalScreen({ navigation, route }) {
             <Text style={[styles.verseTranslation, { color: colors.textMuted }]}>{verse.translation}</Text>
 
             <TouchableOpacity style={styles.shareBtn} onPress={handleShare} activeOpacity={0.7}>
-              <Text style={styles.shareBtnText}>Share Verse â†—</Text>
+              <Text style={styles.shareBtnText}>Share Verse ↗</Text>
             </TouchableOpacity>
           </Animated.View>
         ) : null}
@@ -318,7 +318,7 @@ export default function DevotionalScreen({ navigation, route }) {
               }}
             />
             <View style={styles.journalActions}>
-              {journalSaved && <Text style={styles.savedLabel}>âœ“ Saved</Text>}
+              {journalSaved && <Text style={styles.savedLabel}>✓ Saved</Text>}
               <TouchableOpacity
                 style={[styles.saveJournalBtn, journalSaved && { opacity: 0.5 }]}
                 onPress={handleSaveJournal}
