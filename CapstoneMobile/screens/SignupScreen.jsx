@@ -184,9 +184,6 @@ export default function SignupScreen({ navigation }) {
     gender: "",
     dob: "",
     branch: "",
-    role: "member",
-    churchId: "",
-    position: "",
     password: "",
     confirmPassword: "",
   });
@@ -321,20 +318,6 @@ export default function SignupScreen({ navigation }) {
       ? "Age must be strictly between 18 and 100 years old"
       : "",
     branch: !form.branch ? "Please select a community" : "",
-    churchId: form.role === "officer"
-      ? (!form.churchId.trim()
-        ? "Church ID is required for officers"
-        : !/^\d{2}-\d{2}-\d{2}$/.test(form.churchId.trim())
-        ? "Church ID must follow XX-XX-XX format"
-        : "")
-      : "",
-    position: form.role === "officer" 
-      ? (!form.position
-        ? "Please select your position"
-        : form.churchId && !churchIdMatchesPosition(form.churchId.trim(), form.position)
-        ? `Church ID prefix does not match ${form.position} validation mapping.`
-        : "") 
-      : "",
     password: !form.password
       ? "Password is required"
       : form.password.length < 8
@@ -471,13 +454,8 @@ export default function SignupScreen({ navigation }) {
         gender: form.gender.toLowerCase(),
         birthday: isoBirthday,
         password: form.password,
-        role: form.role,
+        role: "member",
       };
-
-      if (form.role === "officer") {
-        payload.churchId = form.churchId.trim();
-        payload.position = form.position;
-      }
 
       await signupUser(payload);
 
@@ -487,8 +465,8 @@ export default function SignupScreen({ navigation }) {
           firstName: form.firstName.trim(),
           lastName: form.lastName.trim(),
           fullName: `${form.firstName.trim()} ${form.lastName.trim()}`,
-          role: form.role,
-          position: form.position || "",
+          role: "member",
+          position: "",
         });
       } catch (err) {
         console.log("Failed to cache signup user data:", err);
@@ -541,57 +519,7 @@ export default function SignupScreen({ navigation }) {
           <Text style={styles.title}>Create Your Account</Text>
           <Text style={styles.subtitle}>Join our church community today</Text>
 
-           {/* Role Selector */}
-          <Text style={styles.label}>I am a</Text>
-          <View style={styles.roleRow}>
-            <TouchableOpacity
-              style={[
-                styles.roleCard,
-                form.role === "member" && styles.roleCardActive,
-              ]}
-              onPress={() => { update("role", "member"); touch("role"); }}
-              activeOpacity={0.7}
-            >
-              <Image 
-                source={ICONS.person} 
-                style={[
-                  styles.roleIcon, 
-                  { tintColor: form.role === "member" ? '#0D1F45' : C.iconColor }
-                ]} 
-                resizeMode="contain" 
-              />
-              <Text style={[
-                styles.roleCardTitle,
-                form.role === "member" && styles.roleCardTitleActive,
-              ]}>Member</Text>
-              <Text style={styles.roleCardSub}>Donations, Attendance{"\n"}& Church Events</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.roleCard,
-                form.role === "officer" && styles.roleCardActive,
-              ]}
-              onPress={() => { update("role", "officer"); touch("role"); }}
-              activeOpacity={0.7}
-            >
-              <Image 
-                source={ICONS.badge} 
-                style={[
-                  styles.roleIcon, 
-                  { tintColor: form.role === "officer" ? '#0D1F45' : C.iconColor }
-                ]} 
-                resizeMode="contain" 
-              />
-              <Text style={[
-                styles.roleCardTitle,
-                form.role === "officer" && styles.roleCardTitleActive,
-              ]}>Officer</Text>
-              <Text style={styles.roleCardSub}>All Member features{"\n"}+ Loans, Savings & More</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={{ fontSize: 11, color: C.textDimmed, textAlign: "center", marginBottom: 12, lineHeight: 16 }}>
-            Officers are church-appointed leaders who manage loans and savings.{"\n"}A valid Church ID is required to register as an Officer.
-          </Text>
+
 
           {/* First Name */}
           <Text style={styles.label}>First Name</Text>
@@ -770,56 +698,7 @@ export default function SignupScreen({ navigation }) {
             <Text style={styles.errorMsg}>{errors.branch}</Text>
           ) : null}
 
-          {/* Officer-only fields */}
-          {form.role === "officer" && (
-            <>
-              {/* Church ID */}
-              <Text style={styles.label}>Church ID</Text>
-              <View style={[styles.inputRow, { borderColor: borderFor("churchId") }]}>
-                <Image source={ICONS.badge} style={styles.inputIcon} resizeMode="contain" />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter your Church ID number"
-                  placeholderTextColor={C.textDimmed}
-                  value={form.churchId}
-                  onChangeText={handleChurchId}
-                  onBlur={() => touch("churchId")}
-                  keyboardType="number-pad"
-                  maxLength={12}
-                />
-              </View>
-              {touched.churchId && errors.churchId ? (
-                <Text style={styles.errorMsg}>{errors.churchId}</Text>
-              ) : (
-                <Text style={styles.hintMsg}>Numbers only, max 12 digits</Text>
-              )}
 
-              {/* Position */}
-              <Text style={styles.label}>Position</Text>
-              <TouchableOpacity
-                style={[styles.inputRow, { borderColor: borderFor("position") }]}
-                activeOpacity={0.6}
-                onPress={() => {
-                  touch("position");
-                  openModal("position");
-                }}
-              >
-                <Image source={ICONS.badge} style={styles.inputIcon} resizeMode="contain" />
-                <Text
-                  style={[
-                    styles.input,
-                    { color: form.position ? C.textDark : C.textDimmed },
-                  ]}
-                >
-                  {form.position || "Select your position"}
-                </Text>
-                <Text style={styles.chevron}>▾</Text>
-              </TouchableOpacity>
-              {touched.position && errors.position ? (
-                <Text style={styles.errorMsg}>{errors.position}</Text>
-              ) : null}
-            </>
-          )}
 
           {/* Password */}
           <Text style={styles.label}>Password</Text>

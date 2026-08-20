@@ -804,7 +804,7 @@ export default function ProfileScreen({ navigation, route }) {
               )}
               <View style={styles.faqItem}>
                 <Text style={styles.faqQuestion}>How do I become an officer?</Text>
-                <Text style={styles.faqAnswer}>Officer accounts are created during signup by selecting the "Officer" role and providing your Church ID. If you need to change your role, please contact church administration.</Text>
+                <Text style={styles.faqAnswer}>Officer roles are assigned by the church administration through the web portal. If you believe you should have officer access, please contact your local church admin to have your account upgraded.</Text>
               </View>
               <View style={styles.faqItem}>
                 <Text style={styles.faqQuestion}>Why can't I edit my profile information?</Text>
