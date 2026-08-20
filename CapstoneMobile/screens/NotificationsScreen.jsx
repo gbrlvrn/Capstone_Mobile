@@ -279,7 +279,7 @@ export default function NotificationsScreen({ navigation, route }) {
     if (notif.id?.startsWith("donation")) return "Donations";
     if (notif.id?.startsWith("savings")) return "Savings";
     if (notif.category === "announcement") return "Announcements";
-    if (notif.id?.startsWith("attendance")) return "Branch";
+    if (notif.id?.startsWith("attendance")) return "Branches";
     return null;
   };
 

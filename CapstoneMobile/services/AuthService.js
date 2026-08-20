@@ -493,35 +493,54 @@ export function getPublicSettings() {
 // ── Branches ────────────────────────────────────────────────────────
 
 export async function getBranches() {
+  // Branch name → Province mapping (the API doesn't return province)
+  // Names must match exactly what the production API returns
+  const COMMUNITIES = {
+    "Kalinga": ["Tabuk", "Zapote", "Bliss", "Libanon", "Batong Buhay", "Balatoc", "Lat-nog"],
+    "Abra": ["Lamao", "Lingey", "Cabaruyan", "Ducligan", "Gangal", "Bila-Bila", "Naguillian", "Ud-udiao", "Villa Conchita", "Ay-yeng Manabo", "Dao-angan", "Kilong-olao", "Bao-yan", "Amti", "Danac", "Bengued", "Sappaac", "Saccaang"],
+    "Benguet": ["Baguio"],
+    "Pangasinan": ["Dagupan", "Mangatarem", "Laoak Langka", "Orbiztondo", "Malasique Bolaoit", "Taloyan", "Binmaley", "San Carlos", "Manaoag", "Pozorrobio", "Alcala"],
+    "Isabela": ["Santiago City"],
+    "Bulacan": ["Meycauayan City", "Camalig", "San Jose Del Monte"],
+    "Tarlac": ["Pacpaco San Manuel", "Victoria"],
+    "Nueva Ecija": ["Bambanaba Cuyapo"],
+    "NCR": ["Valenzuela City", "Tandang Sora Quezon City", "COA Quezon City", "Payatas Quezon City", "Malaria Caloocan"],
+    "Rizal": ["Montalban"],
+    "Cebu": ["Mandaue", "Li-loan", "Calero", "Compostela"],
+    "Agusan Del Norte": ["Butuan City", "RTR", "Jabango Bangonay", "Jabonga Bangonay", "Jabonga, Bangonay", "Kasiklan", "San Mateo", "Fatima Kim.13", "Bayugan", "Ibuan", "Balubo"],
+    "Surigao Del Norte": ["Alegria", "Bonifacio", "Matin-ao", "Ipil"],
+    "Surigao Del Sur": ["Kinabigtasan Tago"],
+  };
+  // Build name → province lookup (case-insensitive, comma-stripped)
+  const normalize = (s) => s.toLowerCase().replace(/,/g, "").replace(/\s+/g, " ").trim();
+  const NAME_TO_PROVINCE = {};
+  for (const [province, names] of Object.entries(COMMUNITIES)) {
+    for (const name of names) {
+      NAME_TO_PROVINCE[normalize(name)] = province;
+    }
+  }
+
   try {
     const fetchPromise = get("/public/branches");
     const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error("Branch fetch timeout")), 8000)
     );
     const data = await Promise.race([fetchPromise, timeoutPromise]);
-    if (data && data.success) return data;
-    if (Array.isArray(data)) return { success: true, branches: data };
-    if (data && data.branches) return { success: true, branches: data.branches };
-    throw new Error("Invalid format");
+    let branches = [];
+    if (data && data.success) branches = data.branches || [];
+    else if (Array.isArray(data)) branches = data;
+    else if (data && data.branches) branches = data.branches;
+    else throw new Error("Invalid format");
+
+    // Enrich each branch with province (API doesn't return it)
+    branches = branches.map(b => ({
+      ...b,
+      province: b.province || NAME_TO_PROVINCE[normalize(b.name || "")] || "",
+    }));
+    return { success: true, branches };
   } catch (e) {
     console.log("Fallback branches:", e.message);
     // Local hardcoded fallback (offline only)
-    const COMMUNITIES = {
-      "Kalinga": ["Tabuk", "Zapote", "Bliss", "Libanon", "Batong Buhay", "Balatoc", "Lat-nog"],
-      "Isabela": ["Santiago City"],
-      "Abra": ["Lamao", "Lingey", "Cabaruyan", "Ducligan", "Gangal", "Bila-Bila", "Naguillian", "Ud-udiao", "Villa Conchita", "Ay-yeng Manabo", "Dao-angan", "Kilong-olao", "Bao-yan", "Amti", "Danac", "Bengued", "Sappaac", "Saccaang"],
-      "Benguet": ["Baguio"],
-      "Rizal": ["Montalban"],
-      "NCR": ["Valenzuela City", "Tandang Sora, Quezon City", "COA, Quezon City", "Payatas, Quezon City", "Malaria, Caloocan"],
-      "Bulacan": ["Meycauayan City", "Camalig", "San Jose Del Monte"],
-      "Tarlac": ["Pacpaco, San Manuel", "Victoria"],
-      "Nueva Ecija": ["Bambanaba, Cuyapo"],
-      "Pangasinan": ["Dagupan", "Mangatarem", "Laoak Langka", "Orbiztondo", "Malasiqui, Bolaoit", "Taloyan", "Binmaley", "San Carlos", "Manaoag", "Pozorrubio", "Alcala"],
-      "Agusan Del Norte": ["Butuan City", "RTR", "Jabonga, Bangonay", "Kasiklan", "San Mateo", "Fatima Kim.13", "Bayugan", "Ibuan", "Balubo"],
-      "Cebu": ["Mandaue", "Liloan", "Calero", "Compostela"],
-      "Surigao Del Norte": ["Alegria", "Bonifacio", "Matin-ao", "Ipil"],
-      "Surigao Del Sur": ["Kinabigtasan, Tago"],
-    };
     const branches = [];
     let idCounter = 1;
     for (const [province, names] of Object.entries(COMMUNITIES)) {
@@ -660,11 +679,11 @@ export function respondToLoanTerms(loanId, accepted) {
   return webPut(`/loans/${loanId}/respond-terms`, { accepted }, true);
 }
 
-// POST /api/loans/verify-id — Gemini Vision AI ID validation (local backend, port 5001)
+// POST /api/loans/verify-id-frame — Gemini Vision AI ID validation (web backend)
 // body: { base64: string, mimeType: string }
 // returns: { valid: boolean, idType: string|null, confidence: string, reason: string }
 export function verifyIdImage(base64, mimeType = "image/jpeg") {
-  return request("POST", "/loans/verify-id", { base64, mimeType }, true);
+  return webPost("/loans/verify-id-frame", { base64, mimeType }, true);
 }
 
 // ── Donation Endpoints ──────────────────────────────────────────────
@@ -786,8 +805,8 @@ export async function getAnnouncements() {
     if (_announcementsCache && (now - _announcementsCacheTime) < ANNOUNCEMENTS_CACHE_TTL) {
       return _announcementsCache;
     }
-    // Correct endpoint: /api/announcements — returns a plain array
-    const result = await get("/announcements", false);
+    // Web backend endpoint: GET /api/upcoming — returns announcements & services
+    const result = await get("/upcoming", false);
     // Normalise: handle plain array, { data: [] }, { announcements: [] }
     let list = [];
     if (Array.isArray(result)) {
@@ -885,7 +904,9 @@ export async function getReadNotificationIds() {
 export async function markNotificationsRead(ids) {
   if (!ids || ids.length === 0) return;
   try {
-    // Persist read IDs locally — merge with existing
+    // Sync to server first (best effort — don't block UI if server is slow)
+    try { await webPost("/read-notifications", { ids }, true); } catch {}
+    // Also persist locally for offline access / instant UI feedback
     const { default: AsyncStorage } = await import("@react-native-async-storage/async-storage");
     const raw = await AsyncStorage.getItem("faithly_read_notification_ids");
     const existing = raw ? JSON.parse(raw) : [];
@@ -909,6 +930,11 @@ export function savePaymentAccount(accountData) {
   return request("POST", "/saved-accounts", accountData, true);
 }
 
+export function deleteSavedAccount(accountData) {
+  // Removes a saved payment account
+  return request("DELETE", "/saved-accounts", accountData, true);
+}
+
 // ── RSVP (kept for events if needed) ────────────────────────────────
 
 export function rsvpEvent(eventId, email, headcount = 1) {
@@ -917,5 +943,5 @@ export function rsvpEvent(eventId, email, headcount = 1) {
 
 
 export async function changePassword(currentPassword, newPassword) {
-  return await webPost("/auth/change-password", { currentPassword, newPassword });
+  return await webPut("/change-password", { currentPassword, newPassword });
 }

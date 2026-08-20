@@ -257,6 +257,7 @@ export default function LoansScreen({ navigation, route }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatbotOpen, setChatbotOpen] = useState(false);
   const [applyModalOpen, setApplyModalOpen] = useState(false);
+  const [loanGuideOpen, setLoanGuideOpen] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [successModalOpen, setSuccessModalOpen] = useState(false);
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
@@ -1372,6 +1373,33 @@ export default function LoansScreen({ navigation, route }) {
             <Text style={styles.applyBtnText}>Apply for Loan</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Loan Guide Button */}
+        <TouchableOpacity
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            backgroundColor: colors.cardBg,
+            borderWidth: 1.5,
+            borderColor: colors.inputBorder,
+            borderRadius: s(12),
+            paddingVertical: s(11),
+            marginBottom: s(16),
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.04,
+            shadowRadius: 6,
+            elevation: 1,
+          }}
+          activeOpacity={0.75}
+          onPress={() => setLoanGuideOpen(true)}
+        >
+          <Text style={{ fontSize: fs(15), color: colors.blue }}>📖</Text>
+          <Text style={{ fontSize: fs(13), fontWeight: '700', color: colors.blue }}>Loan Guide</Text>
+          <Text style={{ fontSize: fs(12), color: colors.textMuted, marginLeft: 2 }}>— How to Apply</Text>
+        </TouchableOpacity>
 
         {/* Savings Eligibility Banner */}
         {!isEligibleForLoan && (
@@ -3257,6 +3285,135 @@ export default function LoansScreen({ navigation, route }) {
         type="loan"
         data={receiptData || {}}
       />
+
+      {/* ── Loan Guide Modal ─────────────────────────────────────────── */}
+      <Modal
+        visible={loanGuideOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLoanGuideOpen(false)}
+      >
+        <View style={[styles.guideOverlay]}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ width: '100%' }}>
+            <View style={[styles.guideCard, { backgroundColor: colors.cardBg }]}>
+
+              {/* Gradient-style Header */}
+              <View style={[styles.guideHeaderGrad, { backgroundColor: '#0D1F45' }]}>
+                <TouchableOpacity style={styles.guideCloseBtn} onPress={() => setLoanGuideOpen(false)} activeOpacity={0.8}>
+                  <Text style={styles.guideCloseTxt}>✕</Text>
+                </TouchableOpacity>
+                <Text style={styles.guideHeaderTitle}>How to Apply for a Loan</Text>
+                <Text style={styles.guideHeaderSub}>
+                  Access fast, transparent co-op funding straight from your IsangDiwa account in 3 simple steps.
+                </Text>
+              </View>
+
+              {/* Step Cards */}
+              <ScrollView style={{ backgroundColor: colors.bg }} contentContainerStyle={styles.guideBody} showsVerticalScrollIndicator={false}>
+
+                {/* Step 1 */}
+                <View style={[styles.guideStepCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+                  <View style={styles.guideStepRow}>
+                    <View style={styles.guideStepRight}>
+                      <View style={styles.guideStepTitleRow}>
+                        <Text style={[styles.guideStepTitle, { color: colors.textDark }]}>1. Check Savings Eligibility</Text>
+                        <View style={[styles.guideStepBadge, { backgroundColor: 'rgba(13,31,69,0.08)' }]}>
+                          <Text style={[styles.guideStepBadgeTxt, { color: colors.blue }]}>Step 01</Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.guideStepDesc, { color: colors.textMuted }]}>
+                        Maintain at least{' '}
+                        <Text style={{ fontWeight: '800', color: colors.textDark }}>₱1,000</Text>
+                        {' '}in confirmed savings to unlock loan access. Your maximum borrowing limit scales directly with your savings.
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Step 2 */}
+                <View style={[styles.guideStepCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+                  <View style={styles.guideStepRow}>
+                    <View style={styles.guideStepRight}>
+                      <View style={styles.guideStepTitleRow}>
+                        <Text style={[styles.guideStepTitle, { color: colors.textDark }]}>2. Select Your Loan Type</Text>
+                        <View style={[styles.guideStepBadge, { backgroundColor: 'rgba(13,31,69,0.08)' }]}>
+                          <Text style={[styles.guideStepBadgeTxt, { color: colors.blue }]}>Step 02</Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.guideStepDesc, { color: colors.textMuted }]}>
+                        Pick the loan bracket tailored to your needs:
+                      </Text>
+                    </View>
+                  </View>
+                  {/* Loan type chips */}
+                  <View style={styles.guideLoanTypeRow}>
+                    <View style={[styles.guideLoanChip, { backgroundColor: 'rgba(13,31,69,0.06)', borderColor: 'rgba(13,31,69,0.15)' }]}>
+                      <Text style={[styles.guideLoanChipName, { color: colors.blue }]}>Personal</Text>
+                      <Text style={[styles.guideLoanChipSub, { color: colors.blue }]}>Up to 2× Savings</Text>
+                    </View>
+                    <View style={[styles.guideLoanChip, { backgroundColor: 'rgba(13,31,69,0.06)', borderColor: 'rgba(13,31,69,0.15)' }]}>
+                      <Text style={[styles.guideLoanChipName, { color: colors.blue }]}>Emergency</Text>
+                      <Text style={[styles.guideLoanChipSub, { color: colors.blue }]}>Up to 1.5× Savings</Text>
+                    </View>
+                    <View style={[styles.guideLoanChip, { backgroundColor: 'rgba(13,31,69,0.06)', borderColor: 'rgba(13,31,69,0.15)' }]}>
+                      <Text style={[styles.guideLoanChipName, { color: colors.blue }]}>Short-Term</Text>
+                      <Text style={[styles.guideLoanChipSub, { color: colors.blue }]}>Up to 1× Savings</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Step 3 */}
+                <View style={[styles.guideStepCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+                  <View style={styles.guideStepRow}>
+                    <View style={styles.guideStepRight}>
+                      <View style={styles.guideStepTitleRow}>
+                        <Text style={[styles.guideStepTitle, { color: colors.textDark }]}>3. Submit & Receive Disbursement</Text>
+                        <View style={[styles.guideStepBadge, { backgroundColor: 'rgba(13,31,69,0.08)' }]}>
+                          <Text style={[styles.guideStepBadgeTxt, { color: colors.blue }]}>Step 03</Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.guideStepDesc, { color: colors.textMuted }]}>
+                        Complete identity verification and your payout details. Once approved by co-op officers, funds are disbursed directly.
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+              </ScrollView>
+
+
+              {/* Footer */}
+              <View style={[styles.guideFooter, { backgroundColor: colors.cardBg, borderTopColor: colors.cardBorder }]}>
+                <View style={{ flexDirection: 'row', gap: s(10) }}>
+                  <TouchableOpacity
+                    style={styles.guideApplyNowBtn}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      setLoanGuideOpen(false);
+                      if (!isEligibleForLoan) return;
+                      const hasOngoingLoan = loansData.some(l => ['pending', 'approved', 'member_accepted', 'active'].includes(l.status?.toLowerCase()));
+                      if (hasOngoingLoan) {
+                        return showAlert('Wait just a moment', 'You already have an active loan or an ongoing application.');
+                      }
+                      setTimeout(() => handleOpenApplyModal(), 300);
+                    }}
+                  >
+                    <Text style={styles.guideApplyNowTxt}>＋ Apply Now</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.guideDismissBtn} activeOpacity={0.7} onPress={() => setLoanGuideOpen(false)}>
+                    <Text style={[styles.guideDismissTxt, { color: colors.textMuted }]}>Got it, thanks!</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={[styles.guideFooterNote, { color: colors.textMuted, marginTop: s(10) }]}>
+                  Need assistance? Contact your co-op admin.
+                </Text>
+              </View>
+
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -3509,6 +3666,183 @@ const getStyles = (C) => StyleSheet.create({
   detailsBtnText: { fontSize: fs(14), fontWeight: "700", color: C.blue },
 
   bottomPad: { height: 110 },
+
+  // Loan Guide Modal
+  guideOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: s(16),
+  },
+  guideCard: {
+    width: '100%',
+    maxHeight: '92%',
+    borderRadius: s(20),
+    overflow: 'hidden',
+  },
+  guideHeaderGrad: {
+    paddingTop: s(24),
+    paddingBottom: s(22),
+    paddingHorizontal: s(22),
+  },
+  guideCloseBtn: {
+    position: 'absolute',
+    top: s(14),
+    right: s(14),
+    width: s(32),
+    height: s(32),
+    borderRadius: s(16),
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  guideCloseTxt: { fontSize: fs(16), color: '#FFF', fontWeight: '700' },
+  guideHeaderTitle: {
+    fontSize: fs(22),
+    fontWeight: '900',
+    color: '#FFF',
+    marginBottom: s(6),
+    letterSpacing: -0.3,
+  },
+  guideHeaderSub: {
+    fontSize: fs(13),
+    color: 'rgba(255,255,255,0.78)',
+    lineHeight: fs(20),
+  },
+  guideBody: {
+    paddingHorizontal: s(16),
+    paddingTop: s(16),
+    paddingBottom: s(16),
+  },
+  guideStepCard: {
+    borderRadius: s(14),
+    borderWidth: 1,
+    borderColor: C.cardBorder,
+    backgroundColor: C.cardBg,
+    padding: s(16),
+    marginBottom: s(12),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  guideStepRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: s(12),
+    marginBottom: s(10),
+  },
+  guideStepIconWrap: {
+    width: s(44),
+    height: s(44),
+    borderRadius: s(12),
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  guideStepIconTxt: { fontSize: fs(20) },
+  guideStepRight: { flex: 1 },
+  guideStepTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: s(4),
+  },
+  guideStepTitle: {
+    fontSize: fs(14),
+    fontWeight: '800',
+    color: C.textDark,
+    flex: 1,
+    marginRight: 6,
+  },
+  guideStepBadge: {
+    paddingHorizontal: s(8),
+    paddingVertical: s(3),
+    borderRadius: s(20),
+  },
+  guideStepBadgeTxt: {
+    fontSize: fs(10),
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  guideStepDesc: {
+    fontSize: fs(12.5),
+    color: C.textMuted,
+    lineHeight: fs(19),
+  },
+  guideLoanTypeRow: {
+    flexDirection: 'row',
+    gap: s(8),
+    marginTop: s(10),
+  },
+  guideLoanChip: {
+    flex: 1,
+    borderRadius: s(10),
+    paddingVertical: s(9),
+    paddingHorizontal: s(6),
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  guideLoanChipName: {
+    fontSize: fs(12),
+    fontWeight: '800',
+    marginBottom: s(2),
+    textAlign: 'center',
+  },
+  guideLoanChipSub: {
+    fontSize: fs(10),
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  guideApplyLink: {
+    marginTop: s(6),
+  },
+  guideApplyLinkTxt: {
+    fontSize: fs(13),
+    fontWeight: '800',
+    color: C.blue,
+  },
+  guideFooter: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    paddingHorizontal: s(16),
+    paddingVertical: s(14),
+    borderTopWidth: 1,
+    borderTopColor: C.cardBorder,
+    backgroundColor: C.cardBg,
+  },
+  guideFooterNote: {
+    fontSize: fs(11.5),
+    color: C.textMuted,
+    lineHeight: fs(16),
+  },
+  guideApplyNowBtn: {
+    backgroundColor: C.blue,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: s(16),
+    paddingVertical: s(12),
+    borderRadius: s(12),
+    shadowColor: C.blue,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  guideApplyNowTxt: { fontSize: fs(13), fontWeight: '800', color: '#FFF' },
+  guideDismissBtn: {
+    backgroundColor: C.bg,
+    borderWidth: 1,
+    borderColor: C.inputBorder,
+    paddingHorizontal: s(14),
+    paddingVertical: s(12),
+    borderRadius: s(12),
+  },
+  guideDismissTxt: { fontSize: fs(13), fontWeight: '700', color: C.textMuted },
 
   chatBtn: {
     position: "absolute",

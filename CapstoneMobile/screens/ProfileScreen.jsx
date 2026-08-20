@@ -291,13 +291,23 @@ export default function ProfileScreen({ navigation, route }) {
         const res = await getProfile(emailToFetch); 
         if (!mounted) return;
 
+        // getProfile() returns user object directly (not wrapped in { user })
+        const apiUser = res?.user || res || {};
+        // Web backend may return firstName/lastName instead of fullName
+        const fullName = apiUser.fullName
+          || (apiUser.firstName && apiUser.lastName ? `${apiUser.firstName} ${apiUser.lastName}` : "")
+          || apiUser.firstName || apiUser.name || "";
+
         const merged = {
           ...EMPTY_USER,
-          ...res.user,
-          email: cleanEmail(res.user?.email || emailToFetch),
+          ...apiUser,
+          fullName,
+          email: cleanEmail(apiUser.email || emailToFetch),
         };
 
         setUser(merged);
+        if (merged.role) setUserRole(merged.role);
+        if (merged.position) setUserPosition(merged.position);
         if (merged.profilePhoto) setProfilePhoto(merged.profilePhoto);
         await AsyncStorage.setItem("faithly_user", JSON.stringify(merged));
       } catch (e) {
@@ -326,12 +336,20 @@ export default function ProfileScreen({ navigation, route }) {
       const emailToFetch = resolvedEmail;
       if (emailToFetch) {
         const res = await getProfile(emailToFetch);
+        const apiUser = res?.user || res || {};
+        const fullName = apiUser.fullName
+          || (apiUser.firstName && apiUser.lastName ? `${apiUser.firstName} ${apiUser.lastName}` : "")
+          || apiUser.firstName || apiUser.name || "";
         const merged = {
           ...EMPTY_USER,
-          ...res.user,
-          email: cleanEmail(res.user?.email || emailToFetch),
+          ...apiUser,
+          fullName,
+          email: cleanEmail(apiUser.email || emailToFetch),
         };
         setUser(merged);
+        if (merged.role) setUserRole(merged.role);
+        if (merged.position) setUserPosition(merged.position);
+        if (merged.profilePhoto) setProfilePhoto(merged.profilePhoto);
         await AsyncStorage.setItem("faithly_user", JSON.stringify(merged));
       }
       showToast("Profile refreshed", "success");

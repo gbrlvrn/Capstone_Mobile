@@ -146,11 +146,14 @@ export default function BranchScreen({ navigation, route }) {
         setLoadingBranches(true);
         const res = await getBranches();
         if (mounted && res?.success) {
-          const mapped = res.branches.map((b, idx) => ({
+          // Filter to Active branches only (matches web UI behavior)
+          const activeBranches = (res.branches || []).filter(b => !b.status || b.status === "Active");
+          const mapped = activeBranches.map((b, idx) => ({
             id: b._id || idx + 1,
             name: b.name,
-            province: b.province,
-            location: `${b.province} - ${b.name}`,
+            province: b.province || b.region || "",
+            region: b.region || "",
+            location: `${b.province || b.region || ""} - ${b.name}`,
             leader: b.leader || "PUAC Representative",
             phone: b.phone || "+63 90 000 0000",
             email: b.email || "puac@gmail.com",
@@ -213,8 +216,82 @@ export default function BranchScreen({ navigation, route }) {
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedBranchId, setExpandedBranchId] = useState(null);
+  const [expandedProvince, setExpandedProvince] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 10;
+
+  // Philippine province → region mapping
+  const PROVINCE_TO_REGION = useMemo(() => ({
+    "Kalinga": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Abra": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Benguet": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Mountain Province": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Ifugao": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Apayao": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Isabela": { code: "Region II", name: "Cagayan Valley" },
+    "Cagayan": { code: "Region II", name: "Cagayan Valley" },
+    "Pangasinan": { code: "Region I", name: "Ilocos Region" },
+    "La Union": { code: "Region I", name: "Ilocos Region" },
+    "Ilocos Norte": { code: "Region I", name: "Ilocos Region" },
+    "Ilocos Sur": { code: "Region I", name: "Ilocos Region" },
+    "Tarlac": { code: "Region III", name: "Central Luzon" },
+    "Nueva Ecija": { code: "Region III", name: "Central Luzon" },
+    "Bulacan": { code: "Region III", name: "Central Luzon" },
+    "Pampanga": { code: "Region III", name: "Central Luzon" },
+    "Zambales": { code: "Region III", name: "Central Luzon" },
+    "Bataan": { code: "Region III", name: "Central Luzon" },
+    "NCR": { code: "NCR", name: "National Capital Region" },
+    "Metro Manila": { code: "NCR", name: "National Capital Region" },
+    "Rizal": { code: "Region IV-A", name: "CALABARZON" },
+    "Cavite": { code: "Region IV-A", name: "CALABARZON" },
+    "Laguna": { code: "Region IV-A", name: "CALABARZON" },
+    "Batangas": { code: "Region IV-A", name: "CALABARZON" },
+    "Quezon": { code: "Region IV-A", name: "CALABARZON" },
+    "Cebu": { code: "Region VII", name: "Central Visayas" },
+    "Bohol": { code: "Region VII", name: "Central Visayas" },
+    "Agusan Del Norte": { code: "Region XIII", name: "Caraga" },
+    "Agusan del Norte": { code: "Region XIII", name: "Caraga" },
+    "Surigao Del Norte": { code: "Region XIII", name: "Caraga" },
+    "Surigao del Norte": { code: "Region XIII", name: "Caraga" },
+    "Surigao Del Sur": { code: "Region XIII", name: "Caraga" },
+    "Surigao del Sur": { code: "Region XIII", name: "Caraga" },
+    "Agusan Del Sur": { code: "Region XIII", name: "Caraga" },
+    "Agusan del Sur": { code: "Region XIII", name: "Caraga" },
+    "Dinagat Islands": { code: "Region XIII", name: "Caraga" },
+  }), []);
+
+  // Build case-insensitive lookup from PROVINCE_TO_REGION
+  const provinceLookup = useMemo(() => {
+    const map = {};
+    Object.entries(PROVINCE_TO_REGION).forEach(([key, val]) => {
+      map[key.toLowerCase().trim()] = val;
+    });
+    return map;
+  }, [PROVINCE_TO_REGION]);
+
+  // Group filtered branches by region (matching the web)
+  const groupedByRegion = useMemo(() => {
+    const groups = {};
+    filteredBranches.forEach(b => {
+      const provKey = (b.province || "").toLowerCase().trim();
+      const region = provinceLookup[provKey]
+        || (b.region ? { code: b.region, name: b.region } : null);
+      if (!region) return; // Skip unmapped branches — no "Other" group
+      const key = region.code;
+      if (!groups[key]) groups[key] = { code: region.code, name: region.name, branches: [] };
+      groups[key].branches.push(b);
+    });
+    // Sort by region code order (CAR first, then Region I, II, III... NCR, then XIII)
+    const regionOrder = ["CAR", "Region I", "Region II", "Region III", "NCR", "Region IV-A", "Region IV-B", "Region V", "Region VI", "Region VII", "Region VIII", "Region IX", "Region X", "Region XI", "Region XII", "Region XIII"];
+    return Object.values(groups).sort((a, b) => {
+      const ai = regionOrder.indexOf(a.code);
+      const bi = regionOrder.indexOf(b.code);
+      if (ai === -1 && bi === -1) return a.code.localeCompare(b.code);
+      if (ai === -1) return 1;
+      if (bi === -1) return 1;
+      return ai - bi;
+    });
+  }, [filteredBranches, PROVINCE_TO_REGION]);
 
   // Filtered tabs based on role (members don't see Loans)
   const TAB_ITEMS = userRole !== "officer"
@@ -496,9 +573,9 @@ export default function BranchScreen({ navigation, route }) {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text style={[styles.headerTitle, { color: colors.textDark }]}>Our Branches</Text>
+          <Text style={[styles.headerTitle, { color: colors.textDark }]}>Our Communities</Text>
           <Text style={[styles.headerSubtitle, { color: colors.textMuted }]}>
-            Find a church location near you
+            Find a church community near you
           </Text>
         </View>
 
@@ -506,7 +583,7 @@ export default function BranchScreen({ navigation, route }) {
         <View style={styles.statsContainer}>
           <View style={[styles.statCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
             <View style={styles.statLeft}>
-              <Text style={[styles.statLabel, { color: colors.textMuted }]}>Total Branches</Text>
+              <Text style={[styles.statLabel, { color: colors.textMuted }]}>Total Communities</Text>
               <Text style={[styles.statValue, { color: colors.textDark }]}>{filteredBranches.length}</Text>
             </View>
             <View style={[styles.statIconBox, { backgroundColor: C.blueLight }]}>
@@ -520,7 +597,7 @@ export default function BranchScreen({ navigation, route }) {
 
           <View style={[styles.statCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
             <View style={styles.statLeft}>
-              <Text style={[styles.statLabel, { color: colors.textMuted }]}>Nearest Branch</Text>
+              <Text style={[styles.statLabel, { color: colors.textMuted }]}>Nearest Community</Text>
               <Text style={[styles.statValue, { color: colors.textDark }]}>{nearestBranchDistance}</Text>
               {nearestBranchName !== "" && (
                 <Text style={{ fontSize: fs(13), color: C.blue, marginTop: 4, fontWeight: "600" }}>{nearestBranchName}</Text>
@@ -547,7 +624,7 @@ export default function BranchScreen({ navigation, route }) {
               />
               <TextInput
                 style={[styles.searchInput, { color: colors.textDark }]}
-                placeholder="Search branches..."
+                placeholder="Search communities..."
                 placeholderTextColor={colors.textMuted}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -584,9 +661,9 @@ export default function BranchScreen({ navigation, route }) {
           ) : null}
         </View>
 
-        {/* Branch Listings — Accordion with Pagination */}
+        {/* Branch Listings — Grouped by Province */}
         <View style={{ paddingHorizontal: s(18), paddingBottom: 8 }}>
-          {branchesLinkedWithDistance.length === 0 && !loadingBranches && (
+          {filteredBranches.length === 0 && !loadingBranches && (
             <View style={{
               backgroundColor: colors.cardBg,
               borderRadius: 16,
@@ -609,10 +686,10 @@ export default function BranchScreen({ navigation, route }) {
                 <Ionicons name="location-outline" size={26} color={colors.textMuted} />
               </View>
               <Text style={{ color: colors.textDark, fontSize: fs(16), fontWeight: '700', marginBottom: 6, textAlign: 'center' }}>
-                No Branches Found
+                No Communities Found
               </Text>
               <Text style={{ color: colors.textMuted, fontSize: fs(13), textAlign: 'center', marginBottom: 16, paddingHorizontal: 12 }}>
-                {searchQuery ? `We couldn't find any branches matching "${searchQuery}".` : 'No branches are currently available in this category.'}
+                {searchQuery ? `We couldn't find any communities matching "${searchQuery}".` : 'No communities are currently available in this category.'}
               </Text>
               {searchQuery ? (
                 <TouchableOpacity
@@ -630,202 +707,164 @@ export default function BranchScreen({ navigation, route }) {
               ) : null}
             </View>
           )}
-          {branchesLinkedWithDistance
-            .slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
-            .map((branch) => {
-            const isExpanded = expandedBranchId === branch.id;
+
+          {/* Region Groups — matching web layout */}
+          {groupedByRegion.map((region) => {
+            const isRegionExpanded = expandedProvince === region.code;
             return (
-              <View key={branch.id} style={[styles.branchCard, { backgroundColor: colors.cardBg, borderColor: isExpanded ? C.blue : colors.cardBorder, width: '100%', marginRight: 0 }]}>
-                {/* Accordion Header — always visible */}
+              <View key={region.code} style={{ marginBottom: s(6) }}>
+                {/* Region Row */}
                 <TouchableOpacity
                   activeOpacity={0.7}
-                  onPress={() => setExpandedBranchId(isExpanded ? null : branch.id)}
-                  style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+                  onPress={() => {
+                    setExpandedProvince(isRegionExpanded ? null : region.code);
+                    setExpandedBranchId(null);
+                  }}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: colors.cardBg,
+                    borderRadius: s(12),
+                    paddingVertical: s(16),
+                    paddingHorizontal: s(14),
+                    borderWidth: 1,
+                    borderColor: isRegionExpanded ? C.blue : colors.cardBorder,
+                  }}
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                    <View style={[styles.branchIconBox, { backgroundColor: isExpanded ? C.blueLight : colors.bg }]}>
-                      <Image source={ICONS.church} style={[styles.branchIcon, { tintColor: isExpanded ? C.blue : colors.textMuted }]} resizeMode="contain" />
-                    </View>
-                    <View style={{ flex: 1, marginLeft: 10 }}>
-                      <Text style={[styles.branchName, { color: colors.textDark }]} numberOfLines={1}>{branch.name}</Text>
-                      <Text style={[styles.branchLeader, { color: colors.textMuted }]} numberOfLines={1}>{branch.province}</Text>
-                    </View>
+                  {/* Region Badge */}
+                  <View style={{
+                    paddingHorizontal: s(10),
+                    paddingVertical: s(5),
+                    borderRadius: s(8),
+                    borderWidth: 1.5,
+                    borderColor: C.blue,
+                    backgroundColor: 'transparent',
+                    marginRight: s(12),
+                    minWidth: s(55),
+                    alignItems: 'center',
+                  }}>
+                    <Text style={{
+                      fontSize: fs(11),
+                      fontWeight: '800',
+                      color: C.blue,
+                      letterSpacing: 0.3,
+                    }}>{region.code}</Text>
                   </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    {branch.computedDistance !== null && (
-                      <Text style={{ fontSize: fs(11), color: C.blue, fontWeight: '600', marginBottom: 2 }}>
-                        {branch.computedDistance.toFixed(1)} km
-                      </Text>
-                    )}
-                    <Text style={{ fontSize: fs(18), color: isExpanded ? C.blue : colors.textMuted }}>
-                      {isExpanded ? '▲' : '▼'}
-                    </Text>
-                  </View>
+                  {/* Region Name */}
+                  <Text style={{
+                    flex: 1,
+                    fontSize: fs(15),
+                    fontWeight: '700',
+                    color: colors.textDark,
+                  }} numberOfLines={1}>{region.name}</Text>
+                  {/* Count */}
+                  <Text style={{
+                    fontSize: fs(15),
+                    fontWeight: '600',
+                    color: C.blue,
+                    marginRight: s(10),
+                  }}>{region.branches.length}</Text>
+                  {/* Chevron */}
+                  <Ionicons
+                    name={isRegionExpanded ? "chevron-up" : "chevron-down"}
+                    size={s(18)}
+                    color={colors.textMuted}
+                  />
                 </TouchableOpacity>
 
-                {/* Expandable Details */}
-                {isExpanded && (
-                  <View style={{ marginTop: 14, borderTopWidth: 1, borderTopColor: colors.cardBorder, paddingTop: 14 }}>
-
-                    {/* Contact Info */}
-                    <View style={styles.contactSection}>
-                      <View style={styles.contactRow}>
-                        <Image source={ICONS.location} style={styles.contactIcon} resizeMode="contain" />
-                        <Text style={[styles.contactText, { color: colors.textMuted }]}>{branch.address || branch.location}</Text>
-                      </View>
-                      <View style={styles.contactRow}>
-                        <Image source={ICONS.phone} style={styles.contactIcon} resizeMode="contain" />
-                        <Text style={[styles.contactText, { color: colors.textMuted }]}>{branch.phone}</Text>
-                      </View>
-                      <View style={styles.contactRow}>
-                        <Image source={ICONS.email} style={styles.contactIcon} resizeMode="contain" />
-                        <Text style={[styles.contactText, { color: colors.textMuted }]}>{branch.email}</Text>
-                      </View>
-                    </View>
-
-                    {/* Service Times */}
-                    <View style={[styles.serviceTimesSection, { marginTop: 12 }]}>
-                      <Text style={{ fontSize: fs(11), fontWeight: '700', color: colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 8 }}>Service Times</Text>
-                      {branch.serviceTimes.map((service, idx) => (
-                        <View key={idx} style={styles.serviceTimeRow}>
-                          <Text style={[styles.serviceDay, { color: idx % 2 === 0 ? C.blue : C.gold }]}>{service.day}</Text>
-                          <Text style={styles.serviceTime}>{service.time}</Text>
-                        </View>
-                      ))}
-                    </View>
-
-                    {/* Community Statistics */}
-                    <View style={{ marginTop: 14 }}>
-                      <Text style={{ fontSize: fs(11), fontWeight: '700', color: colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 }}>Community Statistics</Text>
-                      <View style={{ flexDirection: 'row', gap: 10 }}>
-                        <View style={{ flex: 1, backgroundColor: colors.bg, borderRadius: s(10), borderWidth: 1, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 14 }}>
-                          <Text style={{ fontSize: fs(22), fontWeight: '800', color: C.blue }}>{branch.members || 0}</Text>
-                          <Text style={{ fontSize: fs(10), fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 }}>Members</Text>
-                        </View>
-                        <View style={{ flex: 1, backgroundColor: colors.bg, borderRadius: s(10), borderWidth: 1, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 14 }}>
-                          <Text style={{ fontSize: fs(22), fontWeight: '800', color: C.blue }}>{branch.officers || 0}</Text>
-                          <Text style={{ fontSize: fs(10), fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 }}>Officers</Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    {/* Upcoming Events */}
-                    <View style={{ marginTop: 14 }}>
-                      <Text style={{ fontSize: fs(11), fontWeight: '700', color: colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 }}>Upcoming Events</Text>
-                      {branch.upcomingEvents && branch.upcomingEvents.length > 0 ? (
-                        branch.upcomingEvents.map((ev, idx) => (
-                          <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: s(8), borderBottomWidth: idx < branch.upcomingEvents.length - 1 ? 1 : 0, borderBottomColor: colors.cardBorder }}>
-                            <View style={{ width: 8, height: 8, borderRadius: s(4), backgroundColor: C.blue, marginRight: 10 }} />
-                            <View style={{ flex: 1 }}>
-                              <Text style={{ fontSize: fs(13), fontWeight: '600', color: colors.textDark }}>{ev.title}</Text>
-                              <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 2 }}>{ev.date}</Text>
+                {/* Branches within Region */}
+                {isRegionExpanded && (
+                  <View style={{ marginTop: s(4), marginLeft: s(4), marginRight: s(4) }}>
+                    {region.branches.map((branch) => {
+                      const isExpanded = expandedBranchId === branch.id;
+                      const dist = branchesLinkedWithDistance.find(b => b.id === branch.id)?.computedDistance;
+                      return (
+                        <View key={branch.id} style={[styles.branchCard, { backgroundColor: colors.cardBg, borderColor: isExpanded ? C.blue : colors.cardBorder, width: '100%', marginRight: 0 }]}>
+                          <TouchableOpacity
+                            activeOpacity={0.7}
+                            onPress={() => setExpandedBranchId(isExpanded ? null : branch.id)}
+                            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                              <View style={[styles.branchIconBox, { backgroundColor: isExpanded ? C.blueLight : colors.bg }]}>
+                                <Image source={ICONS.church} style={[styles.branchIcon, { tintColor: isExpanded ? C.blue : colors.textMuted }]} resizeMode="contain" />
+                              </View>
+                              <View style={{ flex: 1, marginLeft: 10 }}>
+                                <Text style={[styles.branchName, { color: colors.textDark }]} numberOfLines={1}>{branch.name}</Text>
+                                <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 1 }}>{branch.province}</Text>
+                              </View>
                             </View>
-                          </View>
-                        ))
-                      ) : (
-                        <View style={{ backgroundColor: colors.bg, borderRadius: s(10), borderWidth: 1, borderColor: colors.cardBorder, paddingVertical: s(16), alignItems: 'center' }}>
-                          <Text style={{ fontSize: fs(13), color: colors.textMuted }}>No upcoming events scheduled.</Text>
+                            <View style={{ alignItems: 'flex-end' }}>
+                              {dist !== null && dist !== undefined && (
+                                <Text style={{ fontSize: fs(11), color: C.blue, fontWeight: '600', marginBottom: 2 }}>
+                                  {dist.toFixed(1)} km
+                                </Text>
+                              )}
+                              <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={s(16)} color={isExpanded ? C.blue : colors.textMuted} />
+                            </View>
+                          </TouchableOpacity>
+
+                          {isExpanded && (
+                            <View style={{ marginTop: 14, borderTopWidth: 1, borderTopColor: colors.cardBorder, paddingTop: 14 }}>
+                              <View style={styles.contactSection}>
+                                <View style={styles.contactRow}>
+                                  <Image source={ICONS.location} style={styles.contactIcon} resizeMode="contain" />
+                                  <Text style={[styles.contactText, { color: colors.textMuted }]}>{branch.address || branch.location}</Text>
+                                </View>
+                                <View style={styles.contactRow}>
+                                  <Image source={ICONS.phone} style={styles.contactIcon} resizeMode="contain" />
+                                  <Text style={[styles.contactText, { color: colors.textMuted }]}>{branch.phone}</Text>
+                                </View>
+                                <View style={styles.contactRow}>
+                                  <Image source={ICONS.email} style={styles.contactIcon} resizeMode="contain" />
+                                  <Text style={[styles.contactText, { color: colors.textMuted }]}>{branch.email}</Text>
+                                </View>
+                              </View>
+                              <View style={[styles.serviceTimesSection, { marginTop: 12 }]}>
+                                <Text style={{ fontSize: fs(11), fontWeight: '700', color: colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 8 }}>Service Times</Text>
+                                {branch.serviceTimes.map((service, idx) => (
+                                  <View key={idx} style={styles.serviceTimeRow}>
+                                    <Text style={[styles.serviceDay, { color: idx % 2 === 0 ? C.blue : C.gold }]}>{service.day}</Text>
+                                    <Text style={styles.serviceTime}>{service.time}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                              <View style={{ marginTop: 14 }}>
+                                <Text style={{ fontSize: fs(11), fontWeight: '700', color: colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 }}>Community Statistics</Text>
+                                <View style={{ flexDirection: 'row', gap: 10 }}>
+                                  <View style={{ flex: 1, backgroundColor: colors.bg, borderRadius: s(10), borderWidth: 1, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 14 }}>
+                                    <Text style={{ fontSize: fs(22), fontWeight: '800', color: C.blue }}>{branch.members || 0}</Text>
+                                    <Text style={{ fontSize: fs(10), fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 }}>Members</Text>
+                                  </View>
+                                  <View style={{ flex: 1, backgroundColor: colors.bg, borderRadius: s(10), borderWidth: 1, borderColor: colors.cardBorder, alignItems: 'center', paddingVertical: 14 }}>
+                                    <Text style={{ fontSize: fs(22), fontWeight: '800', color: C.blue }}>{branch.officers || 0}</Text>
+                                    <Text style={{ fontSize: fs(10), fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 2 }}>Officers</Text>
+                                  </View>
+                                </View>
+                              </View>
+                              <View style={[styles.actionButtons, { marginTop: 16 }]}>
+                                <TouchableOpacity style={styles.primaryBtn} activeOpacity={0.8} onPress={() => handleGetDirections(branch.id, branch.name, branch.location)}>
+                                  <Text style={styles.primaryBtnText}>Get Directions</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.secondaryBtn} activeOpacity={0.8} onPress={() => handleContact(branch)}>
+                                  <Text style={styles.secondaryBtnText}>Contact</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          )}
                         </View>
-                      )}
-                    </View>
-
-                    {/* Action Buttons */}
-                    <View style={[styles.actionButtons, { marginTop: 16 }]}>
-                      <TouchableOpacity
-                        style={styles.primaryBtn}
-                        activeOpacity={0.8}
-                        onPress={() => handleGetDirections(branch.id, branch.name, branch.location)}
-                      >
-                        <Text style={styles.primaryBtnText}>Get Directions</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.secondaryBtn} activeOpacity={0.8} onPress={() => handleContact(branch)}>
-                        <Text style={styles.secondaryBtnText}>Contact</Text>
-                      </TouchableOpacity>
-                    </View>
-
+                      );
+                    })}
                   </View>
                 )}
               </View>
             );
           })}
 
-          {/* Pagination Controls */}
-          {branchesLinkedWithDistance.length > PAGE_SIZE && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: s(12), marginBottom: s(4), paddingHorizontal: 4 }}>
-              <TouchableOpacity
-                onPress={() => {
-                  setCurrentPage(p => Math.max(1, p - 1));
-                  setExpandedBranchId(null);
-                }}
-                disabled={currentPage === 1}
-                activeOpacity={0.7}
-                style={{
-                  paddingHorizontal: s(18), paddingVertical: 9,
-                  borderRadius: s(10), borderWidth: 1.5,
-                  borderColor: currentPage === 1 ? colors.cardBorder : C.blue,
-                  backgroundColor: currentPage === 1 ? colors.bg : C.blue,
-                }}
-              >
-                <Text style={{ fontSize: fs(13), fontWeight: '700', color: currentPage === 1 ? colors.textMuted : '#fff' }}>← Prev</Text>
-              </TouchableOpacity>
-
-              {/* Page number pills */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: s(6), flexWrap: 'wrap', flex: 1, justifyContent: 'center', marginHorizontal: 8 }}>
-                {Array.from({ length: Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE) }, (_, i) => i + 1)
-                  .filter(p => {
-                    const total = Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE);
-                    return p === 1 || p === total || Math.abs(p - currentPage) <= 1;
-                  })
-                  .reduce((acc, p, idx, arr) => {
-                    if (idx > 0 && p - arr[idx - 1] > 1) acc.push('...');
-                    acc.push(p);
-                    return acc;
-                  }, [])
-                  .map((item, idx) =>
-                    item === '...' ? (
-                      <Text key={`dot-${idx}`} style={{ color: colors.textMuted, fontSize: 13 }}>…</Text>
-                    ) : (
-                      <TouchableOpacity
-                        key={item}
-                        onPress={() => { setCurrentPage(item); setExpandedBranchId(null); }}
-                        activeOpacity={0.7}
-                        style={{
-                          width: 32, height: 32, borderRadius: s(8), alignItems: 'center', justifyContent: 'center',
-                          backgroundColor: currentPage === item ? C.blue : colors.bg,
-                          borderWidth: 1.5,
-                          borderColor: currentPage === item ? C.blue : colors.cardBorder,
-                        }}
-                      >
-                        <Text style={{ fontSize: fs(12), fontWeight: '700', color: currentPage === item ? '#fff' : colors.textMuted }}>{item}</Text>
-                      </TouchableOpacity>
-                    )
-                  )
-                }
-              </View>
-
-              <TouchableOpacity
-                onPress={() => {
-                  setCurrentPage(p => Math.min(Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE), p + 1));
-                  setExpandedBranchId(null);
-                }}
-                disabled={currentPage === Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE)}
-                activeOpacity={0.7}
-                style={{
-                  paddingHorizontal: s(18), paddingVertical: 9,
-                  borderRadius: s(10), borderWidth: 1.5,
-                  borderColor: currentPage === Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE) ? colors.cardBorder : C.blue,
-                  backgroundColor: currentPage === Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE) ? colors.bg : C.blue,
-                }}
-              >
-                <Text style={{ fontSize: fs(13), fontWeight: '700', color: currentPage === Math.ceil(branchesLinkedWithDistance.length / PAGE_SIZE) ? colors.textMuted : '#fff' }}>Next →</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Page info */}
-          {branchesLinkedWithDistance.length > PAGE_SIZE && (
+          {/* Region count summary */}
+          {groupedByRegion.length > 0 && (
             <Text style={{ textAlign: 'center', fontSize: fs(11), color: colors.textMuted, marginTop: 6, marginBottom: 8 }}>
-              Showing {Math.min((currentPage - 1) * PAGE_SIZE + 1, branchesLinkedWithDistance.length)}–{Math.min(currentPage * PAGE_SIZE, branchesLinkedWithDistance.length)} of {branchesLinkedWithDistance.length} branches
+              {filteredBranches.length} communities across {groupedByRegion.length} regions
             </Text>
           )}
         </View>

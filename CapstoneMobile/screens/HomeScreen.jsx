@@ -20,7 +20,7 @@ import FloatingNavBar from "../components/FloatingNavBar";
 import { SkeletonMemberCard, SkeletonCard, SkeletonQuickAction } from "../components/SkeletonLoader";
 import { useToast } from "../components/ToastContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getVerificationStatus, getProfile, getAnnouncements, getDonations, getSavingsData, getAttendanceHistory } from "../services/AuthService";
+import { getVerificationStatus, getProfile, getAnnouncements, getDonations, getSavingsData, getAttendanceHistory, getLoans } from "../services/AuthService";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTheme } from "../components/ThemeContext";
 import OfflineBanner from "../components/OfflineBanner";
@@ -334,6 +334,19 @@ export default function HomeScreen({ navigation, route }) {
     })),
   ).current;
 
+  // Quick Action press scale animations
+  const qaPressAnims = useRef(
+    Array.from({ length: QUICK_ACTIONS.length }, () => new Animated.Value(1))
+  ).current;
+
+  const handleQAPress = useCallback((anim, onPress) => {
+    Animated.sequence([
+      Animated.spring(anim, { toValue: 0.94, tension: 200, friction: 10, useNativeDriver: true }),
+      Animated.spring(anim, { toValue: 1, tension: 200, friction: 8, useNativeDriver: true }),
+    ]).start();
+    onPress();
+  }, []);
+
   // Trigger staggered card + quick action entrance when loading finishes
   useEffect(() => {
     if (!loading) {
@@ -515,14 +528,14 @@ export default function HomeScreen({ navigation, route }) {
             const unreadCount = notifs.filter(n => !n.read).length;
             setNotificationCount(unreadCount);
 
-            // Grab top 3 for Recent Activity
-            const recent = notifs.slice(0, 3).map(n => {
+            // Grab top 3 for Recent Activity from notifications
+            const notifRecent = notifs.slice(0, 3).map(n => {
               let icon, iconBg, iconColor;
               switch (n.category) {
                 case "transaction":
-                  icon = ICONS.heart; iconColor = C.green; iconBg = C.greenLight; break;
+                  icon = ICONS.heart; iconColor = C.green; iconBg = "rgba(52,199,89,0.1)"; break;
                 case "announcement":
-                  icon = ICONS.branches; iconColor = C.purple; iconBg = C.purpleLight; break;
+                  icon = ICONS.branches; iconColor = C.purple; iconBg = "rgba(175,82,222,0.1)"; break;
                 case "loan":
                   icon = ICONS.loans; iconColor = C.blue; iconBg = C.blueLight; break;
                 default:
@@ -535,13 +548,119 @@ export default function HomeScreen({ navigation, route }) {
                 time: n.time,
                 icon,
                 iconBg,
-                iconColor
+                iconColor,
+                sortDate: n.createdAt || n.time || "",
               };
             });
-            setRecentActivity(recent);
+            setNotificationCount(notifs.filter(n => !n.read).length);
+
+            // Also build activity from real API data (donations, attendance, etc.)
+            try {
+              const donSaved = await AsyncStorage.getItem(`faithly_donations_${userEmail}`);
+              const attSaved = await AsyncStorage.getItem(`faithly_attendance_${userEmail}`);
+              const loanSaved = await AsyncStorage.getItem(`faithly_loans_${userEmail}`);
+              const donItems = donSaved ? JSON.parse(donSaved) : [];
+              const attItems = attSaved ? JSON.parse(attSaved) : [];
+              const loanItems = loanSaved ? JSON.parse(loanSaved) : [];
+
+              const apiActivity = [];
+
+              // Donations
+              donItems.slice(0, 5).forEach(d => {
+                const amt = parseFloat(String(d.amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                apiActivity.push({
+                  id: `don-${d._id || d.id}`,
+                  title: "Donation",
+                  subtitle: `₱${amt.toLocaleString()} — ${d.type || d.category || "General"}`,
+                  time: d.createdAt || d.date || "",
+                  icon: ICONS.heart,
+                  iconBg: "rgba(52,199,89,0.1)",
+                  iconColor: C.green,
+                  sortDate: d.createdAt || d.date || "",
+                });
+              });
+
+              // Attendance
+              attItems.slice(0, 5).forEach(a => {
+                apiActivity.push({
+                  id: `att-${a._id || a.id}`,
+                  title: "Attendance",
+                  subtitle: a.eventName || a.event || "Church Service",
+                  time: a.date || a.createdAt || "",
+                  icon: ICONS.clock,
+                  iconBg: "rgba(175,82,222,0.1)",
+                  iconColor: C.purple,
+                  sortDate: a.date || a.createdAt || "",
+                });
+              });
+
+              // Loans
+              loanItems.slice(0, 3).forEach(l => {
+                apiActivity.push({
+                  id: `loan-${l._id || l.id}`,
+                  title: `Loan — ${l.status || "Pending"}`,
+                  subtitle: `₱${parseFloat(String(l.amount || "0").replace(/[^0-9.-]+/g, "")).toLocaleString()}`,
+                  time: l.createdAt || l.applicationDate || "",
+                  icon: ICONS.loans,
+                  iconBg: C.blueLight,
+                  iconColor: C.blue,
+                  sortDate: l.createdAt || l.applicationDate || "",
+                });
+              });
+
+              // Merge notif + API activity, sort by date, take top 5
+              const combined = [...notifRecent, ...apiActivity]
+                .sort((a, b) => new Date(b.sortDate || 0) - new Date(a.sortDate || 0))
+                .slice(0, 5);
+
+              setRecentActivity(combined.length > 0 ? combined : notifRecent);
+            } catch {
+              setRecentActivity(notifRecent);
+            }
           } else {
             setNotificationCount(0);
-            setRecentActivity([]);
+            // No notifications, but still try to show activity from API data
+            try {
+              const donSaved = await AsyncStorage.getItem(`faithly_donations_${userEmail}`);
+              const attSaved = await AsyncStorage.getItem(`faithly_attendance_${userEmail}`);
+              const loanSaved = await AsyncStorage.getItem(`faithly_loans_${userEmail}`);
+              const donItems = donSaved ? JSON.parse(donSaved) : [];
+              const attItems = attSaved ? JSON.parse(attSaved) : [];
+              const loanItems = loanSaved ? JSON.parse(loanSaved) : [];
+              const apiActivity = [];
+              donItems.slice(0, 5).forEach(d => {
+                const amt = parseFloat(String(d.amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                apiActivity.push({
+                  id: `don-${d._id || d.id}`, title: "Donation",
+                  subtitle: `₱${amt.toLocaleString()} — ${d.type || d.category || "General"}`,
+                  time: d.createdAt || d.date || "", icon: ICONS.heart,
+                  iconBg: "rgba(52,199,89,0.1)", iconColor: C.green,
+                  sortDate: d.createdAt || d.date || "",
+                });
+              });
+              attItems.slice(0, 5).forEach(a => {
+                apiActivity.push({
+                  id: `att-${a._id || a.id}`, title: "Attendance",
+                  subtitle: a.eventName || a.event || "Church Service",
+                  time: a.date || a.createdAt || "", icon: ICONS.clock,
+                  iconBg: "rgba(175,82,222,0.1)", iconColor: C.purple,
+                  sortDate: a.date || a.createdAt || "",
+                });
+              });
+              loanItems.slice(0, 3).forEach(l => {
+                apiActivity.push({
+                  id: `loan-${l._id || l.id}`, title: `Loan — ${l.status || "Pending"}`,
+                  subtitle: `₱${parseFloat(String(l.amount || "0").replace(/[^0-9.-]+/g, "")).toLocaleString()}`,
+                  time: l.createdAt || l.applicationDate || "", icon: ICONS.loans,
+                  iconBg: C.blueLight, iconColor: C.blue,
+                  sortDate: l.createdAt || l.applicationDate || "",
+                });
+              });
+              const sorted = apiActivity.sort((a, b) => new Date(b.sortDate || 0) - new Date(a.sortDate || 0)).slice(0, 5);
+              setRecentActivity(sorted);
+            } catch {
+              setRecentActivity([]);
+            }
           }
         } catch (e) {
           console.error("Home Notification Error", e);
@@ -551,17 +670,24 @@ export default function HomeScreen({ navigation, route }) {
     }, [userEmail])
   );
 
-  // Load live stats from AsyncStorage
+  // Load live stats from API (not just local cache)
   useFocusEffect(
     useCallback(() => {
       const loadStats = async () => {
         if (!userEmail) return;
         try {
-          // Loans
-          const savedLoans = await AsyncStorage.getItem(`faithly_loans_${userEmail}`);
-          if (savedLoans) {
-            const loans = JSON.parse(savedLoans);
-            const active = loans.filter(l => l.status?.toLowerCase() === "active");
+          // Fetch ALL data from backend in parallel
+          const [loansResult, donationResult, savingsResult, attendanceResult] = await Promise.allSettled([
+            getLoans(),
+            getDonations(),
+            getSavingsData(),
+            getAttendanceHistory(1, 100),
+          ]);
+
+          // ── Process Loans (from API, not just cache) ──────────────
+          if (loansResult.status === "fulfilled") {
+            const serverLoans = loansResult.value?.loans || [];
+            const active = serverLoans.filter(l => l.status?.toLowerCase() === "active");
             setActiveLoans(active.length);
 
             let balance = 0;
@@ -574,20 +700,31 @@ export default function HomeScreen({ navigation, route }) {
             });
             setRemainingBalance(balance);
             setNextPaymentDate(nearest);
+            // Cache for offline use
+            await AsyncStorage.setItem(`faithly_loans_${userEmail}`, JSON.stringify(serverLoans));
           } else {
-            setActiveLoans(0);
-            setRemainingBalance(0);
-            setNextPaymentDate("");
+            // Fallback to cache if API fails
+            const savedLoans = await AsyncStorage.getItem(`faithly_loans_${userEmail}`);
+            if (savedLoans) {
+              const loans = JSON.parse(savedLoans);
+              const active = loans.filter(l => l.status?.toLowerCase() === "active");
+              setActiveLoans(active.length);
+              let balance = 0;
+              let nearest = "";
+              active.forEach(l => {
+                balance += parseFloat(l.remainingBalance?.toString().replace(/[^0-9.-]+/g, "")) || 0;
+                if (l.nextPayment && (!nearest || l.nextPayment < nearest)) nearest = l.nextPayment;
+              });
+              setRemainingBalance(balance);
+              setNextPaymentDate(nearest);
+            } else {
+              setActiveLoans(0);
+              setRemainingBalance(0);
+              setNextPaymentDate("");
+            }
           }
 
-          // Donations + Savings + Attendance in parallel (was sequential — this cuts load time in half)
-          const [donationResult, savingsResult, attendanceResult] = await Promise.allSettled([
-            getDonations(),
-            getSavingsData(),
-            getAttendanceHistory(1, 100),
-          ]);
-
-          // Process donations
+          // ── Process Donations ──────────────────────────────────────
           if (donationResult.status === "fulfilled") {
             const sd = donationResult.value;
             const donations = Array.isArray(sd) ? sd : (sd?.donations || []);
@@ -612,7 +749,7 @@ export default function HomeScreen({ navigation, route }) {
             }
           }
 
-          // Process attendance
+          // ── Process Attendance ─────────────────────────────────────
           if (attendanceResult && attendanceResult.status === "fulfilled") {
             const att = attendanceResult.value;
             const records = Array.isArray(att) ? att : (att?.records || att?.attendance || att?.data || []);
@@ -628,22 +765,25 @@ export default function HomeScreen({ navigation, route }) {
             }
           }
 
-          // Process savings
+          // ── Process Savings (use goals' savedAmount, not transactions) ──
           if (savingsResult.status === "fulfilled") {
             const sv = savingsResult.value;
-            const savingsArr = Array.isArray(sv) ? sv : (sv?.savings || []);
+            // stats.totalSaved is the definitive total from the backend
+            // Fallback: sum each goal's savedAmount
             let total = 0;
-            savingsArr.forEach(d => { total += parseFloat(d.amount) || 0; });
+            if (sv?.stats?.totalSaved != null) {
+              total = sv.stats.totalSaved;
+            } else {
+              const goals = sv?.goals || [];
+              goals.forEach(g => { total += parseFloat(g.amountSaved || g.savedAmount || 0); });
+            }
             setTotalSavings(total);
-            await AsyncStorage.setItem(`faithly_savings_${userEmail}`, JSON.stringify(savingsArr));
+            await AsyncStorage.setItem(`faithly_savings_total_${userEmail}`, String(total));
           } else {
             console.log("Failed to load savings from server, using cache", savingsResult.reason);
-            const savedSavings = await AsyncStorage.getItem(`faithly_savings_${userEmail}`);
-            if (savedSavings) {
-              const savingsArr = JSON.parse(savedSavings);
-              let total = 0;
-              savingsArr.forEach(d => { total += parseFloat(d.amount) || 0; });
-              setTotalSavings(total);
+            const savedTotal = await AsyncStorage.getItem(`faithly_savings_total_${userEmail}`);
+            if (savedTotal) {
+              setTotalSavings(parseFloat(savedTotal) || 0);
             }
           }
         } catch (e) {
@@ -1035,7 +1175,7 @@ export default function HomeScreen({ navigation, route }) {
                 {/* Attendance Checks Column */}
                 <TouchableOpacity
                   activeOpacity={0.8}
-                  onPress={() => navWithEmail("Branch")}
+                  onPress={() => navWithEmail("Branches")}
                   style={{ flex: 1, paddingRight: s(8) }}
                 >
                   <Text style={[styles.cardLabel, { color: colors.textMuted, fontSize: fs(12), marginBottom: 4 }]}>Attendance Checks</Text>
@@ -1237,17 +1377,19 @@ export default function HomeScreen({ navigation, route }) {
             {visibleQuickActions.map((action, idx) => (
               <Animated.View
                 key={idx}
-                style={{ width: "48%", opacity: qaAnims[idx].opacity, transform: [{ translateY: qaAnims[idx].translateY }] }}
+                style={{ width: "48%", opacity: qaAnims[idx].opacity, transform: [{ translateY: qaAnims[idx].translateY }, { scale: qaPressAnims[idx] }] }}
               >
               <TouchableOpacity
                 style={[styles.quickActionCard, { width: "100%", backgroundColor: colors.cardBg }]}
-                activeOpacity={0.75}
+                activeOpacity={1}
                 onPress={() => {
-                  if (action.screen) {
-                    navigation.replace(action.screen, { email: userEmail });
-                  } else {
-                    setChatbotOpen(true);
-                  }
+                  handleQAPress(qaPressAnims[idx], () => {
+                    if (action.screen) {
+                      navigation.replace(action.screen, { email: userEmail });
+                    } else {
+                      setChatbotOpen(true);
+                    }
+                  });
                 }}
               >
                 <View

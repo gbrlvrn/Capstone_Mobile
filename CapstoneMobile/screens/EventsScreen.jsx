@@ -17,7 +17,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import ChatbotModal from "./ChatbotModal";
 import DraggableChatButton from "../components/DraggableChatButton";
 import { useTheme } from "../components/ThemeContext";
-import { getEvents, rsvpEvent, seedEvents } from "../services/AuthService";
+import { getEvents, rsvpEvent } from "../services/AuthService";
 import * as Haptics from "expo-haptics";
 import * as Calendar from "expo-calendar";
 import { useToast } from "../components/ToastContext";
@@ -169,8 +169,6 @@ export default function EventsScreen({ navigation, route }) {
   // Load events
   const loadEvents = useCallback(async () => {
     try {
-      // Try to seed events first (idempotent)
-      try { await seedEvents(); } catch {}
       const data = await getEvents();
       if (data?.events) {
         setEvents(data.events);

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
   Pressable,
   ActivityIndicator,
   Dimensions,
+  Animated,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { signupUser, getBranches, saveUserData } from "../services/AuthService";
@@ -200,6 +201,26 @@ export default function SignupScreen({ navigation }) {
   const [loadingBranches, setLoadingBranches] = useState(true);
   const [touched, setTouched] = useState({});
   const [submitting, setSubmitting] = useState(false);
+
+  // Entrance animation
+  const cardTranslateY = useRef(new Animated.Value(40)).current;
+  const cardOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(cardTranslateY, {
+        toValue: 0,
+        tension: 70,
+        friction: 11,
+        useNativeDriver: true,
+      }),
+      Animated.timing(cardOpacity, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
 
   // Fetch branches from API on mount
   useEffect(() => {
@@ -507,7 +528,15 @@ export default function SignupScreen({ navigation }) {
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
 
-        <View style={styles.card}>
+        <Animated.View
+          style={[
+            styles.card,
+            {
+              opacity: cardOpacity,
+              transform: [{ translateY: cardTranslateY }],
+            },
+          ]}
+        >
           <Image source={LOGO} style={styles.logo} resizeMode="contain" />
           <Text style={styles.title}>Create Your Account</Text>
           <Text style={styles.subtitle}>Join our church community today</Text>
@@ -913,7 +942,7 @@ export default function SignupScreen({ navigation }) {
               </TouchableOpacity>
             );
           })()}
-        </View>
+        </Animated.View>
       </ScrollView>
 
       {/* Dropdown Modal */}

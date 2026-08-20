@@ -13,6 +13,7 @@ import {
   Platform,
   ActivityIndicator,
   Dimensions,
+  Animated,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { loginUser, saveUserData } from "../services/AuthService";
@@ -63,6 +64,26 @@ export default function LoginScreen({ navigation, route }) {
   const [lockUntil, setLockUntil] = useState(0);
   const [timeLeft, setTimeLeft] = useState(0);
   const [errorMessage, setErrorMessage] = useState("");
+
+  // Entrance animation
+  const cardTranslateY = useRef(new Animated.Value(40)).current;
+  const cardOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(cardTranslateY, {
+        toValue: 0,
+        tension: 70,
+        friction: 11,
+        useNativeDriver: true,
+      }),
+      Animated.timing(cardOpacity, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
 
   const isLocked = lockUntil > Date.now();
 
@@ -256,7 +277,18 @@ export default function LoginScreen({ navigation, route }) {
             <Text style={[styles.backText, { color: colors.textMuted }]}>← Back</Text>
           </TouchableOpacity>
 
-          <View style={[styles.card, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder, shadowColor: colors.cardShadow }]}>
+          <Animated.View
+            style={[
+              styles.card,
+              {
+                backgroundColor: colors.cardBg,
+                borderColor: colors.cardBorder,
+                shadowColor: colors.cardShadow,
+                opacity: cardOpacity,
+                transform: [{ translateY: cardTranslateY }],
+              },
+            ]}
+          >
             <Image source={LOGO} style={styles.logo} resizeMode="contain" />
             <Text style={[styles.title, { color: colors.textDark }]}>Welcome Back</Text>
             <Text style={[styles.subtitle, { color: colors.textMuted }]}>Sign in to access your account</Text>
@@ -377,7 +409,7 @@ export default function LoginScreen({ navigation, route }) {
             >
               <Text style={[styles.createBtnText, { color: colors.blue }]}>New to IsangDiwa? Create Account</Text>
             </TouchableOpacity>
-          </View>
+          </Animated.View>
 
           <Text style={[styles.disclaimer, { color: colors.textDimmed }]}>
             By continuing, you agree to our{" "}

@@ -30,7 +30,7 @@ const ALL_TAB_ITEMS = [
   { key: "Loans", label: "Loans", icon: ICONS.loans },
   { key: "Donations", label: "Donations", icon: ICONS.donations },
   { key: "Attendance", label: "Attendance", icon: ICONS.attendance },
-  { key: "Branches", label: "Branches", icon: ICONS.branches },
+  { key: "Branches", label: "Communities", icon: ICONS.branches },
 ];
 
 function FloatingNavBar({
@@ -109,6 +109,12 @@ function FloatingNavBar({
                       inputRange: [0, 1],
                       outputRange: [s(8), s(14)],
                     }),
+                    // Glow shadow on active pill
+                    shadowColor: isActive ? "#FFFFFF" : "transparent",
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: isActive ? 0.5 : 0,
+                    shadowRadius: isActive ? 8 : 0,
+                    elevation: isActive ? 8 : 0,
                   },
                 ]}
               >
