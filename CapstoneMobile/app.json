@@ -59,6 +59,11 @@
     },
     "android": {
       "package": "com.puac.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDdTRSOkcAhr5ckQyQdfB7u_h9C5-Y4IMI"
+        }
+      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"

@@ -37,6 +37,22 @@ export function sendForgotPasswordOTP(email) {
   return post("/reset-password-request", { email: String(email || "").trim().toLowerCase() });
 }
 
+export async function verifyResetOTP(email, otp) {
+  try {
+    return await post("/reset-password-verify-otp", {
+      email: String(email || "").trim().toLowerCase(),
+      otp: String(otp || "").trim(),
+    });
+  } catch (err) {
+    // If backend returns 404 because verify endpoint isn't deployed on production web server, allow flow to continue to resetPassword step
+    if (err?.message?.includes("404") || err?.message?.includes("Cannot POST")) {
+      console.warn("Verify OTP route 404 on server; proceeding to reset password screen");
+      return { message: "Proceeding" };
+    }
+    throw err;
+  }
+}
+
 export function resetPassword(email, otp, newPassword) {
   return post("/reset-password-update", {
     email: String(email || "").trim().toLowerCase(),

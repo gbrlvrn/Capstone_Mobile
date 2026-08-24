@@ -138,6 +138,17 @@ export default function SettingsScreen({ navigation, route }) {
   const [showConfirmPwd, setShowConfirmPwd] = useState(false);
   const [isPasswordSaving, setIsPasswordSaving] = useState(false);
 
+  const passRules = useMemo(() => [
+    { label: "At least 8 characters", met: newPassword.length >= 8 },
+    { label: "One uppercase letter", met: /[A-Z]/.test(newPassword) },
+    { label: "At least one number or more", met: /[0-9]/.test(newPassword) },
+    { label: "At least 1 symbol (@#$%^_!)", met: /[@#$%^_!]/.test(newPassword) },
+  ], [newPassword]);
+
+  const strengthCount = useMemo(() => passRules.filter((r) => r.met).length, [passRules]);
+  const strengthLabel = ["Weak", "Weak", "Fair", "Good", "Strong"][strengthCount];
+  const strengthColor = ["#D1D5DB", "#EF4444", "#FF9500", "#FBBF24", "#10B981"][strengthCount];
+
   const handleClearCache = async () => {
     setIsClearingCache(true);
     try {
@@ -491,10 +502,44 @@ export default function SettingsScreen({ navigation, route }) {
                     secureTextEntry={!showNewPwd}
                     value={newPassword}
                     onChangeText={setNewPassword}
+                    placeholder="Enter new password"
+                    placeholderTextColor={C.textMuted}
                   />
                   <TouchableOpacity onPress={() => setShowNewPwd(!showNewPwd)} style={styles.pwdEyeBtn}>
                     <Ionicons name={showNewPwd ? "eye-off-outline" : "eye-outline"} size={20} color={C.textMuted} />
                   </TouchableOpacity>
+                </View>
+
+                {/* Password strength meter */}
+                {newPassword.length > 0 && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 10 }}>
+                    <View style={{ flex: 1, flexDirection: 'row', gap: 4 }}>
+                      {[0, 1, 2, 3].map((i) => (
+                        <View
+                          key={i}
+                          style={{
+                            flex: 1,
+                            height: 4,
+                            borderRadius: 2,
+                            backgroundColor: i < strengthCount ? strengthColor : "#E5E7EB",
+                          }}
+                        />
+                      ))}
+                    </View>
+                    <Text style={{ fontSize: 11, fontWeight: "700", color: strengthColor, minWidth: 40, textAlign: "right" }}>
+                      {strengthLabel}
+                    </Text>
+                  </View>
+                )}
+
+                {/* Password rules checklist */}
+                <View style={{ backgroundColor: "#F9FAFB", borderWidth: 1, borderColor: C.cardBorder || '#E8ECF0', borderRadius: 8, padding: 10, marginTop: 8, marginBottom: 4 }}>
+                  <Text style={{ fontSize: 11, color: C.textMuted, fontWeight: "600", marginBottom: 4 }}>Password must contain:</Text>
+                  {passRules.map((r, i) => (
+                    <Text key={i} style={{ fontSize: 11, color: r.met ? "#10B981" : C.textMuted, marginTop: 2, fontWeight: r.met ? "600" : "400" }}>
+                      {r.met ? "✓ " : "• "}{r.label}
+                    </Text>
+                  ))}
                 </View>
 
                 <Text style={styles.pwdLabel}>CONFIRM NEW PASSWORD</Text>
@@ -504,11 +549,19 @@ export default function SettingsScreen({ navigation, route }) {
                     secureTextEntry={!showConfirmPwd}
                     value={confirmPassword}
                     onChangeText={setConfirmPassword}
+                    placeholder="Confirm new password"
+                    placeholderTextColor={C.textMuted}
                   />
                   <TouchableOpacity onPress={() => setShowConfirmPwd(!showConfirmPwd)} style={styles.pwdEyeBtn}>
                     <Ionicons name={showConfirmPwd ? "eye-off-outline" : "eye-outline"} size={20} color={C.textMuted} />
                   </TouchableOpacity>
                 </View>
+
+                {confirmPassword.length > 0 && (
+                  <Text style={{ fontSize: 11, fontWeight: "600", color: newPassword === confirmPassword ? "#10B981" : "#E74C3C", marginTop: 4 }}>
+                    {newPassword === confirmPassword ? "✓ Passwords match" : "✗ Passwords do not match"}
+                  </Text>
+                )}
 
                 <View style={styles.pwdActionsRow}>
                   <TouchableOpacity 
@@ -529,15 +582,35 @@ export default function SettingsScreen({ navigation, route }) {
                     disabled={isPasswordSaving}
                     onPress={async () => {
                       if (!currentPassword || !newPassword || !confirmPassword) {
-                        showAlert("Error", "Please fill in all fields.");
+                        showAlert("Error", "Please fill in all password fields.");
                         return;
                       }
                       if (newPassword.length < 8) {
-                        showAlert("Error", "New password must be at least 8 characters.");
+                        showAlert("Validation Error", "New password must be at least 8 characters.");
+                        return;
+                      }
+                      if (newPassword.length > 72) {
+                        showAlert("Validation Error", "New password must be under 72 characters max.");
+                        return;
+                      }
+                      if (!/[A-Z]/.test(newPassword)) {
+                        showAlert("Validation Error", "New password must contain at least one uppercase letter.");
+                        return;
+                      }
+                      if (!/[a-z]/.test(newPassword)) {
+                        showAlert("Validation Error", "New password must contain at least one lowercase letter.");
+                        return;
+                      }
+                      if (!/[0-9]/.test(newPassword)) {
+                        showAlert("Validation Error", "New password must contain at least one number.");
+                        return;
+                      }
+                      if (!/[@#$%^_!]/.test(newPassword)) {
+                        showAlert("Validation Error", "New password must contain at least one symbol (@#$%^_!).");
                         return;
                       }
                       if (newPassword !== confirmPassword) {
-                        showAlert("Error", "New passwords do not match.");
+                        showAlert("Validation Error", "New passwords do not match.");
                         return;
                       }
                       if (!userEmail) {

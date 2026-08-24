@@ -30,6 +30,8 @@ import { getPublicSettings, getVerificationStatus, createSavingsDeposit, createS
 import EmptyState from "../components/EmptyState";
 import OfflineBanner from "../components/OfflineBanner";
 
+
+
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
 const s = (v) => Math.round(v * _WR);
@@ -134,6 +136,8 @@ export default function SavingsScreen({ navigation, route }) {
   const [depositNote, setDepositNote] = useState("");
   const [goalName, setGoalName] = useState("");
   const [goalTarget, setGoalTarget] = useState("");
+  const [goalNameDropdownOpen, setGoalNameDropdownOpen] = useState(false);
+  const [customGoalName, setCustomGoalName] = useState("");
   const [formError, setFormError] = useState("");
 
   const [selectedPayment, setSelectedPayment] = useState("gcash");
@@ -167,6 +171,7 @@ export default function SavingsScreen({ navigation, route }) {
   const [withdrawGoalId, setWithdrawGoalId] = useState(null);
   const [withdrawMethod, setWithdrawMethod] = useState("gcash");
   const [withdrawAccount, setWithdrawAccount] = useState("");
+  const [withdrawAccountName, setWithdrawAccountName] = useState("");
   const [showWithdrawDropdown, setShowWithdrawDropdown] = useState(false);
 
 
@@ -473,6 +478,20 @@ export default function SavingsScreen({ navigation, route }) {
       setSubmitting(false);
       return;
     }
+    if (amount > 500000) {
+      setFormError("Maximum deposit amount is \u20B1500,000.");
+      setSubmitting(false);
+      return;
+    }
+    const selectedGoal = goals.find(g => g.id === activeDepositGoalId);
+    if (selectedGoal) {
+      const remaining = (selectedGoal.target || 0) - (selectedGoal.amountSaved || 0);
+      if (remaining > 0 && amount > remaining) {
+        setFormError(`Amount exceeds remaining goal balance of \u20B1${remaining.toLocaleString()}.`);
+        setSubmitting(false);
+        return;
+      }
+    }
 
     if (!activeDepositGoalId) {
       setFormError("Please select a goal.");
@@ -666,7 +685,12 @@ export default function SavingsScreen({ navigation, route }) {
     }
 
     if (!withdrawAccount.trim()) {
-      setFormError("Please provide account details (GCash number or Bank info).");
+      setFormError(withdrawMethod === "gcash" ? "Please provide your GCash number." : "Please provide your bank account number.");
+      setSubmitting(false);
+      return;
+    }
+    if (withdrawMethod === "bank" && !withdrawAccountName.trim()) {
+      setFormError("Please provide the account holder name.");
       setSubmitting(false);
       return;
     }
@@ -677,13 +701,14 @@ export default function SavingsScreen({ navigation, route }) {
         amount: amount,
         note: withdrawNote.trim() || "Savings Withdrawal",
         method: withdrawMethod === "gcash" ? "GCash" : "Bank Transfer",
-        accountDetails: withdrawAccount.trim()
+        accountDetails: withdrawMethod === "bank" ? `${withdrawAccountName.trim()} - ${withdrawAccount.trim()}` : withdrawAccount.trim()
       });
       showAlert("Success", "Withdrawal request submitted for approval.");
       setWithdrawModalOpen(false);
       setWithdrawAmount("");
       setWithdrawNote("");
       setWithdrawAccount("");
+      setWithdrawAccountName("");
       setWithdrawGoalId(null);
       loadSavingsData();
     } catch (e) {
@@ -698,8 +723,9 @@ export default function SavingsScreen({ navigation, route }) {
   const handleAddGoal = async () => {
     setFormError("");
 
-    if (!goalName.trim()) {
-      setFormError("Please enter a goal name.");
+    const resolvedGoalName = goalName === "Others (Specify)" ? customGoalName.trim() : goalName.trim();
+    if (!resolvedGoalName) {
+      setFormError("Please select or enter a goal name.");
       return;
     }
 
@@ -713,12 +739,13 @@ export default function SavingsScreen({ navigation, route }) {
 
     try {
       const response = await createSavingsGoal({
-        name: goalName.trim(),
+        name: resolvedGoalName,
         targetAmount: target
       });
 
       showAlert("Success", "Savings goal created successfully!");
       setGoalName("");
+      setCustomGoalName("");
       setGoalTarget("");
       setGoalModalOpen(false);
       loadSavingsData(); // refresh from backend
@@ -1258,16 +1285,37 @@ export default function SavingsScreen({ navigation, route }) {
                       placeholderTextColor="#6B7FA3"
                       keyboardType="numeric"
                       value={depositAmount}
-                      onChangeText={(t) => { setDepositAmount(t); if(formError) setFormError(""); }}
+                      onChangeText={(t) => {
+                        const digits = t.replace(/[^0-9]/g, "");
+                        const formatted = digits ? Number(digits).toLocaleString() : "";
+                        setDepositAmount(formatted);
+                        if(formError) setFormError("");
+                      }}
                     />
                   </View>
                   <View style={styles.quickPillsRow}>
                     {[500, 1000, 2000, 5000].map(amt => (
-                      <TouchableOpacity key={amt} style={styles.quickPill} activeOpacity={0.7} onPress={() => setDepositAmount(amt.toString())}>
+                      <TouchableOpacity key={amt} style={styles.quickPill} activeOpacity={0.7} onPress={() => setDepositAmount(amt.toLocaleString())}>
                         <Text style={styles.quickPillText}>₱{amt.toLocaleString()}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
+
+                  {/* Real-time remaining balance hint */}
+                  {(() => {
+                    const g = goals.find(x => x.id === activeDepositGoalId);
+                    if (!g) return null;
+                    const remaining = (g.target || 0) - (g.amountSaved || 0);
+                    const typed = parseFloat((depositAmount || "0").replace(/,/g, "")) || 0;
+                    const over = remaining > 0 && typed > remaining;
+                    return (
+                      <Text style={{ fontSize: 12, fontWeight: "600", marginTop: 6, color: over ? "#E74C3C" : "#34C759" }}>
+                        {over
+                          ? `Exceeds remaining balance of \u20B1${remaining.toLocaleString()}`
+                          : `Remaining: \u20B1${remaining.toLocaleString()} of \u20B1${(g.target || 0).toLocaleString()} goal`}
+                      </Text>
+                    );
+                  })()}
 
                   <Text style={[styles.customLabel, { marginTop: 18 }]}>PAYMENT METHOD</Text>
                   <View style={styles.radioMethodRow}>
@@ -1320,17 +1368,33 @@ export default function SavingsScreen({ navigation, route }) {
                         placeholder="Juan Dela Cruz"
                         placeholderTextColor="#6B7FA3"
                         value={accountName}
-                        onChangeText={setAccountName}
+                        onChangeText={(t) => setAccountName(t.replace(/[^a-zA-Z\s]/g, ""))}
                       />
 
-                      <Text style={[styles.customLabel, { marginTop: 18 }]}>ACCOUNT NUMBER</Text>
+                      <Text style={[styles.customLabel, { marginTop: 18 }]}>{selectedPayment === "gcash" ? "PHONE NUMBER" : "ACCOUNT NUMBER"}</Text>
                       <TextInput
                         style={styles.noteInputBox}
-                        placeholder="09123456789"
+                        placeholder={selectedPayment === "gcash" ? "+63 9XX XXX XXXX" : "e.g. 1234567890"}
                         placeholderTextColor="#6B7FA3"
                         keyboardType="numeric"
+                        maxLength={selectedPayment === "gcash" ? 14 : 16}
                         value={accountNumber}
-                        onChangeText={setAccountNumber}
+                        onChangeText={(t) => {
+                          if (selectedPayment === "gcash") {
+                            // Ensure +63 prefix, allow only digits after
+                            let cleaned = t.replace(/[^0-9+]/g, "");
+                            if (!cleaned.startsWith("+63")) {
+                              cleaned = "+63" + cleaned.replace(/\+/g, "").replace(/^63/, "");
+                            }
+                            // Limit to +63 + 10 digits = 13 chars
+                            if (cleaned.length > 13) cleaned = cleaned.slice(0, 13);
+                            setAccountNumber(cleaned);
+                          } else {
+                            // Bank: digits only, max 16
+                            const digits = t.replace(/[^0-9]/g, "").slice(0, 16);
+                            setAccountNumber(digits);
+                          }
+                        }}
                       />
 
                       <Text style={[styles.customLabel, { marginTop: 18 }]}>REFERENCE / TRANSACTION ID <Text style={{ textTransform: "none", color: "#6B7FA3", fontWeight: "400" }}>(optional)</Text></Text>
@@ -1451,9 +1515,30 @@ export default function SavingsScreen({ navigation, route }) {
                       placeholderTextColor="#6B7FA3"
                       keyboardType="numeric"
                       value={withdrawAmount}
-                      onChangeText={(t) => { setWithdrawAmount(t); if(formError) setFormError(""); }}
+                      onChangeText={(t) => {
+                        const digits = t.replace(/[^0-9]/g, "");
+                        const formatted = digits ? Number(digits).toLocaleString() : "";
+                        setWithdrawAmount(formatted);
+                        if(formError) setFormError("");
+                      }}
                     />
                   </View>
+
+                  {/* Real-time available balance hint */}
+                  {(() => {
+                    const wGoal = goals.find(x => x.id === withdrawGoalId);
+                    if (!wGoal) return null;
+                    const available = wGoal.amountSaved || 0;
+                    const typed = parseFloat((withdrawAmount || "0").replace(/,/g, "")) || 0;
+                    const over = typed > available;
+                    return (
+                      <Text style={{ fontSize: 12, fontWeight: "600", marginTop: 6, color: over ? "#E74C3C" : "#34C759" }}>
+                        {over
+                          ? `Exceeds available balance of \u20B1${available.toLocaleString()}`
+                          : `Available: \u20B1${available.toLocaleString()}`}
+                      </Text>
+                    );
+                  })()}
 
                   <Text style={[styles.customLabel, { marginTop: 18 }]}>RECEIVE VIA</Text>
                   <View style={styles.radioMethodRow}>
@@ -1472,13 +1557,40 @@ export default function SavingsScreen({ navigation, route }) {
                     </TouchableOpacity>
                   </View>
 
-                  <Text style={[styles.customLabel, { marginTop: 18 }]}>{withdrawMethod === "gcash" ? "GCASH NUMBER" : "BANK DETAILS (Name/Acc #)"}</Text>
+                  {withdrawMethod === "bank" && (
+                    <>
+                      <Text style={[styles.customLabel, { marginTop: 18 }]}>ACCOUNT HOLDER NAME</Text>
+                      <TextInput
+                        style={styles.noteInputBox}
+                        placeholder="Juan Dela Cruz"
+                        placeholderTextColor="#6B7FA3"
+                        value={withdrawAccountName}
+                        onChangeText={(t) => setWithdrawAccountName(t.replace(/[^a-zA-Z\s]/g, ""))}
+                      />
+                    </>
+                  )}
+
+                  <Text style={[styles.customLabel, { marginTop: 18 }]}>{withdrawMethod === "gcash" ? "PHONE NUMBER" : "ACCOUNT NUMBER"}</Text>
                   <TextInput
                     style={styles.noteInputBox}
-                    placeholder={withdrawMethod === "gcash" ? "09xx xxx xxxx" : "BDO - Juan Dela Cruz - 1234567890"}
+                    placeholder={withdrawMethod === "gcash" ? "+63 9XX XXX XXXX" : "e.g. 1234567890"}
                     placeholderTextColor="#6B7FA3"
+                    keyboardType="numeric"
+                    maxLength={withdrawMethod === "gcash" ? 14 : 16}
                     value={withdrawAccount}
-                    onChangeText={setWithdrawAccount}
+                    onChangeText={(t) => {
+                      if (withdrawMethod === "gcash") {
+                        let cleaned = t.replace(/[^0-9+]/g, "");
+                        if (!cleaned.startsWith("+63")) {
+                          cleaned = "+63" + cleaned.replace(/\+/g, "").replace(/^63/, "");
+                        }
+                        if (cleaned.length > 13) cleaned = cleaned.slice(0, 13);
+                        setWithdrawAccount(cleaned);
+                      } else {
+                        const digits = t.replace(/[^0-9]/g, "").slice(0, 16);
+                        setWithdrawAccount(digits);
+                      }
+                    }}
                   />
 
                   <Text style={[styles.customLabel, { marginTop: 18 }]}>REASON FOR WITHDRAWAL <Text style={{ textTransform: "none", color: "#6B7FA3", fontWeight: "400" }}>(optional)</Text></Text>
@@ -1577,9 +1689,30 @@ export default function SavingsScreen({ navigation, route }) {
                       placeholderTextColor="#6B7FA3"
                       keyboardType="numeric"
                       value={transferAmount}
-                      onChangeText={(t) => { setTransferAmount(t); if(formError) setFormError(""); }}
+                      onChangeText={(t) => {
+                        const digits = t.replace(/[^0-9]/g, "");
+                        const formatted = digits ? Number(digits).toLocaleString() : "";
+                        setTransferAmount(formatted);
+                        if(formError) setFormError("");
+                      }}
                     />
                   </View>
+
+                  {/* Real-time available balance hint */}
+                  {(() => {
+                    const fromGoal = goals.find(x => x.id === transferFromGoalId);
+                    if (!fromGoal) return null;
+                    const available = fromGoal.amountSaved || 0;
+                    const typed = parseFloat((transferAmount || "0").replace(/,/g, "")) || 0;
+                    const over = typed > available;
+                    return (
+                      <Text style={{ fontSize: 12, fontWeight: "600", marginTop: 6, color: over ? "#E74C3C" : "#34C759" }}>
+                        {over
+                          ? `Exceeds available balance of \u20B1${available.toLocaleString()}`
+                          : `Available: \u20B1${available.toLocaleString()}`}
+                      </Text>
+                    );
+                  })()}
 
                   {formError ? <Text style={[styles.formError, { marginTop: s(16), textAlign: "center", marginBottom: 10 }]}>{formError}</Text> : <View style={{ height: 20 }} />}
                 </ScrollView>
@@ -1611,18 +1744,69 @@ export default function SavingsScreen({ navigation, route }) {
               </Text>
 
               <Text style={[styles.inputLabel, { color: colors.textMuted }]}>Goal Name</Text>
-              <TextInput
-                style={[styles.input, { color: colors.textDark, borderColor: colors.cardBorder }]}
-                placeholder="e.g., Emergency Fund"
-                placeholderTextColor={C.textMuted}
-                value={goalName}
-                onChangeText={(t) => {
-                  setGoalName(t);
-                  if (formError) setFormError("");
+              <TouchableOpacity
+                style={{
+                  flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+                  borderWidth: 1, borderColor: goalNameDropdownOpen ? colors.blue || "#0D1F45" : colors.cardBorder,
+                  borderRadius: s(12), paddingHorizontal: s(16), paddingVertical: s(14),
+                  backgroundColor: "rgba(0,0,0,0.02)", marginBottom: goalNameDropdownOpen ? 0 : 18,
+                  borderBottomLeftRadius: goalNameDropdownOpen ? 0 : s(12),
+                  borderBottomRightRadius: goalNameDropdownOpen ? 0 : s(12),
                 }}
-              />
+                activeOpacity={0.8}
+                onPress={() => {
+                  setGoalNameDropdownOpen(!goalNameDropdownOpen);
+                }}
+              >
+                <Text style={{ fontSize: fs(15), color: goalName ? colors.textDark : colors.textMuted, flex: 1 }}>
+                  {goalName || "Select a goal..."}
+                </Text>
+                <Text style={{ color: colors.textMuted, fontSize: 14 }}>{goalNameDropdownOpen ? "▲" : "▼"}</Text>
+              </TouchableOpacity>
+              {goalNameDropdownOpen && (
+                <View style={{
+                  borderWidth: 1, borderTopWidth: 0, borderColor: colors.blue || "#0D1F45",
+                  borderBottomLeftRadius: s(12), borderBottomRightRadius: s(12),
+                  backgroundColor: colors.cardBg, marginBottom: 18, overflow: "hidden",
+                }}>
+                  {["Vacation Fund", "Emergency Fund", "House / Down Payment", "Car Purchase", "Education Fund", "Retirement", "Gadget / Tech", "Wedding Fund", "Others (Specify)"].map((choice, idx, arr) => (
+                    <TouchableOpacity
+                      key={choice}
+                      style={{
+                        paddingHorizontal: s(16), paddingVertical: s(13),
+                        borderBottomWidth: idx < arr.length - 1 ? 1 : 0,
+                        borderBottomColor: colors.cardBorder,
+                        backgroundColor: goalName === choice ? "rgba(13,31,69,0.07)" : "transparent",
+                      }}
+                      onPress={() => {
+                        setGoalName(choice);
+                        setGoalNameDropdownOpen(false);
+                        if (choice !== "Others (Specify)") setCustomGoalName("");
+                        if (formError) setFormError("");
+                      }}
+                    >
+                      <Text style={{ fontSize: fs(14), color: goalName === choice ? (colors.blue || "#0D1F45") : colors.textDark, fontWeight: goalName === choice ? "700" : "400" }}>{choice}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              {goalName === "Others (Specify)" && (
+                <>
+                  <Text style={[styles.inputLabel, { color: colors.textMuted }]}>Specify Goal Name</Text>
+                  <TextInput
+                    style={[styles.input, { color: colors.textDark, borderColor: colors.cardBorder }]}
+                    placeholder="Enter your custom goal name"
+                    placeholderTextColor={colors.textMuted}
+                    value={customGoalName}
+                    onChangeText={(t) => {
+                      setCustomGoalName(t);
+                      if (formError) setFormError("");
+                    }}
+                  />
+                </>
+              )}
 
-              <Text style={[styles.inputLabel, { color: colors.textMuted }]}>Target Amount (?)</Text>
+              <Text style={[styles.inputLabel, { color: colors.textMuted }]}>Target Amount</Text>
               <TextInput
                 style={[styles.input, { color: colors.textDark, borderColor: colors.cardBorder }]}
                 placeholder="0.00"
@@ -1630,7 +1814,9 @@ export default function SavingsScreen({ navigation, route }) {
                 keyboardType="numeric"
                 value={goalTarget}
                 onChangeText={(t) => {
-                  setGoalTarget(t);
+                  const digits = t.replace(/[^0-9]/g, "");
+                  const formatted = digits ? Number(digits).toLocaleString() : "";
+                  setGoalTarget(formatted);
                   if (formError) setFormError("");
                 }}
               />

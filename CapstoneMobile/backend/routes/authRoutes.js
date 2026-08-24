@@ -3,7 +3,7 @@ import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
 import authMiddleware from "../middleware/authMiddleware.js";
-import { signup, login, checkEmailExists, getProfile, deleteAccount, uploadProfilePhoto, registerPushToken, forgotPassword, resetPassword, changePassword } from "../controllers/authController.js";
+import { signup, login, checkEmailExists, getProfile, deleteAccount, uploadProfilePhoto, registerPushToken, forgotPassword, resetPassword, verifyResetOtp, changePassword } from "../controllers/authController.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,7 +27,11 @@ router.post("/auth/login", login);
 router.post("/login", login);
 router.get("/auth/exists", checkEmailExists);
 router.post("/auth/forgot-password", forgotPassword);
+router.post("/reset-password-request", forgotPassword);
+router.post("/auth/verify-reset-otp", verifyResetOtp);
+router.post("/reset-password-verify-otp", verifyResetOtp);
 router.post("/auth/reset-password", resetPassword);
+router.post("/reset-password-update", resetPassword);
 router.post("/auth/change-password", authMiddleware, changePassword);
 
 // Protected routes (auth required)

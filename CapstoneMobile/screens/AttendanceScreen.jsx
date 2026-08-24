@@ -120,6 +120,8 @@ export default function AttendanceScreen({ navigation, route }) {
   const { showToast } = useToast();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(false);
+  // Scan result UI state: { type: 'success'|'warning'|'error', title, message } | null
+  const [scanResult, setScanResult] = useState(null);
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth());
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
@@ -315,11 +317,20 @@ export default function AttendanceScreen({ navigation, route }) {
     setScanning(true);
     
     try {
-      // The web admin QR code contains a plain text session ID (e.g. "SESS-2026-0001")
-      // Always send it as { sessionId: "<scanned_value>" } to the scan-qr endpoint
-      const sessionId = (data || "").trim();
+      // Sanitize the scanned value — strip whitespace and stray quotes
+      const sessionId = (data || "").trim().replace(/^"|"$/g, "");
+
+      // ── Validation 1: Empty scan ──
       if (!sessionId) {
-        showToast("error", "Invalid QR code. No session ID found.");
+        setScanResult({ type: "error", title: "Invalid QR Code", message: "No data was found in the scanned QR code. Please try again." });
+        isScanningRef.current = false;
+        setScanning(false);
+        return;
+      }
+
+      // ── Validation 2: Must look like a session ID (starts with SESS-) ──
+      if (!sessionId.startsWith("SESS-")) {
+        setScanResult({ type: "error", title: "Not a Service QR", message: "This QR code is not a valid service session. Please scan the QR code displayed by the admin." });
         isScanningRef.current = false;
         setScanning(false);
         return;
@@ -327,26 +338,38 @@ export default function AttendanceScreen({ navigation, route }) {
 
       const result = await scanQRAttendance(sessionId);
 
-      // Handle "already logged" response
       if (result?.alreadyLogged) {
-        showToast("warning", result?.message || "You have already checked in for this session.");
+        setScanResult({ type: "warning", title: "Already Checked In", message: "You have already checked in for this session. No duplicate entry was recorded." });
+      } else if (result?.success) {
+        setScanResult({ type: "success", title: "Checked In Successfully!", message: "Your attendance has been recorded for this service session." });
       } else {
-        showToast("success", result?.message || "Successfully checked in!");
+        setScanResult({ type: "success", title: "Check-In Processed", message: result?.message || "Your attendance has been recorded." });
       }
-      setShowQRCode(false);
-      // Refresh attendance data after successful check-in
       fetchAttendanceData();
     } catch (error) {
       console.log("Check-in error:", error);
-      const msg = error?.message || "Failed to check in. Try again.";
-      showToast("error", msg);
+      const msg = (error?.message || "").toLowerCase();
+
+      if (msg.includes("session id is required")) {
+        setScanResult({ type: "error", title: "Invalid QR Format", message: "The session ID is missing from this QR code. Please scan a valid service QR." });
+      } else if (msg.includes("active session not found") || msg.includes("has ended")) {
+        setScanResult({ type: "error", title: "Session Not Active", message: "This session has ended or hasn\u2019t started yet. Please ask the admin to start a service session." });
+      } else if (msg.includes("token") || msg.includes("unauthorized") || msg.includes("invalid or expired")) {
+        setScanResult({ type: "error", title: "Session Expired", message: "Your login session has expired. Please sign in again and try scanning." });
+      } else if (msg.includes("user not found")) {
+        setScanResult({ type: "error", title: "Account Not Found", message: "Your account was not found in the system. Please contact your administrator." });
+      } else if (msg.includes("network") || msg.includes("timed out") || msg.includes("fetch")) {
+        setScanResult({ type: "error", title: "Network Error", message: "Could not connect to the server. Please check your internet connection and try again." });
+      } else {
+        setScanResult({ type: "error", title: "Check-In Failed", message: error?.message || "Something went wrong. Please try again." });
+      }
     } finally {
       setTimeout(() => {
         isScanningRef.current = false;
         setScanning(false);
-      }, 2000); // Prevent duplicate scans
+      }, 2000);
     }
-  }, [showToast, fetchAttendanceData]);
+  }, [fetchAttendanceData]);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
@@ -743,19 +766,67 @@ export default function AttendanceScreen({ navigation, route }) {
         visible={showQRCode}
         transparent={true}
         animationType="slide"
-        onRequestClose={() => setShowQRCode(false)}
+        onRequestClose={() => { setShowQRCode(false); setScanResult(null); }}
       >
         <View style={styles.scannerModalOverlay}>
           <View style={styles.scannerModalBox}>
             <View style={styles.scannerHeader}>
               <Text style={styles.scannerTitle}>Scan Service QR</Text>
-              <TouchableOpacity onPress={() => setShowQRCode(false)} style={styles.scannerCloseIcon}>
+              <TouchableOpacity onPress={() => { setShowQRCode(false); setScanResult(null); }} style={styles.scannerCloseIcon}>
                 <Ionicons name="close" size={20} color={colors.textDark || "#1A2744"} />
               </TouchableOpacity>
             </View>
             
             <View style={styles.scannerContainer}>
-              {showQRCode && permission?.granted ? (
+              {scanResult ? (
+                /* ── Scan Result Card ── */
+                <View style={styles.scanResultOverlay}>
+                  <View style={[
+                    styles.scanResultIconCircle,
+                    { backgroundColor: scanResult.type === "success" ? "rgba(52,199,89,0.15)" : scanResult.type === "warning" ? "rgba(245,166,35,0.15)" : "rgba(231,76,60,0.15)" }
+                  ]}>
+                    <Ionicons
+                      name={scanResult.type === "success" ? "checkmark-circle" : scanResult.type === "warning" ? "alert-circle" : "close-circle"}
+                      size={48}
+                      color={scanResult.type === "success" ? "#34C759" : scanResult.type === "warning" ? "#F5A623" : "#E74C3C"}
+                    />
+                  </View>
+                  <Text style={[
+                    styles.scanResultTitle,
+                    { color: scanResult.type === "success" ? "#34C759" : scanResult.type === "warning" ? "#F5A623" : "#E74C3C" }
+                  ]}>{scanResult.title}</Text>
+                  <Text style={styles.scanResultMessage}>{scanResult.message}</Text>
+
+                  {scanResult.type === "success" ? (
+                    <TouchableOpacity
+                      style={styles.scanResultBtnSuccess}
+                      activeOpacity={0.8}
+                      onPress={() => { setShowQRCode(false); setScanResult(null); }}
+                    >
+                      <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+                      <Text style={styles.scanResultBtnText}>Done</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.scanResultBtnRow}>
+                      <TouchableOpacity
+                        style={styles.scanResultBtnRetry}
+                        activeOpacity={0.8}
+                        onPress={() => setScanResult(null)}
+                      >
+                        <Ionicons name="scan-outline" size={16} color="#0D1F45" />
+                        <Text style={styles.scanResultBtnRetryText}>{scanResult.type === "warning" ? "OK" : "Try Again"}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.scanResultBtnClose}
+                        activeOpacity={0.8}
+                        onPress={() => { setShowQRCode(false); setScanResult(null); }}
+                      >
+                        <Text style={styles.scanResultBtnCloseText}>Close</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              ) : showQRCode && permission?.granted ? (
                 <CameraView
                   style={StyleSheet.absoluteFillObject}
                   barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
@@ -778,11 +849,13 @@ export default function AttendanceScreen({ navigation, route }) {
               )}
             </View>
 
-            <View style={styles.scannerFooter}>
-              <Text style={styles.scannerFooterText}>
-                Point your camera at the session QR code displayed by the admin.
-              </Text>
-            </View>
+            {!scanResult && (
+              <View style={styles.scannerFooter}>
+                <Text style={styles.scannerFooterText}>
+                  Point your camera at the session QR code displayed by the admin.
+                </Text>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -1385,6 +1458,94 @@ const getStyles = (C) => StyleSheet.create({
   dropdownText: {
     fontSize: 14,
     fontWeight: "600",
+  },
+
+  // ── Scan Result Card Styles ──
+  scanResultOverlay: {
+    flex: 1,
+    backgroundColor: C.cardBg,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 28,
+    paddingVertical: 24,
+  },
+  scanResultIconCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 18,
+  },
+  scanResultTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  scanResultMessage: {
+    fontSize: 14,
+    color: C.textMuted,
+    textAlign: "center",
+    lineHeight: 21,
+    marginBottom: 28,
+    paddingHorizontal: 8,
+  },
+  scanResultBtnSuccess: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#34C759",
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    borderRadius: 14,
+    width: "100%",
+    shadowColor: "#34C759",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  scanResultBtnText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  scanResultBtnRow: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
+  scanResultBtnRetry: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#0D1F45",
+    paddingVertical: 14,
+    borderRadius: 14,
+  },
+  scanResultBtnRetryText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  scanResultBtnClose: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: C.cardBorder,
+    backgroundColor: C.secondaryBtnBg,
+  },
+  scanResultBtnCloseText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: C.textDark,
   },
 });
 

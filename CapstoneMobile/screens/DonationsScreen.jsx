@@ -565,6 +565,7 @@ export default function DonationsScreen({ navigation, route }) {
     const errors = {};
     const amt = parseFloat(donationAmount.replace(/,/g, "")) || 0;
     if (!donationAmount || amt <= 0) errors.amount = "Please enter a valid donation amount.";
+    else if (amt > 500000) errors.amount = "Maximum donation amount is \u20B1500,000.";
     if (!selectedCategory) errors.category = "Please select a donation category.";
     if (!selectedBranch) errors.branch = "Please select a community.";
     const isManual = paymentApprovalMethod === "manual";
@@ -589,6 +590,10 @@ export default function DonationsScreen({ navigation, route }) {
     const amt = parseFloat(donationAmount.replace(/,/g, "")) || 0;
     if (amt <= 0) {
       setFormError("Please enter a valid donation amount.");
+      return;
+    }
+    if (amt > 500000) {
+      setFormError("Maximum donation amount is \u20B1500,000.");
       return;
     }
     

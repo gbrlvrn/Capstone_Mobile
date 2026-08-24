@@ -29,19 +29,21 @@ export default function NewPasswordScreen({ navigation, route }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  /* ── Password strength ── */
+  /* ── Password strength & rules ── */
+  const passRules = useMemo(() => [
+    { label: "At least 8 characters", met: newPassword.length >= 8 },
+    { label: "One uppercase letter", met: /[A-Z]/.test(newPassword) },
+    { label: "At least one number or more", met: /[0-9]/.test(newPassword) },
+    { label: "At least 1 symbol (@#$%^_!)", met: /[@#$%^_!]/.test(newPassword) },
+  ], [newPassword]);
+
   const strength = useMemo(() => {
     if (!newPassword) return 0;
-    let score = 0;
-    if (newPassword.length >= 8) score++;
-    if (/[A-Z]/.test(newPassword)) score++;
-    if (/[0-9]/.test(newPassword)) score++;
-    if (/[^A-Za-z0-9]/.test(newPassword)) score++;
-    return score;
-  }, [newPassword]);
+    return passRules.filter((r) => r.met).length;
+  }, [newPassword, passRules]);
 
-  const strengthLabel = ["", "Weak", "Fair", "Good", "Strong"][strength];
-  const strengthColor = ["", "#EF4444", "#F59E0B", "#3B82F6", "#22C55E"][strength];
+  const strengthLabel = ["", "Weak", "Weak", "Fair", "Good", "Strong"][strength];
+  const strengthColor = ["", "#EF4444", "#EF4444", "#F59E0B", "#3B82F6", "#22C55E"][strength];
 
   const handleReset = async () => {
     if (loading) return;
@@ -49,8 +51,20 @@ export default function NewPasswordScreen({ navigation, route }) {
       setError("Please fill in both password fields.");
       return;
     }
-    if (newPassword.length < 6) {
-      setError("Password must be at least 6 characters.");
+    if (newPassword.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (!/[A-Z]/.test(newPassword)) {
+      setError("Password must contain an uppercase letter.");
+      return;
+    }
+    if (!/[0-9]/.test(newPassword)) {
+      setError("Password must contain a number.");
+      return;
+    }
+    if (!/[@#$%^_!]/.test(newPassword)) {
+      setError("Password must contain a symbol (@#$%^_!).");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -224,15 +238,19 @@ export default function NewPasswordScreen({ navigation, route }) {
 
             {/* Requirements hint */}
             <View style={styles.hintBox}>
-              <Text style={[styles.hintTitle, { color: C.textMuted }]}>Password requirements:</Text>
-              {[
-                "At least 6 characters",
-                "One uppercase letter (recommended)",
-                "One number (recommended)",
-                "One special character (recommended)",
-              ].map((h) => (
-                <Text key={h} style={[styles.hintItem, { color: C.textMuted }]}>
-                  · {h}
+              <Text style={[styles.hintTitle, { color: C.textDark }]}>Password requirements:</Text>
+              {passRules.map((r, i) => (
+                <Text
+                  key={i}
+                  style={[
+                    styles.hintItem,
+                    {
+                      color: r.met ? "#22C55E" : newPassword.length > 0 ? "#EF4444" : C.textMuted,
+                      fontWeight: r.met ? "600" : "400",
+                    },
+                  ]}
+                >
+                  {r.met ? "✓ " : "• "}{r.label}
                 </Text>
               ))}
             </View>

@@ -762,7 +762,7 @@ export default function ProfileScreen({ navigation, route }) {
               <Text style={styles.infoModalTitle}>Terms and Conditions</Text>
               <View style={{ width: 34 }} />
             </View>
-            <ScrollView showsVerticalScrollIndicator={false} style={styles.infoModalScroll}>
+            <ScrollView showsVerticalScrollIndicator={true} nestedScrollEnabled={true} style={styles.infoModalScroll} contentContainerStyle={{ paddingBottom: 60 }}>
               {TERMS_SECTIONS.map((section, idx) => (
                 <View key={idx} style={styles.panelSection}>
                   <Text style={styles.panelSectionTitle}>{section.title}</Text>
@@ -1379,6 +1379,7 @@ const getStyles = (C) => StyleSheet.create({
     color: "#FFFFFF",
   },
   infoModalScroll: {
+    flex: 1,
     paddingHorizontal: 20,
     paddingTop: 18,
   },

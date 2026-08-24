@@ -1597,21 +1597,7 @@ export default function HomeScreen({ navigation, route }) {
               <Text style={{ color: C.blue, fontWeight: "600", fontSize: 13 }}>View →</Text>
             </TouchableOpacity>
 
-            {/* Prayer Wall Card */}
-            <TouchableOpacity
-              style={[styles.featureCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}
-              activeOpacity={0.8}
-              onPress={() => navigation.navigate("PrayerWall", { email: userEmail })}
-            >
-              <View style={[styles.featureIconBox, { backgroundColor: "rgba(175,82,222,0.1)" }]}>
-                <Image source={ICONS.heart} style={{ width: s(22), height: s(22), tintColor: "#AF52DE" }} resizeMode="contain" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.featureTitle, { color: colors.textDark }]}>Prayer Wall</Text>
-                <Text style={[styles.featureSubtitle, { color: colors.textMuted }]}>Share & pray for requests</Text>
-              </View>
-              <Text style={{ color: C.blue, fontWeight: "600", fontSize: 13 }}>Open →</Text>
-            </TouchableOpacity>
+
           </View>
         </View>
 

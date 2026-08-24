@@ -349,6 +349,46 @@ export async function resetPassword(req, res) {
 }
 
 /**
+ * ✅ POST /api/auth/verify-reset-otp
+ * Body: { email, otp }
+ * Verifies the OTP without deleting it yet so the reset password flow can proceed.
+ */
+export async function verifyResetOtp(req, res) {
+  try {
+    const email = (req.body.email || "").trim().toLowerCase();
+    const otp = (req.body.otp || "").trim();
+
+    if (!email) return res.status(400).json({ message: "Email is required." });
+    if (!otp) return res.status(400).json({ message: "OTP is required." });
+    if (otp.length !== 6) return res.status(400).json({ message: "OTP must be 6 digits." });
+
+    const record = await Otp.findOne({ email });
+    if (!record) return res.status(400).json({ message: "OTP not found. Please request a new one." });
+
+    if (record.expiresAt < new Date()) {
+      await Otp.deleteOne({ _id: record._id });
+      return res.status(400).json({ message: "OTP expired. Please request a new one." });
+    }
+
+    if (record.attempts >= 5) {
+      await Otp.deleteOne({ _id: record._id });
+      return res.status(429).json({ message: "Too many attempts. Please request a new OTP." });
+    }
+
+    if (record.otp !== otp) {
+      record.attempts += 1;
+      await record.save();
+      return res.status(400).json({ message: "Invalid OTP. Please check the code sent to your email." });
+    }
+
+    return res.json({ message: "OTP is valid." });
+  } catch (err) {
+    console.error("VERIFY RESET OTP ERROR:", err);
+    return res.status(500).json({ message: "Failed to verify OTP." });
+  }
+}
+
+/**
  * ✅ POST /api/auth/change-password
  * Body: { currentPassword, newPassword } (requires authMiddleware)
  */

@@ -847,20 +847,7 @@ export function chatWithBot(payload) {
   return request("POST", "/chat", payload, true);
 }
 
-// ── Prayer Endpoints ─────────────────────────────────────────────────
 
-export function getPrayerRequests(limit = 20, skip = 0) {
-  return get(`/prayers?limit=${limit}&skip=${skip}`, true);
-}
-
-export function createPrayerRequest(data) {
-  // data: { text, author }
-  return request("POST", "/prayers", data, true);
-}
-
-export function prayForRequest(requestId, email) {
-  return request("POST", `/prayers/${requestId}/pray`, { email });
-}
 
 // ── Notifications Endpoints ──────────────────────────────────────────
 

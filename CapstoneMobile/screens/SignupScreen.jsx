@@ -252,7 +252,10 @@ export default function SignupScreen({ navigation }) {
     return groups;
   }, [dynamicBranches]);
 
-  const update = (key, val) => setForm((p) => ({ ...p, [key]: val }));
+  const update = (key, val) => {
+    setForm((p) => ({ ...p, [key]: val }));
+    setTouched((p) => ({ ...p, [key]: true }));
+  };
   const touch = (key) => setTouched((p) => ({ ...p, [key]: true }));
 
   const passRules = [
@@ -306,7 +309,7 @@ export default function SignupScreen({ navigation }) {
       : !isValidEmail(form.email)
       ? "Enter a valid email address (disposable domains blocked)"
       : "",
-    phone: !form.phone.trim() || form.phone.trim() === "+63 "
+    phone: !form.phone.trim() || form.phone.trim() === "+63" || form.phone.trim() === "+63 "
       ? "Phone number is required"
       : !isValidPhone(form.phone)
       ? "Enter exactly 10 digits after +63"
@@ -420,17 +423,17 @@ export default function SignupScreen({ navigation }) {
     );
     setTouched(allTouched);
 
+    const firstError = Object.keys(errors).find((k) => errors[k]);
+    if (firstError) {
+      showAlert("Validation Error", errors[firstError]);
+      return;
+    }
+
     if (!agreedTerms) {
       showAlert(
         "Terms Required",
         "You must agree to the Terms and Conditions and Privacy Policy."
       );
-      return;
-    }
-
-    const firstError = Object.keys(errors).find((k) => errors[k]);
-    if (firstError) {
-      showAlert("Validation Error", errors[firstError]);
       return;
     }
 

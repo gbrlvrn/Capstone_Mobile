@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "../components/ThemeContext";
-import { sendForgotPasswordOTP, resetPassword } from "../services/OtpService";
+import { sendForgotPasswordOTP, verifyResetOTP } from "../services/OtpService";
 
 const OTP_LENGTH = 6;
 const RESEND_COOLDOWN = 30;
@@ -66,10 +66,11 @@ export default function ResetPasswordOTPScreen({ navigation, route }) {
     try {
       setLoading(true);
       setError("");
-      // Navigate to NewPassword screen — actual OTP verification happens there on password reset
+      // Verify the OTP code with backend first
+      await verifyResetOTP(email, code);
       navigation.navigate("NewPassword", { email, otp: code });
     } catch (err) {
-      setError(err?.message || "Verification failed. Please try again.");
+      setError(err?.message || "Invalid or expired OTP. Please try again.");
     } finally {
       setLoading(false);
     }

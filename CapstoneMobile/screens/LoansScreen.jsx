@@ -2410,6 +2410,44 @@ export default function LoansScreen({ navigation, route }) {
                   overflow: 'hidden'
                 }}>
                   <ScrollView nestedScrollEnabled={true} style={{ padding: 12 }}>
+                    <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>1. Eligibility Requirements</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Active co-op member in good standing with minimum ₱1,000 confirmed savings.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Borrowing limit depends directly on accumulated total savings.</Text>
+
+                    <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>2. Application & Approval Process</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• All applications are evaluated by co-op administration officers.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Approval notice will be sent via mobile app notifications.</Text>
+
+                    <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>3. Maximum Loan Limits</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Personal Loan: up to 2× of total active savings.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Emergency Loan: up to 1.5× of total active savings.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Short-Term Loan: up to 1× of total active savings.</Text>
+
+                    <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>4. Interest Rates</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Emergency Loan: 1.5% monthly interest rate.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Personal Loan: 2.0% monthly interest rate.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Short-Term Loan: 1.0% monthly interest rate.</Text>
+
+                    <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>5. Document Requirements</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Live selfie holding valid government ID with current date label.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Uploaded COE, ITR, or payslip supporting income verification.</Text>
+
+                    <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>6. Identity Verification</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Documents undergo automated AI scanning and validation checks.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Unclear or fake document captures will result in instant rejection.</Text>
+
+                    <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>7. Purpose of Loan</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Loan funds must be utilized strictly for the stated purpose.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Misrepresentation of purpose may disqualify future borrowings.</Text>
+
+                    <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>8. Existing Loan Disclosure</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Full disclosure of external active loans is mandatory.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Additional proof of ongoing balance may be requested.</Text>
+
+                    <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>9. Disbursement Options</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Cash pickup at co-op office or direct transfer via GCash / Bank.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Account details must match member name on record.</Text>
+
                     <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>10. Repayment Terms</Text>
                     <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Payments are monthly based on the selected term.</Text>
                     <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Due dates are fixed upon approval.</Text>

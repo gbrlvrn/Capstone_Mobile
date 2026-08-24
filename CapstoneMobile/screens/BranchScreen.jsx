@@ -21,11 +21,47 @@ import DraggableChatButton from "../components/DraggableChatButton";
 import FloatingNavBar from "../components/FloatingNavBar";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
-import { MapView, Marker } from "../components/Map";
 import COMMUNITY_COORDINATES from "../data/communityCoordinates";
 import { useTheme } from "../components/ThemeContext";
 import { getBranches } from "../services/AuthService";
 import OfflineBanner from "../components/OfflineBanner";
+
+// Safe MapView import — prevents crash if react-native-maps fails (e.g. missing API key)
+let MapView = null;
+let Marker = null;
+try {
+  const MapModule = require("../components/Map");
+  MapView = MapModule.MapView;
+  Marker = MapModule.Marker;
+} catch (e) {
+  console.log("react-native-maps not available:", e.message);
+}
+
+// Error boundary to catch MapView native crashes (e.g. missing Google Maps API key)
+class MapErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.log("MapView error:", error?.message);
+  }
+  render() {
+    if (this.state.hasError || !MapView) {
+      return (
+        <View style={{ height: this.props.height || 200, borderRadius: 16, backgroundColor: "rgba(13,31,69,0.04)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#E8ECF0" }}>
+          <Ionicons name="map-outline" size={32} color="#6B7FA3" />
+          <Text style={{ color: "#6B7FA3", fontSize: 13, fontWeight: "600", marginTop: 8 }}>Map view unavailable</Text>
+          <Text style={{ color: "#6B7FA3", fontSize: 11, marginTop: 4 }}>Use Get Directions for navigation</Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
@@ -883,6 +919,8 @@ export default function BranchScreen({ navigation, route }) {
           </View>
           
           <View style={styles.mapContainer}>
+            <MapErrorBoundary height={200}>
+            {MapView && Marker ? (
             <MapView
               style={styles.mapView}
               initialRegion={{
@@ -912,6 +950,8 @@ export default function BranchScreen({ navigation, route }) {
                 );
               })}
             </MapView>
+            ) : null}
+            </MapErrorBoundary>
           </View>
         </View>
 
@@ -1133,6 +1173,8 @@ export default function BranchScreen({ navigation, route }) {
         onRequestClose={() => setFullMapOpen(false)}
       >
         <View style={styles.fullMapContainer}>
+          <MapErrorBoundary height={Dimensions.get("window").height}>
+          {MapView && Marker ? (
           <MapView
             style={styles.fullMapView}
             initialRegion={{
@@ -1161,6 +1203,8 @@ export default function BranchScreen({ navigation, route }) {
               );
             })}
           </MapView>
+          ) : null}
+          </MapErrorBoundary>
           
           <TouchableOpacity 
             style={styles.closeFullMapBtn}

@@ -37,7 +37,7 @@ import SettingsScreen from './screens/SettingsScreen';
 import NotificationsScreen from './screens/NotificationsScreen';
 import DevotionalScreen from './screens/DevotionalScreen';
 import EventsScreen from './screens/EventsScreen';
-import PrayerWallScreen from './screens/PrayerWallScreen';
+
 import SavingsScreen from './screens/SavingsScreen';
 import AnnouncementsScreen from './screens/AnnouncementsScreen';
 
@@ -176,7 +176,7 @@ export default function App() {
           <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ animation: 'fade', animationDuration: 100 }} />
           <Stack.Screen name="Devotional" component={DevotionalScreen} options={{ animation: 'fade', animationDuration: 100 }} />
           <Stack.Screen name="Events" component={EventsScreen} options={{ animation: 'fade', animationDuration: 100 }} />
-          <Stack.Screen name="PrayerWall" component={PrayerWallScreen} options={{ animation: 'fade', animationDuration: 100 }} />
+
           <Stack.Screen name="Savings" component={SavingsScreen} options={{ animation: 'fade', animationDuration: 100 }} />
           <Stack.Screen name="Announcements" component={AnnouncementsScreen} options={{ animation: 'fade', animationDuration: 100 }} />
         </Stack.Navigator>
