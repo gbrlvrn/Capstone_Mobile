@@ -40,6 +40,9 @@ router.get("/user/:email", authMiddleware, getProfile);
 router.get("/me", authMiddleware, getProfile); // Web-compatible alias
 router.delete("/auth/delete", authMiddleware, deleteAccount);
 router.post("/auth/upload-photo", authMiddleware, upload.single("photo"), uploadProfilePhoto);
+router.post("/upload-photo", authMiddleware, upload.single("photo"), uploadProfilePhoto);
+router.put("/auth/upload-photo", authMiddleware, upload.single("photo"), uploadProfilePhoto);
+router.put("/upload-photo-file", authMiddleware, upload.single("photo"), uploadProfilePhoto);
 router.post("/auth/push-token", authMiddleware, registerPushToken);
 
 export default router;

@@ -41,6 +41,7 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use("/uploads", express.static(uploadsDir));
+app.use("/api/uploads", express.static(uploadsDir));
 
 // ── Rate Limiting ──────────────────────────────────────────────────
 // General rate limiter: 100 requests per 15 minutes

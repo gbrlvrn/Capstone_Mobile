@@ -572,7 +572,17 @@ export default function DonationsScreen({ navigation, route }) {
     const isCash = selectedPayment === "cash";
     if (isManual && !isCash) {
       if (!accountName || !accountName.trim()) errors.accountName = "Please enter your account name.";
-      if (!accountNumber || !accountNumber.trim()) errors.accountNumber = "Please enter your account number.";
+      if (!accountNumber || !accountNumber.trim() || (selectedPayment === "gcash" && accountNumber === "+63")) {
+        errors.accountNumber = selectedPayment === "gcash" ? "Please enter your phone number." : "Please enter your account number.";
+      } else if (selectedPayment === "gcash") {
+        if (!/^\+63\d{10}$/.test(accountNumber.replace(/\s/g, ""))) {
+          errors.accountNumber = "Enter exactly 10 digits after +63.";
+        }
+      } else if (selectedPayment === "bank") {
+        if (accountNumber.length < 8) {
+          errors.accountNumber = "Bank account number must be at least 8 digits.";
+        }
+      }
       if (!proofImage || !proofImage.base64) errors.proof = "Please upload proof of payment.";
     }
     setFieldErrors(errors);
@@ -615,8 +625,17 @@ export default function DonationsScreen({ navigation, route }) {
         setFormError("Please enter your account name.");
         return;
       }
-      if (!accountNumber || !accountNumber.trim()) {
-        setFormError("Please enter your account number.");
+      if (!accountNumber || !accountNumber.trim() || (selectedPayment === "gcash" && accountNumber === "+63")) {
+        setFormError(selectedPayment === "gcash" ? "Please enter your phone number." : "Please enter your account number.");
+        return;
+      }
+      if (selectedPayment === "gcash" && !/^\+63\d{10}$/.test(accountNumber.replace(/\s/g, ""))) {
+        setFormError("Phone number must have exactly 10 digits after +63.");
+        return;
+      }
+      if (selectedPayment === "bank" && accountNumber.length < 8) {
+        setFormError("Bank account number must be at least 8 digits.");
+
         return;
       }
       if (!proofImage || !proofImage.base64) {
@@ -1166,7 +1185,16 @@ export default function DonationsScreen({ navigation, route }) {
                 { backgroundColor: colors.inputBg, borderColor: colors.inputBorder },
                 selectedPayment === "gcash" && styles.paymentBtnActive,
               ]}
-              onPress={() => setSelectedPayment("gcash")}
+              onPress={() => {
+                setSelectedPayment("gcash");
+                setSubMethod("GCash");
+                let cleaned = accountNumber.replace(/[^0-9+]/g, "");
+                if (!cleaned.startsWith("+63")) {
+                  cleaned = "+63" + cleaned.replace(/\+/g, "").replace(/^63/, "");
+                }
+                if (cleaned.length > 13) cleaned = cleaned.slice(0, 13);
+                setAccountNumber(cleaned);
+              }}
               activeOpacity={0.7}
             >
               <Text
@@ -1185,7 +1213,12 @@ export default function DonationsScreen({ navigation, route }) {
                 { backgroundColor: colors.inputBg, borderColor: colors.inputBorder },
                 selectedPayment === "bank" && styles.paymentBtnActive,
               ]}
-              onPress={() => setSelectedPayment("bank")}
+              onPress={() => {
+                setSelectedPayment("bank");
+                setSubMethod("BDO");
+                const digits = accountNumber.replace(/[^0-9]/g, "").slice(0, 16);
+                setAccountNumber(digits);
+              }}
               activeOpacity={0.7}
             >
               <Text
@@ -1249,18 +1282,33 @@ export default function DonationsScreen({ navigation, route }) {
                 placeholder="Juan Dela Cruz"
                 placeholderTextColor={colors.textMuted}
                 value={accountName}
-                onChangeText={setAccountName}
+                onChangeText={(t) => setAccountName(t.replace(/[^a-zA-Z\s]/g, ""))}
               />
               {fieldErrors.accountName && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: -8, marginBottom: 8 }}>{fieldErrors.accountName}</Text>}
 
-              <Text style={[styles.inputLabel, { color: colors.textDark }]}>Account Number</Text>
+              <Text style={[styles.inputLabel, { color: colors.textDark }]}>
+                {selectedPayment === "gcash" ? "Phone Number" : "Account Number"}
+              </Text>
               <TextInput
                 style={[styles.amountInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.textDark, paddingLeft: 14, borderRadius: s(8), height: s(48), marginBottom: 12 }]}
-                placeholder="09123456789"
+                placeholder={selectedPayment === "gcash" ? "+63 9XX XXX XXXX" : "e.g. 1234567890"}
                 placeholderTextColor={colors.textMuted}
                 keyboardType="numeric"
                 value={accountNumber}
-                onChangeText={setAccountNumber}
+                maxLength={selectedPayment === "gcash" ? 13 : 16}
+                onChangeText={(t) => {
+                  if (selectedPayment === "gcash") {
+                    let cleaned = t.replace(/[^0-9+]/g, "");
+                    if (!cleaned.startsWith("+63")) {
+                      cleaned = "+63" + cleaned.replace(/\+/g, "").replace(/^63/, "");
+                    }
+                    if (cleaned.length > 13) cleaned = cleaned.slice(0, 13);
+                    setAccountNumber(cleaned);
+                  } else {
+                    const digits = t.replace(/[^0-9]/g, "").slice(0, 16);
+                    setAccountNumber(digits);
+                  }
+                }}
               />
               {fieldErrors.accountNumber && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: -8, marginBottom: 8 }}>{fieldErrors.accountNumber}</Text>}
             </View>

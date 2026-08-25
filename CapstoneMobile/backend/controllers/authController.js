@@ -239,7 +239,12 @@ export async function uploadProfilePhoto(req, res) {
     const photoUrl = `/uploads/${req.file.filename}`;
     await User.updateOne({ email }, { profilePhoto: photoUrl });
 
-    return res.json({ message: "Profile photo updated.", profilePhoto: photoUrl });
+    return res.json({
+      success: true,
+      message: "Profile photo updated.",
+      profilePhoto: photoUrl,
+      photoUrl: photoUrl
+    });
   } catch (err) {
     console.error("UPLOAD PHOTO ERROR:", err);
     return res.status(500).json({ message: "Failed to upload photo." });

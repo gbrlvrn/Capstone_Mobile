@@ -20,7 +20,7 @@ import FloatingNavBar from "../components/FloatingNavBar";
 import { SkeletonMemberCard, SkeletonCard, SkeletonQuickAction } from "../components/SkeletonLoader";
 import { useToast } from "../components/ToastContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getVerificationStatus, getProfile, getAnnouncements, getDonations, getSavingsData, getAttendanceHistory, getLoans } from "../services/AuthService";
+import { getVerificationStatus, getProfile, getAnnouncements, getDonations, getSavingsData, getAttendanceHistory, getLoans, getProfilePhotoUri } from "../services/AuthService";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTheme } from "../components/ThemeContext";
 import OfflineBanner from "../components/OfflineBanner";
@@ -223,6 +223,7 @@ export default function HomeScreen({ navigation, route }) {
   const [userRole, setUserRole] = useState("");
   const [userPosition, setUserPosition] = useState("");
   const [userName, setUserName] = useState("");
+  const [userProfilePhoto, setUserProfilePhoto] = useState("");
   const [isEmailVisible, setIsEmailVisible] = useState(false);
 
   // Live stats
@@ -391,6 +392,7 @@ export default function HomeScreen({ navigation, route }) {
           if (mounted) {
             if (parsed.role) setUserRole(parsed.role);
             if (parsed.position) setUserPosition(parsed.position);
+            if (parsed.profilePhoto) setUserProfilePhoto(parsed.profilePhoto);
             const cachedName = (parsed.firstName || parsed.lastName)
               ? `${parsed.firstName || ''} ${parsed.lastName || ''}`.trim()
               : parsed.fullName || parsed.name || "";
@@ -405,11 +407,16 @@ export default function HomeScreen({ navigation, route }) {
           const parsed = JSON.parse(saved);
 
           if (mounted) {
-            setUserEmail(parsed.email || "");
+            const email = parsed.email || "";
+            setUserEmail(email);
             const cachedName = (parsed.firstName || parsed.lastName)
               ? `${parsed.firstName || ''} ${parsed.lastName || ''}`.trim()
               : parsed.fullName || parsed.name || "";
             if (cachedName) setUserName(cachedName);
+            
+            const persistentPhoto = email ? await AsyncStorage.getItem(`faithly_profile_photo_${email}`) : "";
+            const activePhoto = persistentPhoto || parsed.profilePhoto || "";
+            if (activePhoto) setUserProfilePhoto(activePhoto);
             if (parsed.role) setUserRole(parsed.role);
             if (parsed.position) setUserPosition(parsed.position);
           }
@@ -460,10 +467,15 @@ export default function HomeScreen({ navigation, route }) {
           if (verifData?.role) setUserRole(verifData.role);
           if (verifData?.position) setUserPosition(verifData.position);
 
-          // Cache everything for other screens / offline use
+          // ── Profile Photo & Cache Sync ─────────────────────────────────────
           const cached = await AsyncStorage.getItem("faithly_user");
           const parsed = cached ? JSON.parse(cached) : {};
-          
+
+          const persistentPhoto = userEmail ? await AsyncStorage.getItem(`faithly_profile_photo_${userEmail}`) : "";
+          const photo = persistentPhoto || profileUser?.profilePhoto || verifData?.profilePhoto || parsed.profilePhoto || "";
+          setUserProfilePhoto(photo);
+
+          // Cache everything for other screens / offline use
           const updatedFirstName = profileUser?.firstName || verifData?.firstName || parsed.firstName || "";
           const updatedLastName  = profileUser?.lastName  || verifData?.lastName  || parsed.lastName  || "";
           const updatedFullName  = profileUser?.fullName  || verifData?.fullName  || fetchedName || parsed.fullName || "";
@@ -476,6 +488,7 @@ export default function HomeScreen({ navigation, route }) {
             firstName: updatedFirstName,
             lastName: updatedLastName,
             fullName: updatedFullName,
+            profilePhoto: photo || parsed.profilePhoto || "",
           }));
         } catch {
           // Full failure — fall back to cached data
@@ -979,11 +992,18 @@ export default function HomeScreen({ navigation, route }) {
         >
           <View style={styles.memberLeft}>
             <View style={styles.memberAvatar}>
-              <Image
-                source={ICONS.person}
-                style={styles.memberAvatarIcon}
-                resizeMode="contain"
-              />
+              {getProfilePhotoUri(userProfilePhoto) ? (
+                <Image
+                  source={{ uri: getProfilePhotoUri(userProfilePhoto) }}
+                  style={{ width: s(40), height: s(40), borderRadius: s(20) }}
+                />
+              ) : (
+                <Image
+                  source={ICONS.person}
+                  style={styles.memberAvatarIcon}
+                  resizeMode="contain"
+                />
+              )}
             </View>
             <View style={{ flex: 1 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -1732,11 +1752,18 @@ export default function HomeScreen({ navigation, route }) {
         <View style={styles.sidebarFooter}>
           <View style={styles.sidebarUserRow}>
             <View style={styles.sidebarAvatar}>
-              <Image
-                source={ICONS.person}
-                style={styles.sidebarAvatarIcon}
-                resizeMode="contain"
-              />
+              {getProfilePhotoUri(userProfilePhoto) ? (
+                <Image
+                  source={{ uri: getProfilePhotoUri(userProfilePhoto) }}
+                  style={{ width: s(36), height: s(36), borderRadius: s(18) }}
+                />
+              ) : (
+                <Image
+                  source={ICONS.person}
+                  style={styles.sidebarAvatarIcon}
+                  resizeMode="contain"
+                />
+              )}
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.sidebarUserName}>

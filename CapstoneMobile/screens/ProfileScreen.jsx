@@ -21,7 +21,7 @@ import DraggableChatButton from "../components/DraggableChatButton";
 import { SkeletonInfoRows } from "../components/SkeletonLoader";
 import { useToast } from "../components/ToastContext";
 import { useAlert } from "../components/AlertContext";
-import { deleteAccount, getProfile, uploadProfilePhoto } from "../services/AuthService";
+import { deleteAccount, getProfile, uploadProfilePhoto, getProfilePhotoUri } from "../services/AuthService";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../components/ThemeContext";
 import * as ImagePicker from "expo-image-picker";
@@ -308,7 +308,22 @@ export default function ProfileScreen({ navigation, route }) {
         setUser(merged);
         if (merged.role) setUserRole(merged.role);
         if (merged.position) setUserPosition(merged.position);
-        if (merged.profilePhoto) setProfilePhoto(merged.profilePhoto);
+        
+        // Priority for photo: per-user persistent storage -> apiUser photo -> cached photo
+        const savedPersistentPhoto = emailToFetch ? await AsyncStorage.getItem(`faithly_profile_photo_${emailToFetch}`) : "";
+        let cachedPhoto = "";
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached);
+            if (parsed?.profilePhoto) cachedPhoto = parsed.profilePhoto;
+          } catch {}
+        }
+        const activePhoto = savedPersistentPhoto || merged.profilePhoto || cachedPhoto;
+        if (activePhoto) {
+          setProfilePhoto(activePhoto);
+          merged.profilePhoto = activePhoto;
+        }
+
         await AsyncStorage.setItem("faithly_user", JSON.stringify(merged));
       } catch (e) {
       
@@ -321,8 +336,6 @@ export default function ProfileScreen({ navigation, route }) {
       mounted = false;
     };
   }, [routeEmail]);
-
-
 
   // always navigate with email
   const navWithEmail = useCallback(
@@ -349,7 +362,20 @@ export default function ProfileScreen({ navigation, route }) {
         setUser(merged);
         if (merged.role) setUserRole(merged.role);
         if (merged.position) setUserPosition(merged.position);
-        if (merged.profilePhoto) setProfilePhoto(merged.profilePhoto);
+
+        const savedPersistentPhoto = emailToFetch ? await AsyncStorage.getItem(`faithly_profile_photo_${emailToFetch}`) : "";
+        let cachedPhoto = "";
+        try {
+          const cached = await AsyncStorage.getItem("faithly_user");
+          const parsed = cached ? JSON.parse(cached) : {};
+          if (parsed.profilePhoto) cachedPhoto = parsed.profilePhoto;
+        } catch {}
+        
+        const activePhoto = savedPersistentPhoto || merged.profilePhoto || cachedPhoto;
+        if (activePhoto) {
+          setProfilePhoto(activePhoto);
+          merged.profilePhoto = activePhoto;
+        }
         await AsyncStorage.setItem("faithly_user", JSON.stringify(merged));
       }
       showToast("Profile refreshed", "success");
@@ -359,6 +385,47 @@ export default function ProfileScreen({ navigation, route }) {
       setRefreshing(false);
     }
   }, [resolvedEmail, showToast]);
+
+  const handleRemovePhoto = async () => {
+    try {
+      setUploadingPhoto(true);
+      setProfilePhoto("");
+
+      const currentEmail = resolvedEmail;
+      if (currentEmail) {
+        await AsyncStorage.removeItem(`faithly_profile_photo_${currentEmail}`);
+      }
+
+      const cached = await AsyncStorage.getItem("faithly_user");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        parsed.profilePhoto = "";
+        await AsyncStorage.setItem("faithly_user", JSON.stringify(parsed));
+      }
+
+      showToast("Profile photo removed", "success");
+    } catch (err) {
+      showToast("Could not remove photo", "error");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const handleAvatarPress = () => {
+    if (profilePhoto) {
+      Alert.alert(
+        "Profile Photo Options",
+        "What would you like to do with your profile photo?",
+        [
+          { text: "Change Photo", onPress: handlePickPhoto },
+          { text: "Remove Photo", style: "destructive", onPress: handleRemovePhoto },
+          { text: "Cancel", style: "cancel" },
+        ]
+      );
+    } else {
+      handlePickPhoto();
+    }
+  };
 
   const handlePickPhoto = async () => {
     try {
@@ -378,20 +445,38 @@ export default function ProfileScreen({ navigation, route }) {
       if (!result.canceled && result.assets?.[0]?.uri) {
         setUploadingPhoto(true);
         const localUri = result.assets[0].uri;
+
+        // Instantly display photo locally so user sees it right away
+        setProfilePhoto(localUri);
+
+        const currentEmail = resolvedEmail;
+        if (currentEmail) {
+          await AsyncStorage.setItem(`faithly_profile_photo_${currentEmail}`, localUri);
+        }
+
         try {
           const data = await uploadProfilePhoto(localUri);
-          if (data.profilePhoto) {
-            setProfilePhoto(data.profilePhoto);
-            // Update cached user
-            const cached = await AsyncStorage.getItem("faithly_user");
-            const parsed = cached ? JSON.parse(cached) : {};
-            parsed.profilePhoto = data.profilePhoto;
-            await AsyncStorage.setItem("faithly_user", JSON.stringify(parsed));
+          const photoUrl = data?.profilePhoto || data?.photoUrl || data?.user?.profilePhoto;
+          const finalPhoto = photoUrl || localUri;
+          setProfilePhoto(finalPhoto);
+
+          if (currentEmail) {
+            await AsyncStorage.setItem(`faithly_profile_photo_${currentEmail}`, finalPhoto);
           }
+
+          // Update cached user
+          const cached = await AsyncStorage.getItem("faithly_user");
+          const parsed = cached ? JSON.parse(cached) : {};
+          parsed.profilePhoto = finalPhoto;
+          await AsyncStorage.setItem("faithly_user", JSON.stringify(parsed));
+
           showToast("Profile photo updated!", "success");
         } catch (err) {
           // Fallback to storing local device URI for mock offline UI
           setProfilePhoto(localUri);
+          if (currentEmail) {
+            await AsyncStorage.setItem(`faithly_profile_photo_${currentEmail}`, localUri);
+          }
           const cached = await AsyncStorage.getItem("faithly_user");
           const parsed = cached ? JSON.parse(cached) : {};
           parsed.profilePhoto = localUri;
@@ -590,10 +675,10 @@ export default function ProfileScreen({ navigation, route }) {
             {/* Content row with Avatar + Member Info + Mini QR */}
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
-                <TouchableOpacity style={styles.avatar} activeOpacity={0.8} onPress={handlePickPhoto}>
-                  {profilePhoto ? (
+                <TouchableOpacity style={styles.avatar} activeOpacity={0.8} onPress={handleAvatarPress}>
+                  {getProfilePhotoUri(profilePhoto) ? (
                     <Image
-                      source={{ uri: profilePhoto.startsWith("file://") || profilePhoto.startsWith("content://") ? profilePhoto : `${API_CONFIG.CUSTOM_BACKEND.BASE_URL}${profilePhoto}` }}
+                      source={{ uri: getProfilePhotoUri(profilePhoto) }}
                       style={styles.avatarPhoto}
                     />
                   ) : (
@@ -966,10 +1051,10 @@ export default function ProfileScreen({ navigation, route }) {
             >
               {/* Member Profile Banner Card */}
               <View style={{ width: "100%", alignItems: "center", marginBottom: 18 }}>
-                <TouchableOpacity style={styles.avatarLarge} activeOpacity={0.8} onPress={handlePickPhoto}>
-                  {profilePhoto ? (
+                <TouchableOpacity style={styles.avatarLarge} activeOpacity={0.8} onPress={handleAvatarPress}>
+                  {getProfilePhotoUri(profilePhoto) ? (
                     <Image
-                      source={{ uri: profilePhoto.startsWith("file://") || profilePhoto.startsWith("content://") ? profilePhoto : `${API_CONFIG.CUSTOM_BACKEND.BASE_URL}${profilePhoto}` }}
+                      source={{ uri: getProfilePhotoUri(profilePhoto) }}
                       style={styles.avatarPhotoLarge}
                     />
                   ) : (
@@ -1179,11 +1264,18 @@ export default function ProfileScreen({ navigation, route }) {
         <View style={styles.sidebarFooter}>
           <View style={styles.sidebarUserRow}>
             <View style={styles.sidebarAvatar}>
-              <Image
-                source={ICONS.person}
-                style={styles.sidebarAvatarIcon}
-                resizeMode="contain"
-              />
+              {getProfilePhotoUri(profilePhoto) ? (
+                <Image
+                  source={{ uri: getProfilePhotoUri(profilePhoto) }}
+                  style={{ width: 36, height: 36, borderRadius: 18 }}
+                />
+              ) : (
+                <Image
+                  source={ICONS.person}
+                  style={styles.sidebarAvatarIcon}
+                  resizeMode="contain"
+                />
+              )}
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.sidebarUserName}>

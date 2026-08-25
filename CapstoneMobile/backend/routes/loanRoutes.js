@@ -5,9 +5,9 @@ import { verifyIdImage } from "../controllers/idVerificationController.js";
 
 const router = express.Router();
 
-// ── ID Verification (Gemini Vision AI) ───────────────────────────────
-// POST /api/loans/verify-id — must be before /:id routes to avoid clash
+// POST /api/loans/verify-id & /api/loans/verify-id-frame — must be before /:id routes to avoid clash
 router.post("/loans/verify-id", authMiddleware, verifyIdImage);
+router.post("/loans/verify-id-frame", authMiddleware, verifyIdImage);
 
 // All loan routes require authentication
 router.post("/loans", authMiddleware, createLoanValidation, createLoan);

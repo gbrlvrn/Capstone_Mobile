@@ -153,6 +153,7 @@ export default function SavingsScreen({ navigation, route }) {
 
   // Success modal & receipt modal
   const [successDeposit, setSuccessDeposit] = useState(null); // holds last submitted deposit info
+  const [successTransfer, setSuccessTransfer] = useState(null); // holds last instant transfer info
   const [receiptTxn, setReceiptTxn] = useState(null);         // holds tapped history txn
 
   // Transfer states
@@ -622,6 +623,18 @@ export default function SavingsScreen({ navigation, route }) {
     }
 
     const toGoal = goals.find(g => g.id === transferToGoalId);
+    const transferDetails = {
+      fromGoalName: fromGoal?.name || "Source Goal",
+      toGoalName: toGoal?.name || "Destination Goal",
+      amount: amount,
+      date: new Date().toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    };
 
     try {
       await createSavingsTransfer({
@@ -631,7 +644,6 @@ export default function SavingsScreen({ navigation, route }) {
         goalTarget: toGoal?.target || 0,
         amount: amount
       });
-      showAlert("Success", "Transfer completed instantly.");
       
       const updatedGoals = goals.map(g => {
         if (g.id === transferFromGoalId) {
@@ -645,18 +657,24 @@ export default function SavingsScreen({ navigation, route }) {
       setGoals(updatedGoals);
       await AsyncStorage.setItem(`faithly_savings_goals_${userEmail}`, JSON.stringify(updatedGoals));
       
+      // Close transfer input modal first to prevent modal stacking/freezing in React Native
+      setTransferModalOpen(false);
+      setTransferAmount("");
+      setTransferFromGoalId(null);
+      setTransferToGoalId(null);
+      setSubmitting(false);
+
+      // Open success modal after input modal unmounts
+      setTimeout(() => {
+        setSuccessTransfer(transferDetails);
+      }, 250);
+
     } catch (err) {
       console.log("Failed transfer:", err);
       setFormError("Failed to process transfer.");
       setSubmitting(false);
       return;
     }
-
-    setTransferAmount("");
-    setTransferFromGoalId(null);
-    setTransferToGoalId(null);
-    setTransferModalOpen(false);
-    setSubmitting(false);
   };
 
   const handleWithdraw = async () => {
@@ -1089,6 +1107,60 @@ export default function SavingsScreen({ navigation, route }) {
               style={{ marginTop: 24, backgroundColor: "#34C759", borderRadius: s(14), paddingVertical: s(14), paddingHorizontal: 48, width: "100%" }}
             >
               <Text style={{ color: "#fff", fontWeight: "800", fontSize: fs(15), textAlign: "center" }}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Transfer Success Modal ── */}
+      <Modal visible={!!successTransfer} transparent animationType="fade" onRequestClose={() => setSuccessTransfer(null)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", alignItems: "center", padding: 24 }}>
+          <View style={{ backgroundColor: colors.cardBg || "#fff", borderRadius: s(24), padding: 32, alignItems: "center", width: "100%", maxWidth: 360, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 24, elevation: 12 }}>
+            {/* Blue transfer circle */}
+            <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(13,31,69,0.08)", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+              <View style={{ width: s(52), height: s(52), borderRadius: 26, backgroundColor: colors.blue || "#0D1F45", alignItems: "center", justifyContent: "center" }}>
+                <Text style={{ fontSize: fs(24), color: "#fff", fontWeight: "800" }}>⇄</Text>
+              </View>
+            </View>
+
+            <Text style={{ fontSize: fs(20), fontWeight: "800", color: colors.textDark || "#0D1F45", marginBottom: 4 }}>Transfer Successful!</Text>
+            <Text style={{ fontSize: fs(13), color: colors.textMuted || "#6B7FA3", marginBottom: s(20), textAlign: "center" }}>Your funds have been moved instantly.</Text>
+
+            {/* Transfer details box */}
+            <View style={{ width: "100%", backgroundColor: "rgba(13,31,69,0.04)", borderRadius: s(16), padding: s(16), marginBottom: 24 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: fs(11), fontWeight: "700", color: colors.textMuted || "#6B7FA3", textTransform: "uppercase", letterSpacing: 0.5 }}>From</Text>
+                  <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark || "#0D1F45", marginTop: 2 }}>{successTransfer?.fromGoalName}</Text>
+                </View>
+                <Text style={{ fontSize: fs(18), color: colors.blue || "#0D1F45", fontWeight: "800", marginHorizontal: 8 }}>→</Text>
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={{ fontSize: fs(11), fontWeight: "700", color: colors.textMuted || "#6B7FA3", textTransform: "uppercase", letterSpacing: 0.5 }}>To</Text>
+                  <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark || "#0D1F45", marginTop: 2, textAlign: "right" }}>{successTransfer?.toGoalName}</Text>
+                </View>
+              </View>
+
+              <View style={{ height: 1, backgroundColor: "rgba(0,0,0,0.06)", marginVertical: 10 }} />
+
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                <Text style={{ fontSize: fs(13), color: colors.textMuted || "#6B7FA3", fontWeight: "500" }}>Amount</Text>
+                <Text style={{ fontSize: fs(16), fontWeight: "800", color: "#34C759" }}>
+                  ₱{successTransfer ? successTransfer.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}
+                </Text>
+              </View>
+
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+                <Text style={{ fontSize: fs(12), color: colors.textMuted || "#6B7FA3", fontWeight: "500" }}>Date</Text>
+                <Text style={{ fontSize: fs(12), color: colors.textDark || "#0D1F45", fontWeight: "600" }}>{successTransfer?.date}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              onPress={() => setSuccessTransfer(null)}
+              style={{ backgroundColor: colors.blue || "#0D1F45", borderRadius: s(14), paddingVertical: s(14), width: "100%", alignItems: "center" }}
+              activeOpacity={0.85}
+            >
+              <Text style={{ color: "#fff", fontWeight: "800", fontSize: fs(15) }}>Done</Text>
             </TouchableOpacity>
           </View>
         </View>
