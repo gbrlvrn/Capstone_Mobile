@@ -27,9 +27,8 @@ import { useTheme } from "../components/ThemeContext";
 import * as ImagePicker from "expo-image-picker";
 import { API_CONFIG } from "../services/config";
 import OfflineBanner from "../components/OfflineBanner";
-import QRCode from "react-native-qrcode-svg";
 
-// Metro Reload Trigger: Digital Member Pass QR clean state
+// Metro Reload Trigger: Digital Member Pass Personal Information clean state
 
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -585,13 +584,6 @@ export default function ProfileScreen({ navigation, route }) {
     }
   };
 
-  const InfoRow = ({ label, value }) => (
-    <View style={styles.infoSection}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{value || "—"}</Text>
-    </View>
-  );
-
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
       <OfflineBanner />
@@ -717,28 +709,24 @@ export default function ProfileScreen({ navigation, route }) {
                 </View>
               </View>
 
-              {/* Crisp Mini QR Preview */}
+              {/* Personal Info Preview Badge */}
               <View style={{ alignItems: "center", justifyContent: "center" }}>
                 <View
                   style={{
-                    backgroundColor: "#FFFFFF",
-                    padding: 5,
-                    borderRadius: 12,
+                    backgroundColor: "rgba(255,255,255,0.12)",
+                    width: 48,
+                    height: 48,
+                    borderRadius: 14,
                     alignItems: "center",
                     justifyContent: "center",
                     borderWidth: 1,
-                    borderColor: "rgba(255,255,255,0.3)",
+                    borderColor: "rgba(255,255,255,0.25)",
                     marginBottom: 4,
                   }}
                 >
-                  <QRCode
-                    value={resolvedEmail || "isangdiwa-member"}
-                    size={50}
-                    color="#0D1F45"
-                    backgroundColor="#FFFFFF"
-                  />
+                  <Ionicons name="card-outline" size={24} color="#00C3FF" />
                 </View>
-                <Text style={{ fontSize: 9.5, fontWeight: "700", color: "#00C3FF" }}>View Pass ›</Text>
+                <Text style={{ fontSize: 9.5, fontWeight: "700", color: "#00C3FF" }}>View Info ›</Text>
               </View>
             </View>
           </View>
@@ -898,7 +886,7 @@ export default function ProfileScreen({ navigation, route }) {
 
               <View style={styles.faqItem}>
                 <Text style={styles.faqQuestion}>How do I deactivate my account?</Text>
-                <Text style={styles.faqAnswer}>Go to your Profile, tap on your Digital Member Pass to view your QR Code and Account Information, then scroll to the bottom to find the "Deactivate Account" option.</Text>
+                <Text style={styles.faqAnswer}>Go to your Profile, tap on your Digital Member Pass to view your Personal Information, then scroll to the bottom to find the "Deactivate Account" option.</Text>
               </View>
               <View style={styles.panelSection}>
                 <Text style={styles.panelSectionTitle}>Contact Support</Text>
@@ -1089,62 +1077,12 @@ export default function ProfileScreen({ navigation, route }) {
                 </View>
               </View>
 
-              {/* Scannable Pass Box */}
-              <View
-                style={{
-                  width: "100%",
-                  backgroundColor: "#F4F7FB",
-                  borderRadius: 20,
-                  padding: 16,
-                  alignItems: "center",
-                  borderWidth: 1,
-                  borderColor: "rgba(13, 31, 69, 0.1)",
-                  marginBottom: 20,
-                }}
-              >
-                <Text style={{ fontSize: 11, fontWeight: "700", color: colors.textMuted, textAlign: "center", marginBottom: 12, textTransform: "uppercase", letterSpacing: 0.5 }}>
-                  Sunday Service & Event Check-In Pass
-                </Text>
-
-                <View
-                  style={{
-                    backgroundColor: "#FFFFFF",
-                    padding: 14,
-                    borderRadius: 16,
-                    borderWidth: 2,
-                    borderColor: "#0D1F45",
-                    shadowColor: "#000",
-                    shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.08,
-                    shadowRadius: 6,
-                    elevation: 2,
-                    marginBottom: 10,
-                  }}
-                >
-                  <QRCode
-                    value={resolvedEmail || "isangdiwa-member"}
-                    size={175}
-                    color="#000000"
-                    backgroundColor="#FFFFFF"
-                    logo={LOGO}
-                    logoSize={38}
-                    logoBackgroundColor="#FFFFFF"
-                    logoMargin={2}
-                    logoBorderRadius={19}
-                  />
-                </View>
-
-                <Text style={{ fontSize: 11, color: colors.textMuted, textAlign: "center" }}>
-                  Scan code at admin station to register attendance
-                </Text>
-              </View>
-
-              {/* Account Information Section */}
+              {/* Personal Information Section */}
               <View style={{ width: "100%", backgroundColor: colors.bg, borderRadius: 18, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: colors.cardBorder }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 14 }}>
                   <Ionicons name="person-circle-outline" size={18} color={C.blue} />
                   <Text style={{ fontSize: 13, fontWeight: "800", color: colors.textDark, letterSpacing: 0.4 }}>
-                    MEMBER DETAILS
+                    PERSONAL INFORMATION
                   </Text>
                 </View>
                 
@@ -1152,12 +1090,14 @@ export default function ProfileScreen({ navigation, route }) {
                   <SkeletonInfoRows count={6} />
                 ) : (
                   <View style={{ width: "100%" }}>
+                    <InfoRow icon="person-outline" label="Full Name" value={user.fullName} />
                     <InfoRow icon="mail-outline" label="Email Address" value={resolvedEmail} />
                     <InfoRow icon="call-outline" label="Phone Number" value={user.phone} />
                     <InfoRow icon="business-outline" label="Community / Branch" value={user.branch} />
                     <InfoRow icon="briefcase-outline" label="Position in Church" value={user.position} />
-                    <InfoRow icon="person-outline" label="Gender" value={user.gender} />
+                    <InfoRow icon="transgender-outline" label="Gender" value={user.gender} />
                     <InfoRow icon="calendar-outline" label="Date of Birth" value={user.birthday ? user.birthday.split("T")[0] : ""} />
+                    <InfoRow icon="shield-checkmark-outline" label="Account Status" value={user.isVerified ? "Verified Member" : "Active Member"} />
                   </View>
                 )}
               </View>

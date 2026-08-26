@@ -39,8 +39,11 @@ export async function createLoan(req, res) {
       status: { $in: ["pending", "approved", "member_accepted", "active"] },
     });
     if (existingLoan) {
+      const isPending = existingLoan.status === "pending" || existingLoan.status === "under_review";
       return res.status(409).json({
-        message: `You already have an active loan application (${existingLoan.loanId}). Only one loan at a time is allowed.`,
+        message: isPending
+          ? `You already have a pending loan application (${existingLoan.loanId}) under review. You cannot apply for a new loan until your application is reviewed and rejected (or completed).`
+          : `You already have an active loan (${existingLoan.loanId}). You cannot apply for a new loan until your current loan is settled.`,
       });
     }
 

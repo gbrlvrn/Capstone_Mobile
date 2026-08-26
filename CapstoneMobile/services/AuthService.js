@@ -220,6 +220,9 @@ export async function getTokenPayload() {
 function extractError(data, fallbackText) {
   if (data?.message) return data.message;
   if (Array.isArray(data?.errors) && data.errors[0]?.msg) return data.errors[0].msg;
+  if (typeof fallbackText === "string" && fallbackText.trim().startsWith("<")) {
+    return "Requested resource not found on server.";
+  }
   return fallbackText || "Request failed";
 }
 
@@ -710,20 +713,49 @@ export function respondToLoanTerms(loanId, accepted) {
 
 export async function verifyIdImage(base64, mimeType = "image/jpeg") {
   try {
-    const res = await webPost("/loans/verify-id", { base64, mimeType }, true);
-    if (res && typeof res.valid !== "undefined") {
-      return res;
+    const formattedData = base64.startsWith("data:") 
+      ? base64 
+      : `data:${mimeType};base64,${base64}`;
+
+    // Send imageData field as specified in government_id_backend_guide.md
+    const res = await webPost("/loans/verify-id-frame", { imageData: formattedData }, true);
+    
+    if (res && (typeof res.detected !== "undefined" || typeof res.valid !== "undefined" || typeof res.success !== "undefined")) {
+      const isDetected = Boolean(res.detected === true || res.valid === true);
+      return {
+        valid: isDetected,
+        detected: isDetected,
+        confidence: res.confidence || (isDetected ? "high" : "low"),
+        idType: res.idType || (isDetected ? "Philippine Government ID" : null),
+        reason: res.reason || (isDetected ? "Valid government ID verified successfully." : "No valid government ID detected in the image."),
+      };
     }
-    return { valid: true, idType: "Philippine Government ID", confidence: "medium", reason: "Valid ID captured." };
   } catch (e) {
-    console.log("ID verification API warning (failing open for manual review):", e.message || e);
-    return {
-      valid: true,
-      idType: "Philippine Government ID",
-      confidence: "medium",
-      reason: "ID image captured successfully and queued for review.",
-    };
+    console.log("Web verify-id-frame warning, trying fallback payload format...", e.message || e);
+    try {
+      const rawBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
+      const res2 = await webPost("/loans/verify-id-frame", { imageData: base64, base64: rawBase64, mimeType }, true);
+      if (res2 && (typeof res2.detected !== "undefined" || typeof res2.valid !== "undefined" || typeof res2.success !== "undefined")) {
+        const isDetected = Boolean(res2.detected === true || res2.valid === true);
+        return {
+          valid: isDetected,
+          detected: isDetected,
+          confidence: res2.confidence || (isDetected ? "high" : "low"),
+          idType: res2.idType || (isDetected ? "Philippine Government ID" : null),
+          reason: res2.reason || (isDetected ? "Valid government ID verified successfully." : "No valid government ID detected in the image."),
+        };
+      }
+    } catch (e2) {
+      console.log("All verify-id-frame attempts failed:", e2.message || e2);
+    }
   }
+  return {
+    valid: false,
+    detected: false,
+    idType: null,
+    confidence: "low",
+    reason: "Unable to reach ID verification service. Please check your internet connection and retake a clear photo of your ID card.",
+  };
 }
 
 // ── Donation Endpoints ──────────────────────────────────────────────
@@ -845,23 +877,57 @@ export async function getAnnouncements() {
     if (_announcementsCache && (now - _announcementsCacheTime) < ANNOUNCEMENTS_CACHE_TTL) {
       return _announcementsCache;
     }
-    // Web backend endpoint: GET /api/upcoming — returns announcements & services
-    const result = await get("/upcoming", false);
-    // Normalise: handle plain array, { data: [] }, { announcements: [] }
+
     let list = [];
-    if (Array.isArray(result)) {
-      list = result;
-    } else if (result?.data && Array.isArray(result.data)) {
-      list = result.data;
-    } else if (result?.announcements && Array.isArray(result.announcements)) {
-      list = result.announcements;
+
+    // 1. Primary production endpoint: GET /api/upcoming
+    try {
+      const result = await get("/upcoming", false);
+      if (Array.isArray(result)) {
+        list = result;
+      } else if (result?.announcements && Array.isArray(result.announcements)) {
+        list = result.announcements;
+      } else if (result?.data && Array.isArray(result.data)) {
+        list = result.data;
+      }
+    } catch (err1) {
+      console.log("[Auth] GET /upcoming failed, trying alternate routes...", err1.message);
     }
-    _announcementsCache = list;
+
+    // 2. Fallback to GET /announcements if 0 items returned
+    if (!list || list.length === 0) {
+      try {
+        const result = await get("/announcements", false);
+        let altList = [];
+        if (Array.isArray(result)) altList = result;
+        else if (result?.announcements && Array.isArray(result.announcements)) altList = result.announcements;
+        else if (result?.data && Array.isArray(result.data)) altList = result.data;
+        if (altList.length > 0) list = altList;
+      } catch (_) {
+        // Silently ignore 404 HTML from route mismatch
+      }
+    }
+
+    // 3. Fallback: Check notifications feed for announcements
+    if (!list || list.length === 0) {
+      try {
+        const feed = await getNotificationsFeed();
+        if (feed && Array.isArray(feed.announcements) && feed.announcements.length > 0) {
+          list = feed.announcements;
+        }
+      } catch (_) {
+        // Ignore feed error if unauthenticated
+      }
+    }
+
+    const validList = (list || []).filter(a => a && a.isActive !== false);
+
+    _announcementsCache = validList;
     _announcementsCacheTime = now;
-    return list;
+    return validList;
   } catch (err) {
     console.error("Error fetching announcements:", err.message);
-    return _announcementsCache || []; // return stale cache on network error
+    return _announcementsCache || [];
   }
 }
 

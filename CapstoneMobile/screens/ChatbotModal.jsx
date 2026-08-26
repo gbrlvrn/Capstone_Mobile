@@ -107,11 +107,20 @@ export default function ChatbotModal({ visible, onClose }) {
       }),
     };
 
-    // Format history for backend (last 8 messages) before adding new user message
-    const historyPayload = messages.slice(-8).map((m) => ({
-      sender: m.type === "user" ? "user" : "bot",
-      text: m.text,
-    }));
+    // Format history for backend (last 8 messages) before adding new user message.
+    // Google Gemini API strictly requires that the first message in history must be from 'user'.
+    const historyPayload = messages
+      .filter((m) => m.id !== 1)
+      .slice(-8)
+      .map((m) => ({
+        sender: m.type === "user" ? "user" : "bot",
+        text: m.text,
+      }));
+
+    // Ensure history starts with a user message to prevent Gemini API rejected request error
+    while (historyPayload.length > 0 && historyPayload[0].sender !== "user") {
+      historyPayload.shift();
+    }
 
     setMessages((prev) => [...prev, newMessage]);
     setMessage("");

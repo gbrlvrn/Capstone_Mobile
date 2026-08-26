@@ -24,7 +24,7 @@ import DraggableChatButton from "../components/DraggableChatButton";
 import FloatingNavBar from "../components/FloatingNavBar";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { getPublicSettings, getVerificationStatus, createLoan, getLoans, submitLoanPayment, getMyLoanPayments, cancelLoan, getLoanSchedule, verifyIdImage } from "../services/AuthService";
+import { getPublicSettings, getVerificationStatus, createLoan, getLoans, submitLoanPayment, getMyLoanPayments, cancelLoan, getLoanSchedule, verifyIdImage, getSavingsData } from "../services/AuthService";
 import { addNotification } from "./NotificationsScreen";
 import LoanProgressCircle from "../components/LoanProgressCircle";
 import EmptyState from "../components/EmptyState";
@@ -268,6 +268,20 @@ export default function LoansScreen({ navigation, route }) {
   // Loan application form state
   const [loanType, setLoanType] = useState("");
   const [expandedLoanType, setExpandedLoanType] = useState(null);
+  const loanTypeScrollViewRef = useRef(null);
+  const loanTypeCardLayouts = useRef({});
+  const loanTypeContainerWidth = useRef(SCREEN_WIDTH - s(48));
+
+  const scrollToCenterType = useCallback((typeValue) => {
+    setTimeout(() => {
+      const layout = loanTypeCardLayouts.current[typeValue];
+      if (layout && loanTypeScrollViewRef.current) {
+        const cWidth = loanTypeContainerWidth.current || (SCREEN_WIDTH - s(48));
+        const targetX = Math.max(0, layout.x - (cWidth / 2) + (layout.width / 2));
+        loanTypeScrollViewRef.current.scrollTo({ x: targetX, animated: true });
+      }
+    }, 50);
+  }, []);
 
   // Face verification camera state
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
@@ -298,6 +312,8 @@ export default function LoansScreen({ navigation, route }) {
   const [accountNumber, setAccountNumber] = useState("");
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [formError, setFormError] = useState("");
+  const [loanFilterTab, setLoanFilterTab] = useState("all"); // "all" | "active" | "completed" | "pending"
+  const [expandedCompletedLoans, setExpandedCompletedLoans] = useState({});
   const [fieldErrors, setFieldErrors] = useState({});
   const [loanLoading, setLoanLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -365,10 +381,28 @@ export default function LoansScreen({ navigation, route }) {
   }, [applyModalOpen, loanType, loanAmount, phoneNumber, purposeCategory, purpose, monthsToPay, disbursementMethod, accountNumber, saveLoanDraft]);
 
   const handleOpenApplyModal = useCallback(() => {
+    const pendingLoan = loansData.find(l => ["pending", "under_review", "in_review"].includes(l.status?.toLowerCase()));
+    if (pendingLoan) {
+      showAlert(
+        "Pending Application in Progress",
+        `You currently have a loan application (${pendingLoan.id || "under review"}) awaiting approval. You cannot apply for a new loan until your application is reviewed and rejected (or completed).`
+      );
+      return;
+    }
+
+    const ongoingLoan = loansData.find(l => ["approved", "member_accepted", "active"].includes(l.status?.toLowerCase()));
+    if (ongoingLoan) {
+      showAlert(
+        "Active Loan Exists",
+        `You currently have an active or approved loan (${ongoingLoan.id}). You cannot apply for a new loan until your current loan is settled.`
+      );
+      return;
+    }
+
     setFormError("");
     loadLoanDraft();
     setApplyModalOpen(true);
-  }, [loadLoanDraft]);
+  }, [loansData, loadLoanDraft, showAlert]);
 
   const handleCloseApplyModal = useCallback((force = false) => {
     const isDirty = Boolean(
@@ -505,9 +539,37 @@ export default function LoansScreen({ navigation, route }) {
         const item = { uri: asset.uri, fileName, type, base64: asset.base64 };
         setter(item);
         if (setter === setValidId) {
-          setIdVerified(true);
+          setIdVerifying(true);
+          setIdVerified(false);
           setIdRejected(false);
-          setIdVerifyResult({ idType: "Philippine Government ID", reason: "Government ID uploaded successfully." });
+          setIdVerifyResult(null);
+          try {
+            const verifyRes = await verifyIdImage(asset.base64, type);
+            if (verifyRes && verifyRes.valid === true) {
+              setIdVerified(true);
+              setIdRejected(false);
+              setIdVerifyResult({
+                idType: verifyRes.idType || "Philippine Government ID",
+                reason: verifyRes.reason || "Valid Philippine ID verified successfully.",
+              });
+            } else {
+              setIdVerified(false);
+              setIdRejected(true);
+              setValidId(null); // Clear item so user cannot proceed with invalid image
+              setIdVerifyResult({
+                idType: null,
+                reason: verifyRes?.reason || "No valid government ID card detected in the image. Please select a clear photo of your ID card.",
+              });
+            }
+          } catch (e) {
+            console.log("Gallery ID verify error:", e);
+            setIdVerified(false);
+            setIdRejected(true);
+            setValidId(null);
+            setIdVerifyResult({ idType: null, reason: "ID verification error. Please select a clear photo of your ID card." });
+          } finally {
+            setIdVerifying(false);
+          }
         }
       }
     } catch (err) {
@@ -597,22 +659,26 @@ export default function LoansScreen({ navigation, route }) {
             setValidId(imageData); // store image preview
             try {
               const result = await verifyIdImage(imageData.base64, "image/jpeg");
-              if (result && result.valid !== false) {
+              if (result && result.valid === true) {
                 setIdVerified(true);
                 setIdRejected(false);
                 setIdVerifyResult({ idType: result.idType || "Philippine Government ID", reason: result.reason || "ID verified successfully." });
               } else {
-                // If AI response was negative or inconclusive, accept document for manual review so user is not blocked
-                setIdVerified(true);
-                setIdRejected(false);
-                setIdVerifyResult({ idType: result?.idType || "Philippine Government ID", reason: result?.reason || "ID photo captured. Document accepted for review." });
+                // Reject invalid photos (random shots, selfies, scenery, furniture, food, memes)
+                setIdVerified(false);
+                setIdRejected(true);
+                setValidId(null); // Clear invalid image preview so user cannot submit a bad photo
+                setIdVerifyResult({
+                  idType: null,
+                  reason: result?.reason || "No valid government-issued ID detected in the image. Please retake a clear photo of your ID card.",
+                });
               }
             } catch (verifyErr) {
               console.log("ID verify error:", verifyErr);
-              // Fail open on error so user can proceed
-              setIdVerified(true);
-              setIdRejected(false);
-              setIdVerifyResult({ idType: "Philippine Government ID", reason: "ID photo captured. Document accepted for review." });
+              setIdVerified(false);
+              setIdRejected(true);
+              setValidId(null);
+              setIdVerifyResult({ idType: null, reason: "ID verification error. Please retake a clear photo of your ID card." });
             } finally {
               setIdVerifying(false);
             }
@@ -744,34 +810,49 @@ export default function LoansScreen({ navigation, route }) {
     try {
       const response = await getLoans();
       const serverLoans = response?.loans || [];
+      const formatCurrency = (val) => {
+        if (val === null || val === undefined || val === "") return "₱0.00";
+        if (typeof val === "string" && val.startsWith("₱")) return val;
+        const num = typeof val === "number" ? val : parseFloat(val);
+        if (isNaN(num)) return String(val);
+        return `₱${num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      };
 
       // Map server data to UI format
-      const mapped = serverLoans.map(loan => ({
-        id: loan.loanId,
-        _id: loan._id,
-        type: loan.loanType,
-        amount: loan.amount,
-        amountNum: loan.amount,
-        status: loan.status,
-        monthlyPayment: loan.monthlyPayment,
-        remainingBalance: loan.remainingBalance,
-        totalRepayment: loan.totalRepayment,
-        totalInterest: loan.totalInterest,
-        termMonths: loan.termMonths,
-        paidMonths: loan.paidMonths || 0,
-        disbursed: loan.disbursed,
-        nextPayment: loan.nextPayment || "-",
-        applied: loan.appliedDate,
-        purpose: loan.purpose,
-        phoneNumber: loan.phoneNumber,
-        memberName: loan.memberName,
-        disbursementMethod: loan.disbursementMethod,
-        accountNumber: loan.accountNumber,
-        interestRate: loan.interestRate,
-        adminModified: loan.adminModified || false,
-        originalAmount: loan.originalAmount || null,
-        originalTermMonths: loan.originalTermMonths || null,
-      }));
+      const mapped = serverLoans.map(loan => {
+        const rawAmt = typeof loan.amount === 'number' ? loan.amount : (parseFloat(loan.amount) || 0);
+        const rawMonthly = typeof loan.monthlyPayment === 'number' ? loan.monthlyPayment : (parseFloat(loan.monthlyPayment) || 0);
+        const rawRem = typeof loan.remainingBalance === 'number' ? loan.remainingBalance : (parseFloat(loan.remainingBalance) || 0);
+
+        return {
+          id: loan.loanId,
+          _id: loan._id,
+          type: loan.loanType,
+          amount: formatCurrency(rawAmt),
+          amountNum: rawAmt,
+          status: loan.status,
+          monthlyPayment: formatCurrency(rawMonthly),
+          monthlyPaymentNum: rawMonthly,
+          remainingBalance: formatCurrency(rawRem),
+          remainingBalanceNum: rawRem,
+          totalRepayment: formatCurrency(loan.totalRepayment || (rawMonthly * (loan.termMonths || 1))),
+          totalInterest: formatCurrency(loan.totalInterest || 0),
+          termMonths: loan.termMonths,
+          paidMonths: loan.paidMonths || 0,
+          disbursed: loan.disbursed,
+          nextPayment: loan.nextPayment || "-",
+          applied: loan.appliedDate,
+          purpose: loan.purpose,
+          phoneNumber: loan.phoneNumber,
+          memberName: loan.memberName,
+          disbursementMethod: loan.disbursementMethod,
+          accountNumber: loan.accountNumber,
+          interestRate: loan.interestRate,
+          adminModified: loan.adminModified || false,
+          originalAmount: loan.originalAmount,
+          originalTermMonths: loan.originalTermMonths,
+        };
+      });
       setLoansData(mapped);
       await AsyncStorage.setItem(`faithly_loans_${userEmail}`, JSON.stringify(mapped));
 
@@ -811,17 +892,26 @@ export default function LoansScreen({ navigation, route }) {
       const loadSavings = async () => {
         if (!userEmail) return;
         try {
-          const saved = await AsyncStorage.getItem(`faithly_savings_${userEmail}`);
-          if (saved) {
-            const arr = JSON.parse(saved);
-            let total = 0;
-            arr.forEach(d => { total += parseFloat(d.amount) || 0; });
-            setTotalSavings(total);
-          } else {
+          const data = await getSavingsData();
+          let total = 0;
+          if (data?.stats?.totalSaved != null) {
+            total = parseFloat(data.stats.totalSaved) || 0;
+          } else if (Array.isArray(data?.goals)) {
+            data.goals.forEach(g => { total += parseFloat(g.amountSaved || g.savedAmount || 0) || 0; });
+          }
+          setTotalSavings(total);
+          await AsyncStorage.setItem(`faithly_savings_total_${userEmail}`, String(total));
+        } catch (e) {
+          try {
+            const savedTotal = await AsyncStorage.getItem(`faithly_savings_total_${userEmail}`);
+            if (savedTotal != null) {
+              setTotalSavings(parseFloat(savedTotal) || 0);
+            } else {
+              setTotalSavings(0);
+            }
+          } catch (_) {
             setTotalSavings(0);
           }
-        } catch (e) {
-          console.log("Savings load error:", e);
         }
       };
       loadSavings();
@@ -1008,10 +1098,23 @@ export default function LoansScreen({ navigation, route }) {
     if (!applyModalOpen) return;
     const errors = {};
     if (!loanType) errors.loanType = "Please select a loan type.";
+
+    let multiplier = 1;
+    if (loanType === "Emergency") multiplier = 1.5;
+    if (loanType === "Personal") multiplier = 2;
+    const maxLoanable = totalSavings * multiplier;
+    const availableLimit = Math.max(0, maxLoanable - existingLoanBalance);
+
     const rawAmt = loanAmount.replace(/,/g, "");
     const principal = parseFloat(rawAmt);
-    if (!loanAmount || isNaN(principal) || principal <= 0) errors.amount = "Please enter a valid loan amount.";
-    else if (principal < 1000) errors.amount = "Minimum loan amount: ₱1,000.";
+    if (!loanAmount || isNaN(principal) || principal <= 0) {
+      errors.amount = "Please enter a valid loan amount.";
+    } else if (principal < 1000) {
+      errors.amount = "Minimum loan amount: ₱1,000.";
+    } else if (principal > availableLimit) {
+      errors.amount = `Amount exceeds your maximum available limit of ₱${availableLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`;
+    }
+
     if (!phoneNumber.trim() || phoneNumber.trim() === "+63 ") errors.phone = "Please enter your phone number.";
     else if (!isValidPhone(phoneNumber)) errors.phone = "Enter exactly 10 digits after +63.";
     const finalPurpose = purposeCategory === "Other" ? purpose.trim() : purposeCategory;
@@ -1034,7 +1137,7 @@ export default function LoansScreen({ navigation, route }) {
     if (!agreedToTerms) errors.terms = "Please agree to the Loan Terms & Conditions.";
     if (!idVerified) errors.validId = "Please capture and verify your government ID.";
     setFieldErrors(errors);
-  }, [applyModalOpen, loanType, loanAmount, phoneNumber, purposeCategory, purpose, monthsToPay, disbursementMethod, accountNumber, agreedToTerms, idVerified]);
+  }, [applyModalOpen, loanType, loanAmount, totalSavings, existingLoanBalance, phoneNumber, purposeCategory, purpose, monthsToPay, disbursementMethod, accountNumber, agreedToTerms, idVerified]);
 
   // Handle loan application submission
   const handleSubmitLoan = async () => {
@@ -1049,7 +1152,21 @@ export default function LoansScreen({ navigation, route }) {
       Alert.alert("Validation Error", msg);
     };
 
-    // Validation
+    // Validation - Check for pending/ongoing loan first
+    const pendingLoan = loansData.find(l => ["pending", "under_review", "in_review"].includes(l.status?.toLowerCase()));
+    if (pendingLoan) {
+      return showError(
+        `Pending Application in Progress:\nYou currently have a loan application (${pendingLoan.id || "under review"}) awaiting approval. You cannot submit a new application unless your pending loan is rejected or completed.`
+      );
+    }
+
+    const ongoingLoan = loansData.find(l => ["approved", "member_accepted", "active"].includes(l.status?.toLowerCase()));
+    if (ongoingLoan) {
+      return showError(
+        `Active Loan Exists:\nYou currently have an active or approved loan (${ongoingLoan.id}). You cannot apply for a new loan until your current loan is settled.`
+      );
+    }
+
     if (!loanType) return showError("Please select a loan type.");
     
     const rawLoanAmount = loanAmount.replace(/,/g, "");
@@ -1083,11 +1200,11 @@ export default function LoansScreen({ navigation, route }) {
     if (!idVerified) return showError("Your government ID has not been verified. Please retake your ID photo.");
 
     let multiplier = loanType === "Emergency" ? 1.5 : (loanType === "Personal" ? 2 : 1);
-    const baseLimit = totalSavings * multiplier;
-    const maxLimit = Math.max(0, baseLimit - existingLoanBalance);
+    const maxLoanable = totalSavings * multiplier;
+    const availableLimit = Math.max(0, maxLoanable - existingLoanBalance);
 
-    if (principal > maxLimit) {
-      return showError(`Insufficient Limit:\nYour max limit for a ${loanType} loan is ₱${baseLimit.toLocaleString()} (${multiplier}x of your ₱${totalSavings.toLocaleString()} savings). You have ₱${existingLoanBalance.toLocaleString()} in active unpaid loans, leaving ₱${maxLimit.toLocaleString()} available.`);
+    if (principal > availableLimit) {
+      return showError(`Insufficient Limit:\nYour Maximum Loanable Amount for a ${loanType} loan is ₱${maxLoanable.toLocaleString()} (${multiplier}x of your ₱${totalSavings.toLocaleString()} Total Savings).\n\nAvailable limit after active balance: ₱${availableLimit.toLocaleString()}.`);
     }
 
     submittingRef.current = true;
@@ -1096,24 +1213,40 @@ export default function LoansScreen({ navigation, route }) {
       const capturedLoanType = loanType;
       const capturedMonths = parseInt(monthsToPay);
 
-      // Build backend payload
+      // Build backend payload according to government_id_backend_guide.md
+      let rate = 0.01;
+      if (capturedLoanType === "Emergency") rate = 0.015;
+      if (capturedLoanType === "Personal") rate = 0.02;
+
       const backendPayload = {
         amount: principal,
         loanType: capturedLoanType.toLowerCase().replace(" ", "-"),
         type: capturedLoanType.toLowerCase().replace(" ", "-"),
+        purpose: finalPurpose,
         termMonths: capturedMonths,
+        interestRate: rate,
+        monthlyPayment: monthlyInstallment,
         disbursementMethod: disbursementMethod === "GCash" ? "e-wallet" : disbursementMethod === "Bank Transfer" ? "bank" : "cash",
         disbursementAccount: (disbursementMethod === "GCash" || disbursementMethod === "Bank Transfer") ? accountNumber.trim() : "",
         accountNumber: (disbursementMethod === "GCash" || disbursementMethod === "Bank Transfer") ? accountNumber.trim() : "",
-        purpose: finalPurpose,
         phoneNumber: phoneNumber.trim(),
-        selfieData: selfie?.base64 ? `data:image/jpeg;base64,${selfie.base64}` : "",
-        idData: validId?.base64 ? `data:image/jpeg;base64,${validId.base64}` : "",
-        coeData: coeDoc?.base64 ? `data:image/jpeg;base64,${coeDoc.base64}` : "",
-        itrData: itrDoc?.base64 ? `data:image/jpeg;base64,${itrDoc.base64}` : "",
-        payslipData: payslipDoc?.base64 ? `data:image/jpeg;base64,${payslipDoc.base64}` : "",
+        
+        selfieFileName: selfie ? (selfie.fileName || "selfie.jpg") : "",
+        selfieData: selfie?.base64 ? (selfie.base64.startsWith("data:") ? selfie.base64 : `data:image/jpeg;base64,${selfie.base64}`) : "",
+        
+        idFileName: validId ? (validId.fileName || "gov_id.jpg") : "",
+        idData: validId?.base64 ? (validId.base64.startsWith("data:") ? validId.base64 : `data:image/jpeg;base64,${validId.base64}`) : "",
+        
+        coeFileName: coeDoc ? (coeDoc.fileName || "coe.jpg") : "",
+        coeData: coeDoc?.base64 ? (coeDoc.base64.startsWith("data:") ? coeDoc.base64 : `data:image/jpeg;base64,${coeDoc.base64}`) : "",
+        
+        itrData: itrDoc?.base64 ? (itrDoc.base64.startsWith("data:") ? itrDoc.base64 : `data:image/jpeg;base64,${itrDoc.base64}`) : "",
+        
+        payslipFileName: payslipDoc ? (payslipDoc.fileName || "payslip.jpg") : "",
+        payslipData: payslipDoc?.base64 ? (payslipDoc.base64.startsWith("data:") ? payslipDoc.base64 : `data:image/jpeg;base64,${payslipDoc.base64}`) : "",
+        
         hasActiveLoan: hasExistingLoan === "Yes",
-        activeLoanScreenshotData: activeLoanDoc?.base64 ? `data:image/jpeg;base64,${activeLoanDoc.base64}` : null,
+        activeLoanScreenshotData: activeLoanDoc?.base64 ? (activeLoanDoc.base64.startsWith("data:") ? activeLoanDoc.base64 : `data:image/jpeg;base64,${activeLoanDoc.base64}`) : null,
         activeLoanScreenshotFileName: activeLoanDoc ? "active_loan.jpg" : null,
       };
 
@@ -1539,203 +1672,275 @@ export default function LoansScreen({ navigation, route }) {
 
         {/* All Loans Section */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textDark }]}>All Loans</Text>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: s(12) }}>
+            <Text style={[styles.sectionTitle, { color: colors.textDark, marginBottom: 0 }]}>All Loans</Text>
+          </View>
 
-          {loansData.length === 0 ? (
-            <EmptyState
-              icon="document-text-outline"
-              title="No Loans Yet"
-              subtitle="Your loan applications will appear here once you apply."
-            />
-          ) : (
-          loansData.map((loan, idx) => (
-            <View key={idx} style={[styles.loanCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-              {/* Section label for active loans */}
-              {loan.status === "active" && (
-                <Text style={{ fontSize: fs(15), fontWeight: "800", color: colors.textDark, marginBottom: 14 }}>Active Loan</Text>
-              )}
+          {/* Filter Tabs: All, Active, Completed, Pending */}
+          {loansData.length > 0 && (() => {
+            const completedCount = loansData.filter(l => ["completed", "paid", "finished"].includes((l.status || "").toLowerCase())).length;
+            const activeCount = loansData.filter(l => ["active", "approved", "member_accepted"].includes((l.status || "").toLowerCase())).length;
+            const pendingCount = loansData.filter(l => ["pending", "under_review", "in_review"].includes((l.status || "").toLowerCase())).length;
 
-              {/* Loan Header */}
-              <View style={styles.loanHeader}>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 3 }}>
-                    <Text style={[styles.loanId, { color: colors.textDark, marginBottom: 0 }]}>{loan.id}</Text>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        { marginBottom: 0, backgroundColor: 
-                          loan.status === "active" ? C.greenLight :
-                          loan.status === "approved" || loan.status === "member_accepted" ? "rgba(46,107,240,0.1)" :
-                          loan.status === "completed" ? "rgba(52,199,89,0.15)" :
-                          loan.status === "rejected" ? "rgba(231,76,60,0.1)" :
-                          C.orangeLight
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[styles.statusText, { color: 
-                          loan.status === "active" ? C.green :
-                          loan.status === "approved" || loan.status === "member_accepted" ? "#0D1F45" :
-                          loan.status === "completed" ? C.green :
-                          loan.status === "rejected" ? C.red :
-                          C.orange
-                        }]}
-                      >
-                        {loan.status === "member_accepted" ? "Accepted" : loan.status.charAt(0).toUpperCase() + loan.status.slice(1)}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={[styles.loanApplied, { color: colors.textMuted }]}>
-                    {loan.applied ? new Date(loan.applied).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "-"} · {loan.type} Loan
-                  </Text>
-                </View>
-                <View style={{ alignItems: "flex-end" }}>
-                 {/* Show the original applied amount; if admin modified, show both */}
-                 <Text style={[styles.loanAmount, { color: colors.textDark }]}>
-                   ₱{((loan.adminModified && loan.originalAmount) ? loan.originalAmount : (loan.amountNum || loan.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                 </Text>
-                 {loan.adminModified && loan.originalAmount && loan.originalAmount !== (loan.amountNum || loan.amount) ? (
-                   <Text style={{ fontSize: fs(11), color: C.orange, marginTop: 2 }}>Modified → ₱{(loan.amountNum || loan.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
-                 ) : (
-                   <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 2 }}>Applied amount</Text>
-                 )}
-                </View>
-              </View>
+            const tabs = [
+              { id: "all", label: `All (${loansData.length})` },
+              { id: "active", label: `Active (${activeCount})` },
+              { id: "completed", label: `Completed (${completedCount})` },
+              { id: "pending", label: `Pending (${pendingCount})` },
+            ];
 
-              {/* Accept Button - only shown when admin modified the loan terms */}
-              {loan.status === "approved" && loan.adminModified && (
-                <View style={{ marginBottom: s(8), marginHorizontal: 4 }}>
-                  <View style={{ backgroundColor: "rgba(255,149,0,0.08)", paddingVertical: s(10), paddingHorizontal: s(14), borderRadius: s(8), marginBottom: s(8), borderWidth: 1, borderColor: "rgba(255,149,0,0.2)" }}>
-                    <Text style={{ color: C.orange, fontSize: fs(12), fontWeight: "700", marginBottom: 4 }}>š ï¸ Admin Modified Your Loan Terms:</Text>
-                    {loan.originalAmount != null && loan.originalAmount !== loan.amountNum && (
-                      <Text style={{ color: colors.textDark, fontSize: fs(12), marginBottom: 2 }}>
-                        * Amount: ₱{loan.originalAmount.toLocaleString()} → ₱{(loan.amountNum || 0).toLocaleString()}
-                      </Text>
-                    )}
-                    {loan.originalTermMonths != null && loan.originalTermMonths !== loan.termMonths && (
-                      <Text style={{ color: colors.textDark, fontSize: fs(12), marginBottom: 2 }}>
-                        * Term: {loan.originalTermMonths} months → {loan.termMonths} months
-                      </Text>
-                    )}
-                    <Text style={{ color: colors.textMuted, fontSize: fs(11), marginTop: 4 }}>Please review and accept the updated terms below.</Text>
-                  </View>
+            return (
+              <View style={{ flexDirection: "row", gap: s(8), marginBottom: s(14), flexWrap: "wrap" }}>
+                {tabs.map((tab) => (
                   <TouchableOpacity
-                    style={{ backgroundColor: "#0D1F45", paddingVertical: s(10), paddingHorizontal: s(20), borderRadius: s(8), alignItems: "center" }}
-                    activeOpacity={0.8}
-                    onPress={() => handleAcceptLoan(loan.id)}
-                  >
-                    <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 13 }}>✓ Accept Modified Loan Terms</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* Awaiting disbursement message */}
-              {loan.status === "member_accepted" && (
-                <View style={{ backgroundColor: "rgba(46,107,240,0.08)", paddingVertical: s(10), paddingHorizontal: s(14), borderRadius: s(8), marginBottom: s(8), marginHorizontal: 4 }}>
-                  <Text style={{ color: "#0D1F45", fontSize: fs(12), fontWeight: "600", textAlign: "center" }}>⌛ Awaiting fund disbursement by secretary</Text>
-                </View>
-              )}
-
-              {/*  ▬▬ Active Loan: Repayment Progress + Stats + 3 Buttons  ▬▬ */}
-              {loan.status === "active" && (
-                <>
-                  {/* Repayment Progress */}
-                  <View style={{ marginTop: 4, marginBottom: 14 }}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                      <Text style={{ fontSize: fs(12), color: "#0D1F45", fontWeight: "600" }}>Repayment progress</Text>
-                      <Text style={{ fontSize: fs(12), color: colors.textMuted }}>{loan.paidMonths || 0} of {loan.termMonths || 0} payments made</Text>
-                    </View>
-                    <View style={{ height: 6, backgroundColor: colors.inputBg || "#E8ECF0", borderRadius: 3, overflow: "hidden" }}>
-                      <View style={{ height: "100%", backgroundColor: "#0D1F45", borderRadius: 3, width: `${loan.termMonths ? Math.min(100, ((loan.paidMonths || 0) / loan.termMonths) * 100) : 0}%` }} />
-                    </View>
-                  </View>
-
-                  {/* Stats Row - 3 cards */}
-                  <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
-                    <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
-                      <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Monthly payment</Text>
-                      <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>₱{(loan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
-                    </View>
-                    <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
-                      <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Remaining balance</Text>
-                      <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>₱{(loan.remainingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</Text>
-                    </View>
-                    <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
-                      <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Next due date</Text>
-                      <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>{loan.nextPayment || "-"}</Text>
-                    </View>
-                  </View>
-
-                  {/* 3 Action Buttons: View schedule, Loan details, Pay now */}
-                  <View style={{ flexDirection: "row", gap: 8 }}>
-                    <TouchableOpacity
-                      style={{ flex: 1, borderWidth: 1, borderColor: colors.cardBorder || "#E0E5EC", borderRadius: s(8), paddingVertical: s(10), alignItems: "center", backgroundColor: colors.cardBg }}
-                      activeOpacity={0.7}
-                      onPress={() => handleOpenSchedule(loan)}
-                    >
-                      <Text style={{ fontSize: 12.5, fontWeight: "700", color: colors.textDark }}>View schedule</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={{ flex: 1, borderWidth: 1, borderColor: colors.cardBorder || "#E0E5EC", borderRadius: s(8), paddingVertical: s(10), alignItems: "center", backgroundColor: colors.cardBg }}
-                      activeOpacity={0.7}
-                      onPress={() => {
-                        setSelectedLoan(loan);
-                        setDetailsModalOpen(true);
-                      }}
-                    >
-                      <Text style={{ fontSize: 12.5, fontWeight: "700", color: colors.textDark }}>Loan details</Text>
-                    </TouchableOpacity>
-                    {loan.status === "active" && (
-                      <TouchableOpacity
-                        style={{ flex: 1, backgroundColor: C.blue, borderRadius: s(8), paddingVertical: s(10), alignItems: "center" }}
-                        activeOpacity={0.8}
-                        onPress={() => handleOpenPayNow(loan)}
-                      >
-                        <Text style={{ fontSize: 12.5, fontWeight: "700", color: "#FFF" }}>Pay now</Text>
-                      </TouchableOpacity>
-                    )}
-                    {loan.status === "completed" && (
-                      <View style={{ flex: 1, backgroundColor: "rgba(52,199,89,0.1)", borderRadius: s(8), paddingVertical: s(10), alignItems: "center" }}>
-                        <Text style={{ fontSize: 12.5, fontWeight: "700", color: C.green }}>Fully Paid</Text>
-                      </View>
-                    )}
-                  </View>
-                </>
-              )}
-
-              {/*  ▬▬ Non-active loan: Awaiting Release / Completed UI  ▬▬ */}
-              {loan.status !== "active" && loan.status !== "completed" && (
-                <>
-                  {loan.status === "approved" && (
-                    <Text style={{ fontSize: fs(12), color: colors.textMuted, marginBottom: s(12), marginTop: -4 }}>
-                      Review and accept the terms above to proceed.
-                    </Text>
-                  )}
-                  {loan.status === "member_accepted" && (
-                    <Text style={{ fontSize: fs(12), color: colors.textMuted, marginBottom: s(12), marginTop: -4, textAlign: "center" }}>
-                      Your loan will become active once funds are disbursed.
-                    </Text>
-                  )}
-                  {loan.status === "pending" && (
-                    <Text style={{ fontSize: fs(12), color: colors.textMuted, marginBottom: s(12), marginTop: -4 }}>
-                      Your application is under review by the administration.
-                    </Text>
-                  )}
-                  <TouchableOpacity 
-                    style={styles.detailsBtn} 
-                    activeOpacity={0.75}
-                    onPress={() => {
-                      setSelectedLoan(loan);
-                      setDetailsModalOpen(true);
+                    key={tab.id}
+                    style={{
+                      paddingHorizontal: s(14),
+                      paddingVertical: s(6),
+                      borderRadius: s(20),
+                      backgroundColor: loanFilterTab === tab.id ? C.blue : colors.inputBg,
+                      borderWidth: 1,
+                      borderColor: loanFilterTab === tab.id ? C.blue : colors.inputBorder,
                     }}
+                    onPress={() => setLoanFilterTab(tab.id)}
+                    activeOpacity={0.7}
                   >
-                    <Text style={styles.detailsBtnText}>View Details</Text>
+                    <Text style={{
+                      fontSize: fs(12),
+                      fontWeight: loanFilterTab === tab.id ? "700" : "500",
+                      color: loanFilterTab === tab.id ? "#FFF" : colors.textDark,
+                    }}>
+                      {tab.label}
+                    </Text>
                   </TouchableOpacity>
-                </>
-              )}
-            </View>
-          ))
-          )}
+                ))}
+              </View>
+            );
+          })()}
+
+          {(() => {
+            const filtered = loansData.filter((loan) => {
+              const st = (loan.status || "").toLowerCase();
+              if (loanFilterTab === "active") return ["active", "approved", "member_accepted"].includes(st);
+              if (loanFilterTab === "completed") return ["completed", "paid", "finished"].includes(st);
+              if (loanFilterTab === "pending") return ["pending", "under_review", "in_review"].includes(st);
+              return true;
+            });
+
+            if (filtered.length === 0) {
+              return (
+                <EmptyState
+                  icon="document-text-outline"
+                  title={loanFilterTab === "completed" ? "No Completed Loans" : "No Loans Found"}
+                  subtitle={loanFilterTab === "completed" ? "You don't have any completed or fully paid loans yet." : "No loan records match the selected filter."}
+                />
+              );
+            }
+
+            return filtered.map((loan, idx) => {
+              const isCompleted = ["completed", "paid", "finished"].includes((loan.status || "").toLowerCase());
+              const isExpanded = !!expandedCompletedLoans[loan.id];
+
+              return (
+                <View key={loan.id || idx} style={[styles.loanCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+                  {/* Section label for active loans */}
+                  {loan.status === "active" && (
+                    <Text style={{ fontSize: fs(15), fontWeight: "800", color: colors.textDark, marginBottom: 14 }}>Active Loan</Text>
+                  )}
+
+                  {/* Loan Header */}
+                  <TouchableOpacity
+                    activeOpacity={isCompleted ? 0.7 : 1}
+                    onPress={() => {
+                      if (isCompleted) {
+                        setExpandedCompletedLoans(prev => ({ ...prev, [loan.id]: !prev[loan.id] }));
+                      }
+                    }}
+                    style={[styles.loanHeader, { gap: s(12), alignItems: "flex-start" }]}
+                  >
+                    <View style={{ flex: 1, paddingRight: s(4), justifyContent: "center" }}>
+                      <Text style={[styles.loanId, { fontSize: fs(16), fontWeight: "800", color: colors.textDark, marginBottom: s(3) }]}>{loan.id}</Text>
+                      <Text style={{ fontSize: fs(13), fontWeight: "700", color: colors.textDark, marginBottom: s(3) }}>
+                        {(() => {
+                          const t = loan.type ? String(loan.type).trim() : "";
+                          const title = t.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.slice(1).toLowerCase());
+                          return title.toLowerCase().includes("loan") ? title : `${title} Loan`;
+                        })()}
+                      </Text>
+                      <Text style={{ fontSize: fs(12), fontWeight: "500", color: colors.textMuted }}>
+                        Applied {loan.applied ? new Date(loan.applied).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "-"}
+                      </Text>
+                    </View>
+
+                    <View style={{ alignItems: "flex-end", flexShrink: 0 }}>
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          { 
+                            marginBottom: s(6), 
+                            backgroundColor: 
+                              loan.status === "active" ? C.greenLight :
+                              loan.status === "approved" || loan.status === "member_accepted" ? "rgba(46,107,240,0.1)" :
+                              isCompleted ? "rgba(52,199,89,0.15)" :
+                              loan.status === "rejected" ? "rgba(231,76,60,0.1)" :
+                              C.orangeLight
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[styles.statusText, { color: 
+                            loan.status === "active" ? C.green :
+                            loan.status === "approved" || loan.status === "member_accepted" ? "#0D1F45" :
+                            isCompleted ? C.green :
+                            loan.status === "rejected" ? C.red :
+                            C.orange
+                          }]}
+                        >
+                          {loan.status === "member_accepted" ? "Accepted" : isCompleted ? "Completed" : loan.status.charAt(0).toUpperCase() + loan.status.slice(1)}
+                        </Text>
+                      </View>
+                      <Text style={[styles.loanAmount, { color: colors.textDark }]}>
+                        ₱{((loan.adminModified && loan.originalAmount) ? loan.originalAmount : (loan.amountNum || loan.amount || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Text>
+                      {loan.adminModified && loan.originalAmount && loan.originalAmount !== (loan.amountNum || loan.amount) ? (
+                        <Text style={{ fontSize: fs(11), color: C.orange, marginTop: 2 }}>Modified → ₱{(loan.amountNum || loan.amount || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                      ) : (
+                        <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 2 }}>
+                          {isCompleted ? "Settled amount" : "Applied amount"}
+                        </Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Accept Button - only shown when admin modified the loan terms */}
+                  {loan.status === "approved" && loan.adminModified && (
+                    <View style={{ marginBottom: s(8), marginHorizontal: 4 }}>
+                      <View style={{ backgroundColor: "rgba(255,149,0,0.08)", paddingVertical: s(10), paddingHorizontal: s(14), borderRadius: s(8), marginBottom: s(8), borderWidth: 1, borderColor: "rgba(255,149,0,0.2)" }}>
+                        <Text style={{ color: C.orange, fontSize: fs(12), fontWeight: "700", marginBottom: 4 }}>⚠️ Admin Modified Your Loan Terms:</Text>
+                        {loan.originalAmount != null && loan.originalAmount !== loan.amountNum && (
+                          <Text style={{ color: colors.textDark, fontSize: fs(12), marginBottom: 2 }}>
+                            • Amount: ₱{loan.originalAmount.toLocaleString()} → ₱{(loan.amountNum || 0).toLocaleString()}
+                          </Text>
+                        )}
+                        {loan.originalTermMonths != null && loan.originalTermMonths !== loan.termMonths && (
+                          <Text style={{ color: colors.textDark, fontSize: fs(12), marginBottom: 2 }}>
+                            • Term: {loan.originalTermMonths} months → {loan.termMonths} months
+                          </Text>
+                        )}
+                        <Text style={{ color: colors.textMuted, fontSize: fs(11), marginTop: 4 }}>Please review and accept the updated terms below.</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={{ backgroundColor: "#0D1F45", paddingVertical: s(10), paddingHorizontal: s(20), borderRadius: s(8), alignItems: "center" }}
+                        activeOpacity={0.8}
+                        onPress={() => handleAcceptLoan(loan.id)}
+                      >
+                        <Text style={{ color: "#FFF", fontWeight: "700", fontSize: 13 }}>✓ Accept Modified Loan Terms</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {/* Awaiting disbursement message */}
+                  {loan.status === "member_accepted" && (
+                    <View style={{ backgroundColor: "rgba(46,107,240,0.08)", paddingVertical: s(10), paddingHorizontal: s(14), borderRadius: s(8), marginBottom: s(8), marginHorizontal: 4 }}>
+                      <Text style={{ color: "#0D1F45", fontSize: fs(12), fontWeight: "600", textAlign: "center" }}>⌛ Awaiting fund disbursement by secretary</Text>
+                    </View>
+                  )}
+
+                  {/* Active Loan: Repayment Progress + Stats + Buttons */}
+                  {loan.status === "active" && (
+                    <>
+                      <View style={{ marginTop: 4, marginBottom: 14 }}>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                          <Text style={{ fontSize: fs(12), color: "#0D1F45", fontWeight: "600" }}>Repayment progress</Text>
+                          <Text style={{ fontSize: fs(12), color: colors.textMuted }}>{loan.paidMonths || 0} of {loan.termMonths || 0} payments made</Text>
+                        </View>
+                        <View style={{ height: 6, backgroundColor: colors.inputBg || "#E8ECF0", borderRadius: 3, overflow: "hidden" }}>
+                          <View style={{ height: "100%", backgroundColor: "#0D1F45", borderRadius: 3, width: `${loan.termMonths ? Math.min(100, ((loan.paidMonths || 0) / loan.termMonths) * 100) : 0}%` }} />
+                        </View>
+                      </View>
+
+                      <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
+                        <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
+                          <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Monthly payment</Text>
+                          <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>
+                            {typeof loan.monthlyPayment === 'number' ? `₱${loan.monthlyPayment.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : loan.monthlyPayment}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
+                          <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Remaining balance</Text>
+                          <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>
+                            {typeof loan.remainingBalance === 'number' ? `₱${loan.remainingBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : loan.remainingBalance}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
+                          <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Next due date</Text>
+                          <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>{loan.nextPayment || "-"}</Text>
+                        </View>
+                      </View>
+
+                      <View style={{ flexDirection: "row", gap: 8 }}>
+                        <TouchableOpacity
+                          style={{ flex: 1, borderWidth: 1, borderColor: colors.cardBorder || "#E0E5EC", borderRadius: s(8), paddingVertical: s(10), alignItems: "center", backgroundColor: colors.cardBg }}
+                          activeOpacity={0.7}
+                          onPress={() => handleOpenSchedule(loan)}
+                        >
+                          <Text style={{ fontSize: 12.5, fontWeight: "700", color: colors.textDark }}>View schedule</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={{ flex: 1, borderWidth: 1, borderColor: colors.cardBorder || "#E0E5EC", borderRadius: s(8), paddingVertical: s(10), alignItems: "center", backgroundColor: colors.cardBg }}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            setSelectedLoan(loan);
+                            setDetailsModalOpen(true);
+                          }}
+                        >
+                          <Text style={{ fontSize: 12.5, fontWeight: "700", color: colors.textDark }}>Loan details</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={{ flex: 1, backgroundColor: C.blue, borderRadius: s(8), paddingVertical: s(10), alignItems: "center" }}
+                          activeOpacity={0.8}
+                          onPress={() => handleOpenPayNow(loan)}
+                        >
+                          <Text style={{ fontSize: 12.5, fontWeight: "700", color: "#FFF" }}>Pay now</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  )}
+
+                  {/* Non-Active Loans (Completed, Pending, Approved, Member Accepted, Rejected) */}
+                  {loan.status !== "active" && (
+                    <View style={{ marginTop: s(8) }}>
+                      {loan.status === "approved" && (
+                        <Text style={{ fontSize: fs(12), color: colors.textMuted, marginBottom: s(12) }}>
+                          Review and accept the terms above to proceed.
+                        </Text>
+                      )}
+                      {loan.status === "member_accepted" && (
+                        <Text style={{ fontSize: fs(12), color: colors.textMuted, marginBottom: s(12), textAlign: "center" }}>
+                          Your loan will become active once funds are disbursed.
+                        </Text>
+                      )}
+                      {loan.status === "pending" && (
+                        <Text style={{ fontSize: fs(12), color: colors.textMuted, marginBottom: s(12) }}>
+                          Your application is under review by the administration.
+                        </Text>
+                      )}
+                      <TouchableOpacity 
+                        style={styles.detailsBtn} 
+                        activeOpacity={0.75}
+                        onPress={() => {
+                          setSelectedLoan(loan);
+                          setDetailsModalOpen(true);
+                        }}
+                      >
+                        <Text style={styles.detailsBtnText}>View Details</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              );
+            });
+          })()}
         </View>
 
         <View style={styles.bottomPad} />
@@ -1910,18 +2115,61 @@ export default function LoansScreen({ navigation, route }) {
               keyboardShouldPersistTaps="handled"
             >
 
+              {(() => {
+                const pLoan = loansData.find(l => ["pending", "under_review", "in_review"].includes(l.status?.toLowerCase()));
+                if (pLoan) {
+                  return (
+                    <View style={{ backgroundColor: "rgba(255,149,0,0.12)", borderWidth: 1, borderColor: "rgba(255,149,0,0.4)", borderRadius: s(12), padding: s(14), marginBottom: s(16) }}>
+                      <Text style={{ color: C.orange, fontSize: fs(14), fontWeight: "800", marginBottom: 4 }}>
+                        ⚠️ Pending Application in Progress
+                      </Text>
+                      <Text style={{ color: colors.textDark, fontSize: fs(12.5), lineHeight: 18 }}>
+                        You currently have a loan application ({pLoan.id}) under review. You cannot submit another application unless your pending loan is rejected or completed.
+                      </Text>
+                    </View>
+                  );
+                }
+                const oLoan = loansData.find(l => ["approved", "member_accepted", "active"].includes(l.status?.toLowerCase()));
+                if (oLoan) {
+                  return (
+                    <View style={{ backgroundColor: "rgba(231,76,60,0.1)", borderWidth: 1, borderColor: "rgba(231,76,60,0.3)", borderRadius: s(12), padding: s(14), marginBottom: s(16) }}>
+                      <Text style={{ color: C.red, fontSize: fs(14), fontWeight: "800", marginBottom: 4 }}>
+                        ⚠️ Active Loan Exists
+                      </Text>
+                      <Text style={{ color: colors.textDark, fontSize: fs(12.5), lineHeight: 18 }}>
+                        You currently have an active or approved loan ({oLoan.id}). You cannot apply for a new loan until your current loan is fully settled.
+                      </Text>
+                    </View>
+                  );
+                }
+                return null;
+              })()}
+
 
               {/* Loan Type Selection */}
               <View style={styles.formGroup}>
                 <Text style={[styles.formLabel, { color: colors.textDark }]}>Select Loan Type *</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: s(10), paddingBottom: 10 }}>
+                <ScrollView
+                  ref={loanTypeScrollViewRef}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  onLayout={(e) => {
+                    loanTypeContainerWidth.current = e.nativeEvent.layout.width;
+                  }}
+                  contentContainerStyle={{ gap: s(10), paddingBottom: 10 }}
+                >
                   {LOAN_TYPES.map((type) => {
                     const isSelected = loanType === type.value;
-                    const isExpanded = expandedLoanType === type.value;
                     const maxLimit = totalSavings * type.multiplier;
                     return (
                       <TouchableOpacity
                         key={type.value}
+                        onLayout={(e) => {
+                          loanTypeCardLayouts.current[type.value] = {
+                            x: e.nativeEvent.layout.x,
+                            width: e.nativeEvent.layout.width,
+                          };
+                        }}
                         style={[
                           styles.loanTypeCard,
                           { backgroundColor: colors.inputBg, borderColor: colors.inputBorder },
@@ -1930,6 +2178,7 @@ export default function LoansScreen({ navigation, route }) {
                         onPress={() => {
                           setLoanType(type.value);
                           setMonthsToPay("");
+                          scrollToCenterType(type.value);
                         }}
                         activeOpacity={0.7}
                       >
@@ -1942,26 +2191,15 @@ export default function LoansScreen({ navigation, route }) {
                             </View>
                           </View>
                         </View>
-                        
-                        <TouchableOpacity
-                          style={styles.moreInfoBtn}
-                          onPress={() => setExpandedLoanType(isExpanded ? null : type.value)}
-                        >
-                          <Text style={styles.moreInfoText}>
-                            {isExpanded ? "∧ Less Info" : "∨ More Info"}
-                          </Text>
-                        </TouchableOpacity>
 
-                        {isExpanded && (
-                          <View style={styles.expandedInfo}>
-                            <Text style={styles.expandedDesc}>{type.description}</Text>
-                            <View style={styles.expandedBadges}>
-                              <View style={styles.expandedBadge}><Text style={styles.expandedBadgeText}>{type.rateLabel}</Text></View>
-                              <View style={styles.expandedBadge}><Text style={styles.expandedBadgeText}>{type.monthsLabel}</Text></View>
-                            </View>
-                            <Text style={[styles.expandedMax, isSelected && { color: C.blue }]}>Max: ₱{maxLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                        <View style={styles.expandedInfo}>
+                          <Text style={styles.expandedDesc}>{type.description}</Text>
+                          <View style={styles.expandedBadges}>
+                            <View style={styles.expandedBadge}><Text style={styles.expandedBadgeText}>{type.rateLabel}</Text></View>
+                            <View style={styles.expandedBadge}><Text style={styles.expandedBadgeText}>{type.monthsLabel}</Text></View>
                           </View>
-                        )}
+                          <Text style={[styles.expandedMax, isSelected && { color: C.blue }]}>Max: ₱{maxLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                        </View>
                       </TouchableOpacity>
                     );
                   })}
@@ -1972,7 +2210,7 @@ export default function LoansScreen({ navigation, route }) {
               {/* Loan Amount */}
               <View style={styles.formGroup}>
                 <Text style={[styles.formLabel, { color: colors.textDark }]}>Loan Amount *</Text>
-                <View style={[styles.inputWrapper, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}>
+                <View style={[styles.inputWrapper, { backgroundColor: colors.inputBg, borderColor: (fieldErrors.amount && loanAmount) ? "#E74C3C" : colors.inputBorder }]}>
                   <Text style={[styles.currencySymbol, { color: colors.textDark }]}>₱</Text>
                   <TextInput
                     style={[styles.textInput, { color: colors.textDark }]}
@@ -1991,13 +2229,25 @@ export default function LoansScreen({ navigation, route }) {
                   let multiplier = 1;
                   if (loanType === "Emergency") multiplier = 1.5;
                   if (loanType === "Personal") multiplier = 2;
-                  const baseLimit = totalSavings * multiplier;
-                  const maxLimit = Math.max(0, baseLimit - existingLoanBalance);
+                  const maxLoanable = totalSavings * multiplier;
+                  const availableLimit = Math.max(0, maxLoanable - existingLoanBalance);
                   return (
-                    <Text style={[styles.formHint, { color: colors.textMuted, marginTop: 6 }]}>
-                      Maximum limit: ₱{baseLimit.toLocaleString()} ({multiplier}x of ₱{totalSavings.toLocaleString()} savings).{"\n"}
-                      Active Balance: ₱{existingLoanBalance.toLocaleString()} | Available Limit: ₱{maxLimit.toLocaleString()}
-                    </Text>
+                    <View style={{ marginTop: 8, backgroundColor: "rgba(46,107,240,0.06)", borderRadius: s(8), padding: s(10), borderWidth: 1, borderColor: "rgba(46,107,240,0.15)" }}>
+                      <Text style={{ fontSize: fs(12), color: colors.textDark, fontWeight: "600" }}>
+                        Total Savings: <Text style={{ fontWeight: "800", color: C.blue }}>₱{totalSavings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                      </Text>
+                      <Text style={{ fontSize: fs(12), color: colors.textDark, marginTop: 2 }}>
+                        Max Loanable ({loanType}): <Text style={{ fontWeight: "800", color: C.green }}>₱{maxLoanable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text> ({multiplier}x of Total Savings)
+                      </Text>
+                      {existingLoanBalance > 0 && (
+                        <Text style={{ fontSize: fs(11.5), color: C.orange, marginTop: 2 }}>
+                          Active Loan Balance: -₱{existingLoanBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </Text>
+                      )}
+                      <Text style={{ fontSize: fs(12), color: colors.textDark, fontWeight: "700", marginTop: 4, paddingTop: 4, borderTopWidth: 1, borderTopColor: "rgba(46,107,240,0.15)" }}>
+                        Available Limit: <Text style={{ fontWeight: "800", color: C.blue }}>₱{availableLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                      </Text>
+                    </View>
                   );
                 })() : null}
                 {fieldErrors.amount && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: 4 }}>{fieldErrors.amount}</Text>}
@@ -2467,13 +2717,15 @@ export default function LoansScreen({ navigation, route }) {
                   overflow: 'hidden'
                 }}>
                   <ScrollView nestedScrollEnabled={true} style={{ padding: 12 }}>
+                    <Text style={{ fontWeight: '800', fontSize: fs(15), color: colors.textDark, marginBottom: 8 }}>IsangDiwa — Loan Terms & Conditions</Text>
+                    
                     <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>1. Eligibility Requirements</Text>
-                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Active co-op member in good standing with minimum ₱1,000 confirmed savings.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Active officer in good standing with minimum ₱1,000 confirmed savings.</Text>
                     <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Borrowing limit depends directly on accumulated total savings.</Text>
 
                     <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>2. Application & Approval Process</Text>
-                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• All applications are evaluated by co-op administration officers.</Text>
-                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Approval notice will be sent via mobile app notifications.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• All applications are evaluated by loan staff.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Approval notice will be sent via notifications.</Text>
 
                     <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>3. Maximum Loan Limits</Text>
                     <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Personal Loan: up to 2× of total active savings.</Text>
@@ -2502,13 +2754,13 @@ export default function LoansScreen({ navigation, route }) {
                     <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Additional proof of ongoing balance may be requested.</Text>
 
                     <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>9. Disbursement Options</Text>
-                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Cash pickup at co-op office or direct transfer via GCash / Bank.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Cash pickup at office or direct transfer via GCash / Bank.</Text>
                     <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Account details must match member name on record.</Text>
 
                     <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>10. Repayment Terms</Text>
                     <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Payments are monthly based on the selected term.</Text>
                     <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Due dates are fixed upon approval.</Text>
-                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Accepted payment methods: Cash, Bank transfer, GCash.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Accepted payment methods: Cash, Bank Transfer, GCash.</Text>
 
                     <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>11. Early Payment Policy</Text>
                     <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Members may repay early at any time.</Text>
@@ -2518,7 +2770,7 @@ export default function LoansScreen({ navigation, route }) {
                     <Text style={{ fontWeight: '700', fontSize: fs(14), color: colors.textDark, marginBottom: 4 }}>12. Late Payment and Penalties</Text>
                     <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Late payments may incur an ongoing penalty fee.</Text>
                     <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 2 }}>• Accounts past due beyond 60 days will be escalated.</Text>
-                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Reach out to administration to apply for extension.</Text>
+                    <Text style={{ fontSize: fs(13), color: colors.textMuted, marginBottom: 12 }}>• Reach out to administration to apply for an extension.</Text>
                     <View style={{ height: 12 }} />
                   </ScrollView>
                 </View>
@@ -2577,20 +2829,20 @@ export default function LoansScreen({ navigation, route }) {
                 <Text style={styles.breakdownTitle}>Financial Breakdown</Text>
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>Principal:</Text>
-                  <Text style={styles.breakdownValue}>₱{(parseFloat(loanAmount) || 0).toLocaleString()}</Text>
+                  <Text style={styles.breakdownValue}>₱{(parseFloat(loanAmount) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>Interest ({loanType === "Emergency" ? "1.5%/mo" : loanType === "Personal" ? "2%/mo" : "1%/mo"}):</Text>
-                  <Text style={[styles.breakdownValue, { color: C.red }]}>+ ₱{interestAmount.toLocaleString()}</Text>
+                  <Text style={[styles.breakdownValue, { color: C.red }]}>+ ₱{interestAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
                 <View style={[styles.breakdownRow, styles.breakdownTotalRow]}>
                   <Text style={styles.breakdownLabelTotal}>Total Repayment:</Text>
-                  <Text style={styles.breakdownValueTotal}>₱{totalRepayment.toLocaleString()}</Text>
+                  <Text style={styles.breakdownValueTotal}>₱{totalRepayment.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>Monthly Installment:</Text>
                   <Text style={[styles.breakdownValue, { color: C.blue, fontWeight: "800" }]}>
-                    ₱{monthlyInstallment.toLocaleString(undefined, { maximumFractionDigits: 2 })} / mo
+                    ₱{monthlyInstallment.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / mo
                   </Text>
                 </View>
               </View>
@@ -2614,18 +2866,25 @@ export default function LoansScreen({ navigation, route }) {
                 </View>
               ) : null}
 
-              <TouchableOpacity
-                style={[styles.submitBtn, submitting && { opacity: 0.6 }]}
-                activeOpacity={0.8}
-                onPress={handleSubmitLoan}
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <Text style={styles.submitBtnText}>Submit Application</Text>
-                )}
-              </TouchableOpacity>
+              {(() => {
+                const hasPendingOrOngoing = loansData.some(l => ["pending", "under_review", "in_review", "approved", "member_accepted", "active"].includes(l.status?.toLowerCase()));
+                return (
+                  <TouchableOpacity
+                    style={[styles.submitBtn, (submitting || hasPendingOrOngoing) && { opacity: 0.5, backgroundColor: "#6B7FA3" }]}
+                    activeOpacity={0.8}
+                    onPress={handleSubmitLoan}
+                    disabled={submitting || hasPendingOrOngoing}
+                  >
+                    {submitting ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Text style={styles.submitBtnText}>
+                        {hasPendingOrOngoing ? "Cannot Apply (Pending or Active Loan Exists)" : "Submit Application"}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })()}
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -2698,18 +2957,29 @@ export default function LoansScreen({ navigation, route }) {
                     </View>
                     <View style={{ flex: 1, marginLeft: 12 }}>
                       <Text style={styles.detailsId}>{selectedLoan.id}</Text>
-                      <Text style={styles.detailsType}>{selectedLoan.type} Loan</Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        { backgroundColor: selectedLoan.statusBg, marginBottom: 0 },
-                      ]}
-                    >
-                      <Text style={[styles.statusText, { color: selectedLoan.statusColor }]}>
-                        {selectedLoan.status}
+                      <Text style={styles.detailsType}>
+                        {(() => {
+                          const t = selectedLoan.type ? String(selectedLoan.type).trim() : "";
+                          const title = t.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.slice(1).toLowerCase());
+                          return title.toLowerCase().includes("loan") ? title : `${title} Loan`;
+                        })()}
                       </Text>
                     </View>
+                    {(() => {
+                      const st = (selectedLoan.status || "").toLowerCase();
+                      const isComp = ["completed", "paid", "finished"].includes(st);
+                      const bg = selectedLoan.statusBg || (isComp ? "rgba(52,199,89,0.15)" : st === "active" ? C.greenLight : st === "rejected" ? "rgba(231,76,60,0.1)" : C.orangeLight);
+                      const color = selectedLoan.statusColor || (isComp ? C.green : st === "active" ? C.green : st === "rejected" ? C.red : C.orange);
+                      const statusLabel = isComp ? "Completed" : selectedLoan.status ? (selectedLoan.status.charAt(0).toUpperCase() + selectedLoan.status.slice(1)) : "Pending";
+
+                      return (
+                        <View style={[styles.statusBadge, { backgroundColor: bg, marginBottom: 0 }]}>
+                          <Text style={[styles.statusText, { color: color }]}>
+                            {statusLabel}
+                          </Text>
+                        </View>
+                      );
+                    })()}
                   </View>
 
                   <View style={styles.detailsCard}>
@@ -2779,6 +3049,19 @@ export default function LoansScreen({ navigation, route }) {
                       </View>
                     </View>
                   ) : null}
+
+                  {["completed", "paid", "finished", "active"].includes((selectedLoan.status || "").toLowerCase()) && (
+                    <TouchableOpacity
+                      style={[styles.submitBtn, { backgroundColor: C.blue, marginBottom: 10 }]}
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        setDetailsModalOpen(false);
+                        handleOpenSchedule(selectedLoan);
+                      }}
+                    >
+                      <Text style={styles.submitBtnText}>View Repayment Schedule</Text>
+                    </TouchableOpacity>
+                  )}
 
                   <TouchableOpacity
                     style={[styles.submitBtn, { backgroundColor: C.textDark }]}

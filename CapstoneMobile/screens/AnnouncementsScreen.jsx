@@ -281,7 +281,7 @@ export default function AnnouncementsScreen({ navigation, route }) {
                       ) : null}
 
                       <Text style={[styles.annTitle, { color: colors.textDark }]} numberOfLines={2}>{ann.title}</Text>
-                      <Text style={[styles.annDesc, { color: colors.textMuted }]} numberOfLines={2}>{ann.description || ann.message}</Text>
+                      <Text style={[styles.annDesc, { color: colors.textMuted }]} numberOfLines={2}>{ann.description || ann.message || ann.body}</Text>
                       
                       <View style={styles.annMeta}>
                         {ann.time && (
@@ -355,7 +355,7 @@ export default function AnnouncementsScreen({ navigation, route }) {
                 )}
 
                 <Text style={[styles.modalDesc, { color: colors.textDark }]}>
-                  {selectedAnnouncement?.description || selectedAnnouncement?.message}
+                  {selectedAnnouncement?.description || selectedAnnouncement?.message || selectedAnnouncement?.body}
                 </Text>
               </View>
             </ScrollView>
