@@ -237,7 +237,7 @@ export default function DonationsScreen({ navigation, route }) {
       }
     });
     if (totalAmt === 0) return { total: 0, slices: [] };
-    const ROW_COLORS = ['#0D1F45', '#0D1F45', '#34C759', '#F5A623', '#AF52DE', '#FF9500', '#E74C3C'];
+    const ROW_COLORS = ['#0D1F45', '#2E6BF0', '#F5A623', '#1B9CFC', '#0A3D62', '#48DBFB', '#D4AC0D', '#3742FA', '#6AB0DE', '#E1B12C'];
     const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
     return {
       total: totalAmt,
@@ -839,18 +839,12 @@ export default function DonationsScreen({ navigation, route }) {
               </View>
               <Text style={[styles.summaryValueSmall, { color: colors.textDark }]}>₱{filteredAmount.toLocaleString()}</Text>
             </View>
-            <View style={[styles.summaryIconBox, { backgroundColor: C.greenLight }]}>
-              <Image source={ICONS.wallet} style={[styles.summaryIcon, { tintColor: C.green }]} resizeMode="contain" />
-            </View>
           </Animated.View>
 
           <Animated.View style={[styles.summaryCard, styles.summaryCardHalf, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder, opacity: summaryAnims[2].opacity, transform: [{ translateY: summaryAnims[2].translateY }] }]}>
             <View style={styles.summaryLeft}>
               <Text style={[styles.summaryLabel, { color: colors.textMuted }]}>Total Donations</Text>
               <Text style={[styles.summaryValueSmall, { color: colors.textDark }]}>{donationHistory.filter(d => (d.status || '').toLowerCase() !== 'rejected').length}</Text>
-            </View>
-            <View style={[styles.summaryIconBox, { backgroundColor: C.blueLight }]}>
-              <Image source={ICONS.document} style={[styles.summaryIcon, { tintColor: C.blue }]} resizeMode="contain" />
             </View>
           </Animated.View>
 

@@ -52,6 +52,7 @@ const LoanCalendar = ({ loans, notes, onDatePress, colors, currentMonth, setCurr
     const y = currentMonth.getFullYear();
     const daysInMonth = getDaysInMonth(m, y);
     const firstDay = getFirstDayOfMonth(m, y);
+    const todayStr = new Date().toDateString();
 
     const slots = [];
     // Only render slots up to the last day of the month to avoid empty rows at the bottom
@@ -63,6 +64,7 @@ const LoanCalendar = ({ loans, notes, onDatePress, colors, currentMonth, setCurr
       const date = isValidDay ? new Date(y, m, dayNum) : null;
       const dateKey = date ? date.toISOString().split('T')[0] : null;
       const hasNote = dateKey && notes[dateKey];
+      const isToday = date && date.toDateString() === todayStr;
       
       // Loan markers logic
       const activeMarkers = [];
@@ -85,31 +87,35 @@ const LoanCalendar = ({ loans, notes, onDatePress, colors, currentMonth, setCurr
         });
       }
 
+      const hasMarker = activeMarkers.length > 0;
+      const markerColor = hasMarker ? activeMarkers[0].color : null;
+
       slots.push(
         <TouchableOpacity
           key={i}
           style={[
             styles.daySlot, 
             !isValidDay && styles.emptySlot,
-            isValidDay && activeMarkers.length > 0 && { backgroundColor: activeMarkers[0].color, borderRadius: 10 }
           ]}
           onPress={() => isValidDay && onDatePress(date)}
           disabled={!isValidDay}
         >
           {isValidDay && (
             <>
-              <Text style={[
-                styles.dayText, 
-                { color: activeMarkers.length > 0 ? "#FFF" : colors.textDark }
+              <View style={[
+                styles.dayCircle,
+                hasMarker && { backgroundColor: markerColor },
+                !hasMarker && hasNote && { backgroundColor: 'rgba(13,31,69,0.1)', borderWidth: 1.5, borderColor: 'rgba(13,31,69,0.25)' },
+                !hasMarker && !hasNote && isToday && { backgroundColor: 'rgba(46,107,240,0.12)' },
               ]}>
-                {dayNum}
-              </Text>
-              {hasNote && (
-                <View style={[
-                  styles.noteIndicator, 
-                  { backgroundColor: activeMarkers.length > 0 ? "#FFF" : colors.blue }
-                ]} />
-              )}
+                <Text style={[
+                  styles.dayText, 
+                  { color: hasMarker ? '#FFF' : (hasNote || isToday) ? colors.blue : colors.textDark },
+                  hasMarker && { fontWeight: '800' },
+                ]}>
+                  {dayNum}
+                </Text>
+              </View>
             </>
           )}
         </TouchableOpacity>
@@ -122,19 +128,19 @@ const LoanCalendar = ({ loans, notes, onDatePress, colors, currentMonth, setCurr
   const renderLegend = () => (
     <View style={styles.legend}>
       <View style={styles.legendItem}>
-        <View style={[styles.legendDot, { backgroundColor: '#0D1F45', borderRadius: 4 }]} />
+        <View style={[styles.legendSwatch, { backgroundColor: '#0D1F45' }]} />
         <Text style={[styles.legendText, { color: colors.textMuted }]}>Start</Text>
       </View>
       <View style={styles.legendItem}>
-        <View style={[styles.legendDot, { backgroundColor: '#34C759', borderRadius: 4 }]} />
+        <View style={[styles.legendSwatch, { backgroundColor: '#34C759' }]} />
         <Text style={[styles.legendText, { color: colors.textMuted }]}>Payment</Text>
       </View>
       <View style={styles.legendItem}>
-        <View style={[styles.legendDot, { backgroundColor: '#E74C3C', borderRadius: 4 }]} />
+        <View style={[styles.legendSwatch, { backgroundColor: '#E74C3C' }]} />
         <Text style={[styles.legendText, { color: colors.textMuted }]}>End</Text>
       </View>
       <View style={styles.legendItem}>
-        <View style={[styles.legendDot, { backgroundColor: colors.blue, borderRadius: 2 }]} />
+        <View style={[styles.legendSwatch, { backgroundColor: 'rgba(13,31,69,0.1)', borderWidth: 1.5, borderColor: 'rgba(13,31,69,0.25)' }]} />
         <Text style={[styles.legendText, { color: colors.textMuted }]}>Note</Text>
       </View>
     </View>
@@ -218,22 +224,29 @@ const styles = StyleSheet.create({
   emptySlot: {
     opacity: 0,
   },
+  dayCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   dayText: {
-    fontSize: 16, // Massive dates as requested
+    fontSize: 14,
     fontWeight: '700',
-    letterSpacing: -1,
+    letterSpacing: -0.5,
   },
   noteIndicator: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
     position: 'absolute',
-    bottom: 2,
+    bottom: 1,
   },
   legend: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 8,
+    gap: 12,
     marginTop: 8,
     paddingTop: 8,
     borderTopWidth: 1,
@@ -244,9 +257,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  legendDot: {
-    width: 6,
-    height: 6,
+  legendSwatch: {
+    width: 14,
+    height: 14,
     borderRadius: 4,
   },
   legendText: {

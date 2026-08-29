@@ -190,7 +190,7 @@ export default function BranchScreen({ navigation, route }) {
             province: b.province || b.region || "",
             region: b.region || "",
             location: `${b.province || b.region || ""} - ${b.name}`,
-            leader: b.leader || "PUAC Representative",
+            leader: b.pastor || b.leader || "PUAC Representative",
             phone: b.phone || "+63 90 000 0000",
             email: b.email || "puac@gmail.com",
             // Backend returns b.members and b.officers (NOT membersCount/officersCount)
@@ -278,6 +278,12 @@ export default function BranchScreen({ navigation, route }) {
     "Bataan": { code: "Region III", name: "Central Luzon" },
     "NCR": { code: "NCR", name: "National Capital Region" },
     "Metro Manila": { code: "NCR", name: "National Capital Region" },
+    "Makati": { code: "NCR", name: "National Capital Region" },
+    "Quezon City": { code: "NCR", name: "National Capital Region" },
+    "Manila": { code: "NCR", name: "National Capital Region" },
+    "Valenzuela": { code: "NCR", name: "National Capital Region" },
+    "Caloocan": { code: "NCR", name: "National Capital Region" },
+    "Baguio City": { code: "CAR", name: "Cordillera Administrative Region" },
     "Rizal": { code: "Region IV-A", name: "CALABARZON" },
     "Cavite": { code: "Region IV-A", name: "CALABARZON" },
     "Laguna": { code: "Region IV-A", name: "CALABARZON" },
@@ -345,15 +351,46 @@ export default function BranchScreen({ navigation, route }) {
     })),
   ).current;
 
-  // Pre-populate coordinates from hardcoded data (no runtime geocoding needed)
+  // Province/region → fallback coordinates for dynamically added communities
+  const FALLBACK_COORDS = useMemo(() => ({
+    "NCR": { latitude: 14.5995, longitude: 120.9842 },
+    "Makati": { latitude: 14.5547, longitude: 121.0244 },
+    "Quezon City": { latitude: 14.6760, longitude: 121.0437 },
+    "Manila": { latitude: 14.5995, longitude: 120.9842 },
+    "Baguio City": { latitude: 16.4023, longitude: 120.5960 },
+    "Baguio": { latitude: 16.4023, longitude: 120.5960 },
+    "Cebu": { latitude: 10.3157, longitude: 123.8854 },
+    "Cavite": { latitude: 14.2827, longitude: 120.9167 },
+    "Laguna": { latitude: 14.2117, longitude: 121.1653 },
+    "Kalinga": { latitude: 17.4157, longitude: 121.4444 },
+    "Abra": { latitude: 17.5955, longitude: 120.7183 },
+    "Benguet": { latitude: 16.4023, longitude: 120.5960 },
+    "Pangasinan": { latitude: 16.0433, longitude: 120.3374 },
+    "Isabela": { latitude: 16.6892, longitude: 121.5486 },
+    "Bulacan": { latitude: 14.7370, longitude: 120.9610 },
+    "Tarlac": { latitude: 15.7470, longitude: 120.6560 },
+    "Nueva Ecija": { latitude: 15.7680, longitude: 120.6620 },
+    "Rizal": { latitude: 14.7320, longitude: 121.1465 },
+    "Agusan Del Norte": { latitude: 8.9475, longitude: 125.5406 },
+    "Agusan del Norte": { latitude: 8.9475, longitude: 125.5406 },
+    "Surigao Del Norte": { latitude: 9.7668, longitude: 125.5898 },
+    "Surigao del Norte": { latitude: 9.7668, longitude: 125.5898 },
+    "Surigao Del Sur": { latitude: 8.9500, longitude: 126.2333 },
+    "Surigao del Sur": { latitude: 8.9500, longitude: 126.2333 },
+  }), []);
+
+  // Pre-populate coordinates from hardcoded data, with province fallback for dynamic communities
   useEffect(() => {
     const preloaded = {};
     branchesState.forEach(branch => {
-      const coords = COMMUNITY_COORDINATES[branch.location];
-      preloaded[branch.id] = coords || null;
+      const coords = COMMUNITY_COORDINATES[branch.location]
+        || FALLBACK_COORDS[branch.province]
+        || FALLBACK_COORDS[branch.region]
+        || null;
+      preloaded[branch.id] = coords;
     });
     setCoordsCache(preloaded);
-  }, [branchesState]);
+  }, [branchesState, FALLBACK_COORDS]);
 
   // Request user location on mount
   useEffect(() => {
@@ -601,9 +638,43 @@ export default function BranchScreen({ navigation, route }) {
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => {
+          <RefreshControl refreshing={refreshing} onRefresh={async () => {
             setRefreshing(true);
-            setTimeout(() => setRefreshing(false), 800);
+            try {
+              const res = await getBranches();
+              if (res?.success) {
+                const activeBranches = (res.branches || []).filter(b => !b.status || b.status === "Active");
+                const mapped = activeBranches.map((b, idx) => ({
+                  id: b._id || idx + 1,
+                  name: b.name,
+                  province: b.province || b.region || "",
+                  region: b.region || "",
+                  location: `${b.province || b.region || ""} - ${b.name}`,
+                  leader: b.pastor || b.leader || "PUAC Representative",
+                  phone: b.phone || "+63 90 000 0000",
+                  email: b.email || "puac@gmail.com",
+                  members: b.members || b.membersCount || 0,
+                  officers: b.officers || b.officersCount || 0,
+                  upcomingEvents: b.upcomingEvents || [],
+                  serviceTimes: Array.isArray(b.serviceTimes)
+                    ? b.serviceTimes.map(s => {
+                        if (typeof s === "object" && s.day) return s;
+                        const parts = String(s).split(/\s+/);
+                        return { day: parts[0] || s, time: parts.slice(1).join(" ") || "" };
+                      })
+                    : [
+                        { day: "Sunday", time: "9:00 AM" },
+                        { day: "Wednesday", time: "7:00 PM" },
+                      ],
+                  address: b.address || `${b.province}`,
+                }));
+                setBranchesState(mapped);
+              }
+            } catch (err) {
+              console.error("Refresh branches failed:", err);
+            } finally {
+              setRefreshing(false);
+            }
           }} tintColor="#0D1F45" colors={["#0D1F45"]} />
         }
       >

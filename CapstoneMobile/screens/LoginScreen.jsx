@@ -18,6 +18,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { loginUser, saveUserData } from "../services/AuthService";
 import { useTheme } from "../components/ThemeContext";
+import { useMaintenanceMode } from "../components/MaintenanceContext";
 
 const { width: _SW, height: _SH } = Dimensions.get("window");
 const _WR = Math.min(_SW / 375, 1.3);
@@ -51,6 +52,7 @@ export default function LoginScreen({ navigation, route }) {
   const { colors } = useTheme();
   const C = colors;
   const styles = useMemo(() => getStyles(C), [C]);
+  const { setMaintenanceMode } = useMaintenanceMode();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -211,6 +213,11 @@ export default function LoginScreen({ navigation, route }) {
         routes: [{ name: "Home", params: { email: cleanEmail, source: "login" } }],
       });
     } catch (err) {
+      // 503 = System under maintenance
+      if (err?.__maintenance) {
+        setMaintenanceMode(true, err.message);
+        return;
+      }
       await registerFailedAttempt(
         err?.message || "Invalid email or password."
       );

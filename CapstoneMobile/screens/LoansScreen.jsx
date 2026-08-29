@@ -809,7 +809,11 @@ export default function LoansScreen({ navigation, route }) {
     if (!userEmail) return;
     try {
       const response = await getLoans();
-      const serverLoans = response?.loans || [];
+      // Support both { loans: [...] } and { success: true, loans: [...] } response shapes
+      const serverLoans = response?.loans || response?.data || [];
+      if (!Array.isArray(serverLoans)) {
+        console.log("[Loans] Unexpected response shape:", JSON.stringify(response).slice(0, 200));
+      }
       const formatCurrency = (val) => {
         if (val === null || val === undefined || val === "") return "₱0.00";
         if (typeof val === "string" && val.startsWith("₱")) return val;
@@ -876,14 +880,80 @@ export default function LoansScreen({ navigation, route }) {
       newSummary[2] = { ...newSummary[2], value: String(activeCount) };
       setSummaryData(newSummary);
     } catch (e) {
-      console.log("Failed to load loans from API:", e);
+      console.log("Failed to load loans from API:", e?.message || e);
+      // Fallback: load cached data from AsyncStorage so user isn't left with empty screen
+      try {
+        const cached = await AsyncStorage.getItem(`faithly_loans_${userEmail}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setLoansData(parsed);
+            console.log("[Loans] Loaded", parsed.length, "loans from cache");
+          }
+        }
+      } catch (_) {}
     }
   }, [userEmail]);
 
+  // Helper to recalculate summary cards from loan data
+  const recalcSummary = useCallback((loans) => {
+    let totalBorrowed = 0;
+    let totalRemaining = 0;
+    let activeCount = 0;
+    loans.forEach(loan => {
+      if (loan.status === "active" || loan.status === "completed") {
+        totalBorrowed += loan.amountNum || 0;
+      }
+      if (loan.status === "active") {
+        totalRemaining += loan.remainingBalanceNum || loan.remainingBalance || 0;
+        activeCount++;
+      }
+    });
+    const newSummary = [...SUMMARY_DATA];
+    newSummary[0] = { ...newSummary[0], value: `₱${totalBorrowed.toLocaleString()}` };
+    newSummary[1] = { ...newSummary[1], value: `₱${totalRemaining.toLocaleString()}` };
+    newSummary[2] = { ...newSummary[2], value: String(activeCount) };
+    setSummaryData(newSummary);
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
-      loadLoansFromAPI();
-    }, [loadLoansFromAPI])
+      if (!userEmail) return;
+      let cancelled = false;
+
+      (async () => {
+        // 1) Show cached loans + summaries immediately for instant UX
+        try {
+          const cached = await AsyncStorage.getItem(`faithly_loans_${userEmail}`);
+          if (cached && !cancelled) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setLoansData(parsed);
+              recalcSummary(parsed);
+            }
+          }
+        } catch (_) {}
+
+        // 2) Wake up the Render server with a lightweight public ping (wait up to 60s)
+        try {
+          const controller = new AbortController();
+          const tid = setTimeout(() => controller.abort(), 60000);
+          await fetch(`${require("../services/config").API_CONFIG.WEB_BACKEND.BASE_URL}/settings/public`, {
+            signal: controller.signal,
+          });
+          clearTimeout(tid);
+        } catch (_) {
+          // Server may still be waking — proceed anyway, getLoans has its own retries
+        }
+
+        // 3) Now fetch fresh data (server should be warm)
+        if (!cancelled) {
+          await loadLoansFromAPI();
+        }
+      })();
+
+      return () => { cancelled = true; };
+    }, [userEmail, loadLoansFromAPI, recalcSummary])
   );
 
   // Load savings total for loan eligibility check
@@ -1577,7 +1647,7 @@ export default function LoansScreen({ navigation, route }) {
         </TouchableOpacity>
 
         {/* Savings Eligibility Banner */}
-        {!isEligibleForLoan && (
+        {!loanLoading && !isEligibleForLoan && (
           <TouchableOpacity
             style={{
               backgroundColor: "rgba(231,76,60,0.06)",

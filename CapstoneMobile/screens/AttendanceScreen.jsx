@@ -122,6 +122,7 @@ export default function AttendanceScreen({ navigation, route }) {
   const [scanning, setScanning] = useState(false);
   // Scan result UI state: { type: 'success'|'warning'|'error', title, message } | null
   const [scanResult, setScanResult] = useState(null);
+  const [selectedRecord, setSelectedRecord] = useState(null);
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth());
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
@@ -197,7 +198,7 @@ export default function AttendanceScreen({ navigation, route }) {
   const fetchAttendanceData = useCallback(async () => {
     try {
       const [historyRes, statsRes] = await Promise.all([
-        getAttendanceHistory(50, 0),
+        getAttendanceHistory(1, 50),
         getAttendanceStats(),
       ]);
       if (historyRes?.records) setAttendanceHistory(historyRes.records);
@@ -585,12 +586,14 @@ export default function AttendanceScreen({ navigation, route }) {
               }
 
               return filteredHistory.map((record, idx, arr) => (
-                <View
+                <TouchableOpacity
                   key={record._id || idx}
                   style={[
                     styles.tableRow,
                     idx === arr.length - 1 && styles.tableRowLast,
                   ]}
+                  activeOpacity={0.6}
+                  onPress={() => setSelectedRecord(record)}
                 >
                   <Text style={[styles.tableCell, styles.tableCol1]}>
                     {record.service || record.type || "Check-in"}
@@ -601,7 +604,8 @@ export default function AttendanceScreen({ navigation, route }) {
                   <Text style={[styles.tableCell, styles.tableCol3]}>
                     {record.time || (record.createdAt ? new Date(record.createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "-")}
                   </Text>
-                </View>
+                  <Ionicons name="chevron-forward" size={14} color={colors.textMuted} style={{ marginLeft: 4 }} />
+                </TouchableOpacity>
               ));
             })()}
           </View>
@@ -860,6 +864,163 @@ export default function AttendanceScreen({ navigation, route }) {
         </View>
       </Modal>
 
+      {/* Attendance Detail Modal */}
+      <Modal
+        visible={!!selectedRecord}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setSelectedRecord(null)}
+      >
+        <TouchableWithoutFeedback onPress={() => setSelectedRecord(null)}>
+          <View style={styles.detailModalOverlay}>
+            <TouchableWithoutFeedback onPress={(e) => e.stopPropagation()}>
+              <View style={[styles.detailModalBox, { backgroundColor: colors.cardBg }]}>
+                {/* Header */}
+                <View style={styles.detailModalHeader}>
+                  <View style={[styles.detailModalIconCircle, { backgroundColor: colors.blueLight }]}>
+                    <Ionicons name="calendar" size={24} color={colors.blue || "#0D1F45"} />
+                  </View>
+                  <Text style={[styles.detailModalTitle, { color: colors.textDark }]}>Attendance Details</Text>
+                  <TouchableOpacity onPress={() => setSelectedRecord(null)} style={styles.detailModalCloseBtn}>
+                    <Ionicons name="close" size={20} color={colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Status Badge */}
+                {selectedRecord?.status ? (
+                  <View style={[
+                    styles.detailStatusBadge,
+                    {
+                      backgroundColor:
+                        selectedRecord.status === "Present" ? "rgba(52,199,89,0.12)" :
+                        selectedRecord.status === "Late" ? "rgba(245,166,35,0.12)" :
+                        selectedRecord.status === "Absent" ? "rgba(231,76,60,0.12)" :
+                        colors.blueLight,
+                    }
+                  ]}>
+                    <Ionicons
+                      name={selectedRecord.status === "Present" ? "checkmark-circle" : selectedRecord.status === "Late" ? "time" : selectedRecord.status === "Absent" ? "close-circle" : "ellipse"}
+                      size={16}
+                      color={
+                        selectedRecord.status === "Present" ? "#34C759" :
+                        selectedRecord.status === "Late" ? "#F5A623" :
+                        selectedRecord.status === "Absent" ? "#E74C3C" :
+                        colors.blue
+                      }
+                    />
+                    <Text style={[
+                      styles.detailStatusText,
+                      {
+                        color:
+                          selectedRecord.status === "Present" ? "#34C759" :
+                          selectedRecord.status === "Late" ? "#F5A623" :
+                          selectedRecord.status === "Absent" ? "#E74C3C" :
+                          colors.blue,
+                      }
+                    ]}>{selectedRecord.status}</Text>
+                  </View>
+                ) : null}
+
+                {/* Divider */}
+                <View style={[styles.detailDivider, { backgroundColor: colors.cardBorder }]} />
+
+                {/* Detail Rows */}
+                <View style={styles.detailRows}>
+                  {selectedRecord?.service ? (
+                    <View style={styles.detailRow}>
+                      <View style={styles.detailRowLeft}>
+                        <Ionicons name="book-outline" size={16} color={colors.textMuted} />
+                        <Text style={[styles.detailRowLabel, { color: colors.textMuted }]}>Service</Text>
+                      </View>
+                      <Text style={[styles.detailRowValue, { color: colors.textDark }]}>{selectedRecord.service}</Text>
+                    </View>
+                  ) : null}
+
+                  {selectedRecord?.branch ? (
+                    <View style={styles.detailRow}>
+                      <View style={styles.detailRowLeft}>
+                        <Ionicons name="location-outline" size={16} color={colors.textMuted} />
+                        <Text style={[styles.detailRowLabel, { color: colors.textMuted }]}>Branch</Text>
+                      </View>
+                      <Text style={[styles.detailRowValue, { color: colors.textDark }]}>{selectedRecord.branch}</Text>
+                    </View>
+                  ) : null}
+
+                  <View style={styles.detailRow}>
+                    <View style={styles.detailRowLeft}>
+                      <Ionicons name="calendar-outline" size={16} color={colors.textMuted} />
+                      <Text style={[styles.detailRowLabel, { color: colors.textMuted }]}>Date</Text>
+                    </View>
+                    <Text style={[styles.detailRowValue, { color: colors.textDark }]}>
+                      {selectedRecord?.date || (selectedRecord?.createdAt ? new Date(selectedRecord.createdAt).toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric" }) : "-")}
+                    </Text>
+                  </View>
+
+                  <View style={styles.detailRow}>
+                    <View style={styles.detailRowLeft}>
+                      <Ionicons name="time-outline" size={16} color={colors.textMuted} />
+                      <Text style={[styles.detailRowLabel, { color: colors.textMuted }]}>Time</Text>
+                    </View>
+                    <Text style={[styles.detailRowValue, { color: colors.textDark }]}>
+                      {selectedRecord?.time || (selectedRecord?.createdAt ? new Date(selectedRecord.createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "-")}
+                    </Text>
+                  </View>
+
+                  {selectedRecord?.method ? (
+                    <View style={styles.detailRow}>
+                      <View style={styles.detailRowLeft}>
+                        <Ionicons name="scan-outline" size={16} color={colors.textMuted} />
+                        <Text style={[styles.detailRowLabel, { color: colors.textMuted }]}>Method</Text>
+                      </View>
+                      <Text style={[styles.detailRowValue, { color: colors.textDark }]}>{selectedRecord.method}</Text>
+                    </View>
+                  ) : null}
+
+                  {selectedRecord?.member ? (
+                    <View style={styles.detailRow}>
+                      <View style={styles.detailRowLeft}>
+                        <Ionicons name="person-outline" size={16} color={colors.textMuted} />
+                        <Text style={[styles.detailRowLabel, { color: colors.textMuted }]}>Member</Text>
+                      </View>
+                      <Text style={[styles.detailRowValue, { color: colors.textDark }]}>{selectedRecord.member}</Text>
+                    </View>
+                  ) : null}
+
+                  {selectedRecord?.sessionId ? (
+                    <View style={styles.detailRow}>
+                      <View style={styles.detailRowLeft}>
+                        <Ionicons name="key-outline" size={16} color={colors.textMuted} />
+                        <Text style={[styles.detailRowLabel, { color: colors.textMuted }]}>Session</Text>
+                      </View>
+                      <Text style={[styles.detailRowValue, { color: colors.textDark, fontSize: 12 }]}>{selectedRecord.sessionId}</Text>
+                    </View>
+                  ) : null}
+
+                  {selectedRecord?.recordId ? (
+                    <View style={styles.detailRow}>
+                      <View style={styles.detailRowLeft}>
+                        <Ionicons name="document-text-outline" size={16} color={colors.textMuted} />
+                        <Text style={[styles.detailRowLabel, { color: colors.textMuted }]}>Record ID</Text>
+                      </View>
+                      <Text style={[styles.detailRowValue, { color: colors.textDark, fontSize: 12 }]}>{selectedRecord.recordId}</Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {/* Close Button */}
+                <TouchableOpacity
+                  style={[styles.detailCloseButton, { backgroundColor: colors.blue || "#0D1F45" }]}
+                  activeOpacity={0.8}
+                  onPress={() => setSelectedRecord(null)}
+                >
+                  <Text style={styles.detailCloseButtonText}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
     </View>
   );
 }
@@ -1105,6 +1266,101 @@ const getStyles = (C) => StyleSheet.create({
   tableCol1: { flex: 2 },
   tableCol2: { flex: 1.5 },
   tableCol3: { flex: 1, textAlign: "right" },
+
+  // ── Attendance Detail Modal ──
+  detailModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+  },
+  detailModalBox: {
+    width: "100%",
+    maxWidth: 400,
+    borderRadius: 22,
+    paddingVertical: 24,
+    paddingHorizontal: 22,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 10,
+  },
+  detailModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  detailModalIconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  detailModalTitle: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  detailModalCloseBtn: {
+    padding: 6,
+  },
+  detailStatusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    marginBottom: 16,
+  },
+  detailStatusText: {
+    fontSize: 13.5,
+    fontWeight: "700",
+  },
+  detailDivider: {
+    height: 1,
+    marginBottom: 16,
+  },
+  detailRows: {
+    gap: 14,
+    marginBottom: 24,
+  },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  detailRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  detailRowLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  detailRowValue: {
+    fontSize: 13.5,
+    fontWeight: "600",
+    maxWidth: "55%",
+    textAlign: "right",
+  },
+  detailCloseButton: {
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  detailCloseButtonText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
 
   bottomPad: { height: 24 },
 

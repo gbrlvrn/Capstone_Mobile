@@ -1193,9 +1193,7 @@ export default function HomeScreen({ navigation, route }) {
               {/* 2 Column Stats Layout (No icons, visible divider line) */}
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
                 {/* Attendance Checks Column */}
-                <TouchableOpacity
-                  activeOpacity={0.8}
-                  onPress={() => navWithEmail("Branches")}
+                <View
                   style={{ flex: 1, paddingRight: s(8) }}
                 >
                   <Text style={[styles.cardLabel, { color: colors.textMuted, fontSize: fs(12), marginBottom: 4 }]}>Attendance Checks</Text>
@@ -1205,15 +1203,13 @@ export default function HomeScreen({ navigation, route }) {
                       ? `${MONTH_SHORT_NAMES[selectedMonth]} ${selectedYear}`
                       : `Year ${selectedYear}`}
                   </Text>
-                </TouchableOpacity>
+                </View>
 
                 {/* Highly Visible Vertical Divider Line */}
                 <View style={{ width: 1.5, height: s(48), backgroundColor: colors.isDark ? "rgba(255,255,255,0.22)" : "rgba(13,31,69,0.22)", marginHorizontal: s(12) }} />
 
                 {/* Total Donated Column */}
-                <TouchableOpacity
-                  activeOpacity={0.8}
-                  onPress={() => navWithEmail("Donations")}
+                <View
                   style={{ flex: 1, paddingLeft: s(8) }}
                 >
                   <Text style={[styles.cardLabel, { color: colors.textMuted, fontSize: fs(12), marginBottom: 4 }]}>Total Donated</Text>
@@ -1230,7 +1226,7 @@ export default function HomeScreen({ navigation, route }) {
                       ? `${MONTH_SHORT_NAMES[selectedMonth]} ${selectedYear}`
                       : `Year ${selectedYear}`}
                   </Text>
-                </TouchableOpacity>
+                </View>
               </View>
             </View>
           </Animated.View>

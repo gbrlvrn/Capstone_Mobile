@@ -230,17 +230,15 @@ function extractError(data, fallbackText) {
 
 async function request(method, path, body, requiresAuth = false, retries = 1) {
   const url = `${API_CONFIG.CUSTOM_BACKEND.BASE_URL}${path}`;
-  const headers = { "Content-Type": "application/json" };
 
-  if (requiresAuth) {
-    const token = await getToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  for (let attempt = 0; attempt <= retries; attempt++) {
+  async function doFetch() {
+    const headers = { "Content-Type": "application/json" };
+    if (requiresAuth) {
+      const token = await getToken();
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    }
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s timeout for Render cold starts / slow mobile networks
-
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
       const res = await fetch(url, {
         method,
@@ -249,26 +247,61 @@ async function request(method, path, body, requiresAuth = false, retries = 1) {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
+      return res;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  }
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await doFetch();
 
       const text = await res.text();
       let data = {};
       try { data = JSON.parse(text); } catch {}
 
       if (res.status === 401) {
-        // Authenticated requests: try silent re-login before logging user out.
-        // Public endpoints (login, signup, OTP) return 401 for wrong credentials
-        // — that is NOT a session expiry, so just surface the error message.
         if (requiresAuth) {
-          await _handle401(true);
-          throw new Error("Invalid or expired token");
+          const reloggedIn = await silentRelogin();
+          if (reloggedIn) {
+            // Retry with the fresh token
+            const retryRes = await doFetch();
+            const retryText = await retryRes.text();
+            let retryData = {};
+            try { retryData = JSON.parse(retryText); } catch {}
+            if (retryRes.status === 401) {
+              await clearToken();
+              _fireAuthInvalidated();
+              throw new Error("Session expired. Please log in again.");
+            }
+            if (retryRes.status === 503) {
+              const err = new Error(retryData?.message || "System is currently under scheduled maintenance.");
+              err.__maintenance = true;
+              throw err;
+            }
+            if (!retryRes.ok) throw new Error(extractError(retryData, retryText));
+            return retryData;
+          }
+          await clearToken();
+          _fireAuthInvalidated();
+          throw new Error("Session expired. Please log in again.");
         }
         throw new Error(data?.message || "Invalid credentials");
+      }
+
+      // 503 = System under maintenance
+      if (res.status === 503) {
+        const err = new Error(data?.message || "System is currently under scheduled maintenance.");
+        err.__maintenance = true;
+        throw err;
       }
 
       if (!res.ok) throw new Error(extractError(data, text));
       return data;
     } catch (error) {
-      clearTimeout(timeoutId);
+      if (error.__maintenance) throw error;
       if (attempt < retries && (error.name === "AbortError" || error.message?.includes("Network") || error.message?.includes("fetch"))) {
         console.log(`[Network] Retrying ${path} (Attempt ${attempt + 2})...`);
         await new Promise(res => setTimeout(res, 1000));
@@ -288,26 +321,56 @@ async function get(path, requiresAuth = false) {
 // ── Web Backend Helper (faithlyweb server, port 5000) ────────────────
 async function webGet(path, requiresAuth = false, retries = 1) {
   const url = `${API_CONFIG.WEB_BACKEND.BASE_URL}${path}`;
-  const headers = { "Content-Type": "application/json" };
-  if (requiresAuth) {
-    const token = await getToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-  }
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
+  async function doFetch() {
+    const headers = { "Content-Type": "application/json" };
+    if (requiresAuth) {
+      const token = await getToken();
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    }
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
       const res = await fetch(url, { method: "GET", headers, signal: controller.signal });
       clearTimeout(timeoutId);
+      return res;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  }
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await doFetch();
       const text = await res.text();
       let data = {};
       try { data = JSON.parse(text); } catch {}
-      if (res.status === 401) { await _handle401(requiresAuth); throw new Error("Invalid or expired token"); }
+      if (res.status === 401) {
+        if (requiresAuth) {
+          const reloggedIn = await silentRelogin();
+          if (reloggedIn) {
+            const retryRes = await doFetch();
+            const retryText = await retryRes.text();
+            let retryData = {};
+            try { retryData = JSON.parse(retryText); } catch {}
+            if (retryRes.status === 401) {
+              await clearToken();
+              _fireAuthInvalidated();
+              throw new Error("Session expired. Please log in again.");
+            }
+            if (!retryRes.ok) throw new Error(extractError(retryData, retryText));
+            return retryData;
+          }
+          await clearToken();
+          _fireAuthInvalidated();
+          throw new Error("Session expired. Please log in again.");
+        }
+        throw new Error(data?.message || "Invalid credentials");
+      }
       if (!res.ok) throw new Error(extractError(data, text));
       return data;
     } catch (error) {
-      clearTimeout(timeoutId);
       if (attempt < retries && (error.name === "AbortError" || error.message?.includes("Network") || error.message?.includes("fetch"))) {
         console.log(`[Web Network] Retrying ${path}...`);
         await new Promise(res => setTimeout(res, 1000));
@@ -321,26 +384,56 @@ async function webGet(path, requiresAuth = false, retries = 1) {
 
 async function webPost(path, body, requiresAuth = true, retries = 1) {
   const url = `${API_CONFIG.WEB_BACKEND.BASE_URL}${path}`;
-  const headers = { "Content-Type": "application/json" };
-  if (requiresAuth) {
-    const token = await getToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-  }
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
+  async function doFetch() {
+    const headers = { "Content-Type": "application/json" };
+    if (requiresAuth) {
+      const token = await getToken();
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    }
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
       const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal: controller.signal });
       clearTimeout(timeoutId);
+      return res;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  }
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await doFetch();
       const text = await res.text();
       let data = {};
       try { data = JSON.parse(text); } catch {}
-      if (res.status === 401) { await _handle401(requiresAuth); throw new Error("Invalid or expired token"); }
+      if (res.status === 401) {
+        if (requiresAuth) {
+          const reloggedIn = await silentRelogin();
+          if (reloggedIn) {
+            const retryRes = await doFetch();
+            const retryText = await retryRes.text();
+            let retryData = {};
+            try { retryData = JSON.parse(retryText); } catch {}
+            if (retryRes.status === 401) {
+              await clearToken();
+              _fireAuthInvalidated();
+              throw new Error("Session expired. Please log in again.");
+            }
+            if (!retryRes.ok) throw new Error(extractError(retryData, retryText));
+            return retryData;
+          }
+          await clearToken();
+          _fireAuthInvalidated();
+          throw new Error("Session expired. Please log in again.");
+        }
+        throw new Error(data?.message || "Invalid credentials");
+      }
       if (!res.ok) throw new Error(extractError(data, text));
       return data;
     } catch (error) {
-      clearTimeout(timeoutId);
       if (attempt < retries && (error.name === "AbortError" || error.message?.includes("Network") || error.message?.includes("fetch"))) {
         console.log(`[Web Network] Retrying POST ${path}...`);
         await new Promise(res => setTimeout(res, 1000));
@@ -354,26 +447,56 @@ async function webPost(path, body, requiresAuth = true, retries = 1) {
 
 async function webPut(path, body, requiresAuth = true, retries = 1) {
   const url = `${API_CONFIG.WEB_BACKEND.BASE_URL}${path}`;
-  const headers = { "Content-Type": "application/json" };
-  if (requiresAuth) {
-    const token = await getToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-  }
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
+  async function doFetch() {
+    const headers = { "Content-Type": "application/json" };
+    if (requiresAuth) {
+      const token = await getToken();
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    }
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
       const res = await fetch(url, { method: "PUT", headers, body: JSON.stringify(body), signal: controller.signal });
       clearTimeout(timeoutId);
+      return res;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  }
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await doFetch();
       const text = await res.text();
       let data = {};
       try { data = JSON.parse(text); } catch {}
-      if (res.status === 401) { await _handle401(requiresAuth); throw new Error("Invalid or expired token"); }
+      if (res.status === 401) {
+        if (requiresAuth) {
+          const reloggedIn = await silentRelogin();
+          if (reloggedIn) {
+            const retryRes = await doFetch();
+            const retryText = await retryRes.text();
+            let retryData = {};
+            try { retryData = JSON.parse(retryText); } catch {}
+            if (retryRes.status === 401) {
+              await clearToken();
+              _fireAuthInvalidated();
+              throw new Error("Session expired. Please log in again.");
+            }
+            if (!retryRes.ok) throw new Error(extractError(retryData, retryText));
+            return retryData;
+          }
+          await clearToken();
+          _fireAuthInvalidated();
+          throw new Error("Session expired. Please log in again.");
+        }
+        throw new Error(data?.message || "Invalid credentials");
+      }
       if (!res.ok) throw new Error(extractError(data, text));
       return data;
     } catch (error) {
-      clearTimeout(timeoutId);
       if (attempt < retries && (error.name === "AbortError" || error.message?.includes("Network") || error.message?.includes("fetch"))) {
         console.log(`[Web Network] Retrying PUT ${path}...`);
         await new Promise(res => setTimeout(res, 1000));
@@ -535,10 +658,12 @@ export async function getBranches() {
     else if (data && data.branches) branches = data.branches;
     else throw new Error("Invalid format");
 
-    // Enrich each branch with province (API doesn't return it)
+    // Enrich each branch with province/region (API now returns these directly)
     branches = branches.map(b => ({
       ...b,
       province: b.province || NAME_TO_PROVINCE[normalize(b.name || "")] || "",
+      region: b.region || "",
+      leader: b.pastor || b.leader || "",
     }));
     return { success: true, branches };
   } catch (e) {
@@ -673,8 +798,8 @@ export function createLoan(loanData) {
   return webPost("/loans/apply", loanData, true);
 }
 
-export function getLoans(page = 1, limit = 10) {
-  return webGet(`/loans/my-loans?page=${page}&limit=${limit}`, true);
+export function getLoans(page = 1, limit = 50) {
+  return webGet(`/loans/my-loans?page=${page}&limit=${limit}`, true, 2);
 }
 
 export function getLoanById(loanId) {
@@ -853,13 +978,29 @@ export function checkInAttendance(data) {
 }
 
 // GET /api/attendance/my-attendance — on web backend (port 5000)
-export function getAttendanceHistory(page = 1, limit = 10) {
-  return webGet(`/attendance/my-attendance?page=${page}&limit=${limit}`, true);
+// Returns: { success, attendance: [...], totalCount, totalPages, currentPage, stats: { total, thisMonth } }
+export async function getAttendanceHistory(page = 1, limit = 50) {
+  const data = await webGet(`/attendance/my-attendance?page=${page}&limit=${limit}`, true);
+  // Normalize response shape for the AttendanceScreen consumer
+  return {
+    records: data?.attendance || [],
+    total: data?.totalCount || 0,
+    totalPages: data?.totalPages || 1,
+    currentPage: data?.currentPage || page,
+    stats: data?.stats || {},
+  };
 }
 
 // GET /api/attendance/my-attendance stats — on web backend
-export function getAttendanceStats() {
-  return webGet("/attendance/my-attendance?limit=1", true);
+// Stats are included in the history response; this fetches page=1&limit=1 just for stats
+export async function getAttendanceStats() {
+  const data = await webGet("/attendance/my-attendance?page=1&limit=1", true);
+  const stats = data?.stats || {};
+  return {
+    totalCheckIns: stats.total || data?.totalCount || 0,
+    currentStreak: 0, // web backend does not compute streaks
+    thisMonthCount: stats.thisMonth || 0,
+  };
 }
 
 // ── Announcements & Events ──────────────────────────────────────────

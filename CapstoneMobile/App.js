@@ -6,6 +6,7 @@ import { ThemeProvider } from './components/ThemeContext';
 import { AlertProvider } from './components/AlertContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import { NetworkProvider } from './components/NetworkContext';
+import { MaintenanceProvider } from './components/MaintenanceContext';
 import { registerPushToken, getToken, onAuthInvalidated, clearUserData } from './services/AuthService';
 
 // ── Production Log Suppressor ────────────────────────────────────────
@@ -146,6 +147,7 @@ export default function App() {
     <ThemeProvider>
     <AlertProvider>
     <ToastProvider>
+      <MaintenanceProvider>
       <NavigationContainer ref={navigationRef} linking={linking}>
         <Stack.Navigator
           initialRouteName="Splash"
@@ -181,6 +183,7 @@ export default function App() {
           <Stack.Screen name="Announcements" component={AnnouncementsScreen} options={{ animation: 'fade', animationDuration: 100 }} />
         </Stack.Navigator>
       </NavigationContainer>
+      </MaintenanceProvider>
     </ToastProvider>
     </AlertProvider>
     </ThemeProvider>

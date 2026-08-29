@@ -131,6 +131,7 @@ export default function SavingsScreen({ navigation, route }) {
 
   // --- MODALS ---
   const [depositModalOpen, setDepositModalOpen] = useState(false);
+  const [showAllTransactions, setShowAllTransactions] = useState(false);
   const [goalModalOpen, setGoalModalOpen] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
   const [depositNote, setDepositNote] = useState("");
@@ -174,6 +175,11 @@ export default function SavingsScreen({ navigation, route }) {
   const [withdrawAccount, setWithdrawAccount] = useState("");
   const [withdrawAccountName, setWithdrawAccountName] = useState("");
   const [showWithdrawDropdown, setShowWithdrawDropdown] = useState(false);
+
+  // Tutorial & Guide states
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
+  const [showSavingsGuide, setShowSavingsGuide] = useState(false);
 
 
 
@@ -346,6 +352,20 @@ export default function SavingsScreen({ navigation, route }) {
       loadSavingsData();
     }, [loadSavingsData])
   );
+
+  // Check if first-time user for tutorial
+  useEffect(() => {
+    if (!userEmail) return;
+    (async () => {
+      try {
+        const seen = await AsyncStorage.getItem(`faithly_savings_tutorial_${userEmail}`);
+        if (!seen) {
+          setShowTutorial(true);
+          setTutorialStep(0);
+        }
+      } catch {}
+    })();
+  }, [userEmail]);
 
   useFocusEffect(
     useCallback(() => {
@@ -888,8 +908,183 @@ export default function SavingsScreen({ navigation, route }) {
             >
               <Text style={[styles.headerDepositBtnText, { color: C.red, textAlign: "center" }]}>↓ Withdraw </Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.headerDepositBtn, { backgroundColor: colors.blueLight, marginTop: 0, width: "100%", borderColor: "rgba(46,107,240,0.2)", borderWidth: 1 }]}
+              activeOpacity={0.8}
+              onPress={() => setShowSavingsGuide(true)}
+            >
+              <Text style={[styles.headerDepositBtnText, { color: C.blue, textAlign: "center" }]}>📖 Savings Guide</Text>
+            </TouchableOpacity>
           </View>
         </View>
+
+        {/* ── First-Time Tutorial Modal ── */}
+        <Modal
+          visible={showTutorial}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => { setShowTutorial(false); AsyncStorage.setItem(`faithly_savings_tutorial_${userEmail}`, "1").catch(() => {}); }}
+        >
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", paddingHorizontal: 24 }}>
+            <View style={{ width: "100%", maxWidth: 380, backgroundColor: colors.cardBg, borderRadius: 24, padding: 28, shadowColor: "#000", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 10 }}>
+              {/* Step Indicators */}
+              <View style={{ flexDirection: "row", justifyContent: "center", gap: 8, marginBottom: 24 }}>
+                {[0, 1, 2, 3].map(i => (
+                  <View key={i} style={{ width: tutorialStep === i ? 24 : 8, height: 8, borderRadius: 4, backgroundColor: tutorialStep === i ? (colors.blue || "#0D1F45") : (colors.cardBorder || "#E8ECF0") }} />
+                ))}
+              </View>
+
+              {/* Step Content */}
+              {tutorialStep === 0 && (
+                <View style={{ alignItems: "center" }}>
+                  <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(46,107,240,0.1)", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
+                    <Text style={{ fontSize: 32, fontWeight: "800", color: colors.blue || "#0D1F45" }}>1</Text>
+                  </View>
+                  <Text style={{ fontSize: 20, fontWeight: "800", color: colors.textDark, textAlign: "center", marginBottom: 8 }}>Welcome to Savings!</Text>
+                  <Text style={{ fontSize: 14, color: colors.textMuted, textAlign: "center", lineHeight: 21 }}>Let's walk you through how to start saving. It only takes a few steps!</Text>
+                </View>
+              )}
+              {tutorialStep === 1 && (
+                <View style={{ alignItems: "center" }}>
+                  <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(46,107,240,0.1)", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
+                    <Text style={{ fontSize: 32, fontWeight: "800", color: colors.blue || "#0D1F45" }}>2</Text>
+                  </View>
+                  <Text style={{ fontSize: 20, fontWeight: "800", color: colors.textDark, textAlign: "center", marginBottom: 8 }}>Step 1: Create a Goal</Text>
+                  <Text style={{ fontSize: 14, color: colors.textMuted, textAlign: "center", lineHeight: 21 }}>Tap the <Text style={{ fontWeight: "700", color: colors.blue || "#0D1F45" }}>"+ New Goal"</Text> button in the Savings Goals section. Give it a name and set a target amount.</Text>
+                </View>
+              )}
+              {tutorialStep === 2 && (
+                <View style={{ alignItems: "center" }}>
+                  <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(46,107,240,0.1)", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
+                    <Text style={{ fontSize: 32, fontWeight: "800", color: colors.blue || "#0D1F45" }}>3</Text>
+                  </View>
+                  <Text style={{ fontSize: 20, fontWeight: "800", color: colors.textDark, textAlign: "center", marginBottom: 8 }}>Step 2: Make a Deposit</Text>
+                  <Text style={{ fontSize: 14, color: colors.textMuted, textAlign: "center", lineHeight: 21 }}>Once your goal is created, tap <Text style={{ fontWeight: "700", color: colors.blue || "#0D1F45" }}>"+ Deposit"</Text> or <Text style={{ fontWeight: "700", color: colors.blue || "#0D1F45" }}>"Add Savings"</Text> on a goal card. Choose your payment method and submit.</Text>
+                </View>
+              )}
+              {tutorialStep === 3 && (
+                <View style={{ alignItems: "center" }}>
+                  <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(52,199,89,0.15)", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
+                    <Text style={{ fontSize: 32 }}>✓</Text>
+                  </View>
+                  <Text style={{ fontSize: 20, fontWeight: "800", color: colors.textDark, textAlign: "center", marginBottom: 8 }}>You're All Set!</Text>
+                  <Text style={{ fontSize: 14, color: colors.textMuted, textAlign: "center", lineHeight: 21 }}>Your deposit will be reviewed and confirmed. You can also <Text style={{ fontWeight: "700" }}>transfer</Text> between goals or <Text style={{ fontWeight: "700" }}>withdraw</Text> anytime. Tap <Text style={{ fontWeight: "700", color: colors.blue || "#0D1F45" }}>"📖 Savings Guide"</Text> if you need a refresher!</Text>
+                </View>
+              )}
+
+              {/* Buttons */}
+              <View style={{ flexDirection: "row", gap: 12, marginTop: 28 }}>
+                {tutorialStep < 3 ? (
+                  <>
+                    <TouchableOpacity
+                      style={{ flex: 1, paddingVertical: 14, borderRadius: 14, borderWidth: 1.5, borderColor: colors.cardBorder, alignItems: "center" }}
+                      activeOpacity={0.7}
+                      onPress={() => { setShowTutorial(false); AsyncStorage.setItem(`faithly_savings_tutorial_${userEmail}`, "1").catch(() => {}); }}
+                    >
+                      <Text style={{ fontSize: 15, fontWeight: "700", color: colors.textMuted }}>Skip</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={{ flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: colors.blue || "#0D1F45", alignItems: "center" }}
+                      activeOpacity={0.8}
+                      onPress={() => setTutorialStep(prev => prev + 1)}
+                    >
+                      <Text style={{ fontSize: 15, fontWeight: "700", color: "#FFFFFF" }}>Next</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <TouchableOpacity
+                    style={{ flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: "#34C759", alignItems: "center" }}
+                    activeOpacity={0.8}
+                    onPress={() => { setShowTutorial(false); AsyncStorage.setItem(`faithly_savings_tutorial_${userEmail}`, "1").catch(() => {}); }}
+                  >
+                    <Text style={{ fontSize: 15, fontWeight: "700", color: "#FFFFFF" }}>Get Started</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* ── Savings Guide Modal ── */}
+        <Modal
+          visible={showSavingsGuide}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowSavingsGuide(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", paddingHorizontal: 24 }}>
+            <View style={{ width: "100%", maxWidth: 380, backgroundColor: colors.cardBg, borderRadius: 24, padding: 24, shadowColor: "#000", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 10, maxHeight: "80%" }}>
+              <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+                  <Text style={{ fontSize: 20, fontWeight: "800", color: colors.textDark }}>Savings Guide</Text>
+                  <TouchableOpacity onPress={() => setShowSavingsGuide(false)} style={{ padding: 4 }}>
+                    <Text style={{ fontSize: 20, fontWeight: "700", color: colors.textMuted }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Step 1 */}
+                <View style={{ flexDirection: "row", marginBottom: 20 }}>
+                  <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(46,107,240,0.12)", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
+                    <Text style={{ fontSize: 16, fontWeight: "800", color: colors.blue || "#0D1F45" }}>1</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: "700", color: colors.textDark, marginBottom: 4 }}>Create a Savings Goal</Text>
+                    <Text style={{ fontSize: 13, color: colors.textMuted, lineHeight: 19 }}>Tap <Text style={{ fontWeight: "700" }}>"+ New Goal"</Text> in the Savings Goals section. Choose a name (e.g. Emergency Fund) and enter your target amount.</Text>
+                  </View>
+                </View>
+
+                {/* Step 2 */}
+                <View style={{ flexDirection: "row", marginBottom: 20 }}>
+                  <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(46,107,240,0.12)", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
+                    <Text style={{ fontSize: 16, fontWeight: "800", color: colors.blue || "#0D1F45" }}>2</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: "700", color: colors.textDark, marginBottom: 4 }}>Make a Deposit</Text>
+                    <Text style={{ fontSize: 13, color: colors.textMuted, lineHeight: 19 }}>Tap <Text style={{ fontWeight: "700" }}>"+ Deposit"</Text> at the top or <Text style={{ fontWeight: "700" }}>"Add Savings"</Text> on a goal card. Select your payment method (GCash or Bank), enter the amount, and upload proof of payment.</Text>
+                  </View>
+                </View>
+
+                {/* Step 3 */}
+                <View style={{ flexDirection: "row", marginBottom: 20 }}>
+                  <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(46,107,240,0.12)", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
+                    <Text style={{ fontSize: 16, fontWeight: "800", color: colors.blue || "#0D1F45" }}>3</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: "700", color: colors.textDark, marginBottom: 4 }}>Wait for Confirmation</Text>
+                    <Text style={{ fontSize: 13, color: colors.textMuted, lineHeight: 19 }}>Your deposit will be reviewed by an admin. Once confirmed, the amount is added to your goal's balance.</Text>
+                  </View>
+                </View>
+
+                {/* Step 4 */}
+                <View style={{ flexDirection: "row", marginBottom: 20 }}>
+                  <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(46,107,240,0.12)", alignItems: "center", justifyContent: "center", marginRight: 14 }}>
+                    <Text style={{ fontSize: 16, fontWeight: "800", color: colors.blue || "#0D1F45" }}>4</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: "700", color: colors.textDark, marginBottom: 4 }}>Transfer & Withdraw</Text>
+                    <Text style={{ fontSize: 13, color: colors.textMuted, lineHeight: 19 }}>Use <Text style={{ fontWeight: "700" }}>"⇄ Transfer"</Text> to move funds between goals. Use <Text style={{ fontWeight: "700" }}>"↓ Withdraw"</Text> to request a withdrawal to your GCash or bank account.</Text>
+                  </View>
+                </View>
+
+                {/* Tip */}
+                <View style={{ backgroundColor: "rgba(46,107,240,0.08)", borderRadius: 14, padding: 16, marginBottom: 8 }}>
+                  <Text style={{ fontSize: 13, color: colors.textDark, lineHeight: 19 }}>
+                    <Text style={{ fontWeight: "700", color: colors.blue || "#0D1F45" }}>💡 Tip: </Text>
+                    Your savings determine your loanable amount. The more you save, the higher your loan limit!
+                  </Text>
+                </View>
+              </ScrollView>
+
+              <TouchableOpacity
+                style={{ paddingVertical: 14, borderRadius: 14, backgroundColor: colors.blue || "#0D1F45", alignItems: "center", marginTop: 16 }}
+                activeOpacity={0.8}
+                onPress={() => setShowSavingsGuide(false)}
+              >
+                <Text style={{ fontSize: 15, fontWeight: "700", color: "#FFFFFF" }}>Got It</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         {/* PUAC Alert Banner */}
         <View style={styles.puacAlertBox}>
@@ -1013,9 +1208,11 @@ export default function SavingsScreen({ navigation, route }) {
         {/* Transaction History */}
         <View style={[styles.sectionRow, { marginTop: 10 }]}>
           <Text style={[styles.sectionTitle, { color: colors.textDark }]}>Transaction history</Text>
-          <TouchableOpacity activeOpacity={0.6}>
-            <Text style={{ color: C.blue, fontWeight: "700", fontSize: 13 }}>View all</Text>
-          </TouchableOpacity>
+          {deposits.length > 5 && (
+            <TouchableOpacity activeOpacity={0.6} onPress={() => setShowAllTransactions(prev => !prev)}>
+              <Text style={{ color: C.blue, fontWeight: "700", fontSize: 13 }}>{showAllTransactions ? "Show less" : "View all"}</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {deposits.length === 0 ? (
@@ -1028,7 +1225,7 @@ export default function SavingsScreen({ navigation, route }) {
           />
         ) : (
           <View style={[styles.historyList, { backgroundColor: colors.cardBg, marginBottom: 20 }]}>
-            {deposits.map((dep, idx) => {
+            {(showAllTransactions ? deposits : deposits.slice(0, 5)).map((dep, idx, arr) => {
               const displayStatus = (dep.status === "pending" && paymentApprovalMethod !== "manual") ? "confirmed" : (dep.status || "pending");
               const isWithdrawal = dep.type === "withdrawal";
               const dateStr = (() => { try { const dt = new Date(dep.date || dep.createdAt); return isNaN(dt.getTime()) ? "" : dt.toLocaleDateString(); } catch { return ""; } })();
@@ -1037,7 +1234,7 @@ export default function SavingsScreen({ navigation, route }) {
                   key={dep._id || dep.id || idx}
                   activeOpacity={0.7}
                   onPress={() => setReceiptTxn({ ...dep, displayStatus, dateStr })}
-                  style={[styles.sleekHistoryItem, idx !== deposits.length - 1 && { borderBottomWidth: 1, borderBottomColor: "#E8ECF0" }]}
+                  style={[styles.sleekHistoryItem, idx !== arr.length - 1 && { borderBottomWidth: 1, borderBottomColor: "#E8ECF0" }]}
                 >
                   <View style={[styles.sleekHistoryIconBox, isWithdrawal && { backgroundColor: "rgba(231,76,60,0.1)" }]}>
                     <Text style={{ fontSize: fs(16), color: isWithdrawal ? C.red : C.green }}>{isWithdrawal ? "↓" : "↑"}</Text>

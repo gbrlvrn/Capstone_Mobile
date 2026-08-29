@@ -196,6 +196,8 @@ export default function SignupScreen({ navigation }) {
   const [modalField, setModalField] = useState("");
   const [dynamicBranches, setDynamicBranches] = useState([]);
   const [loadingBranches, setLoadingBranches] = useState(true);
+  const [expandedRegion, setExpandedRegion] = useState(null);
+  const [branchSearch, setBranchSearch] = useState("");
   const [touched, setTouched] = useState({});
   const [submitting, setSubmitting] = useState(false);
 
@@ -241,16 +243,85 @@ export default function SignupScreen({ navigation }) {
     return () => { mounted = false; };
   }, []);
 
-  // Group branches by province for the modal
-  const groupedBranches = useMemo(() => {
-    const groups = {};
-    dynamicBranches.forEach(b => {
-      const province = b.province || "Other";
-      if (!groups[province]) groups[province] = [];
-      groups[province].push(b);
+  // Philippine province → region mapping (matches BranchScreen)
+  const PROVINCE_TO_REGION = useMemo(() => ({
+    "Kalinga": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Abra": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Benguet": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Mountain Province": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Ifugao": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Apayao": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Baguio City": { code: "CAR", name: "Cordillera Administrative Region" },
+    "Isabela": { code: "Region II", name: "Cagayan Valley" },
+    "Cagayan": { code: "Region II", name: "Cagayan Valley" },
+    "Pangasinan": { code: "Region I", name: "Ilocos Region" },
+    "La Union": { code: "Region I", name: "Ilocos Region" },
+    "Ilocos Norte": { code: "Region I", name: "Ilocos Region" },
+    "Ilocos Sur": { code: "Region I", name: "Ilocos Region" },
+    "Tarlac": { code: "Region III", name: "Central Luzon" },
+    "Nueva Ecija": { code: "Region III", name: "Central Luzon" },
+    "Bulacan": { code: "Region III", name: "Central Luzon" },
+    "Pampanga": { code: "Region III", name: "Central Luzon" },
+    "Zambales": { code: "Region III", name: "Central Luzon" },
+    "Bataan": { code: "Region III", name: "Central Luzon" },
+    "NCR": { code: "NCR", name: "National Capital Region" },
+    "Metro Manila": { code: "NCR", name: "National Capital Region" },
+    "Makati": { code: "NCR", name: "National Capital Region" },
+    "Quezon City": { code: "NCR", name: "National Capital Region" },
+    "Manila": { code: "NCR", name: "National Capital Region" },
+    "Valenzuela": { code: "NCR", name: "National Capital Region" },
+    "Caloocan": { code: "NCR", name: "National Capital Region" },
+    "Rizal": { code: "Region IV-A", name: "CALABARZON" },
+    "Cavite": { code: "Region IV-A", name: "CALABARZON" },
+    "Laguna": { code: "Region IV-A", name: "CALABARZON" },
+    "Batangas": { code: "Region IV-A", name: "CALABARZON" },
+    "Quezon": { code: "Region IV-A", name: "CALABARZON" },
+    "Cebu": { code: "Region VII", name: "Central Visayas" },
+    "Bohol": { code: "Region VII", name: "Central Visayas" },
+    "Agusan Del Norte": { code: "Region XIII", name: "Caraga" },
+    "Agusan del Norte": { code: "Region XIII", name: "Caraga" },
+    "Surigao Del Norte": { code: "Region XIII", name: "Caraga" },
+    "Surigao del Norte": { code: "Region XIII", name: "Caraga" },
+    "Surigao Del Sur": { code: "Region XIII", name: "Caraga" },
+    "Surigao del Sur": { code: "Region XIII", name: "Caraga" },
+    "Agusan Del Sur": { code: "Region XIII", name: "Caraga" },
+    "Agusan del Sur": { code: "Region XIII", name: "Caraga" },
+    "Dinagat Islands": { code: "Region XIII", name: "Caraga" },
+  }), []);
+
+  // Build case-insensitive lookup
+  const provinceLookup = useMemo(() => {
+    const map = {};
+    Object.entries(PROVINCE_TO_REGION).forEach(([key, val]) => {
+      map[key.toLowerCase().trim()] = val;
     });
-    return groups;
-  }, [dynamicBranches]);
+    return map;
+  }, [PROVINCE_TO_REGION]);
+
+  // Group branches by region for the modal (matches BranchScreen)
+  const groupedByRegion = useMemo(() => {
+    const groups = {};
+    dynamicBranches
+      .filter(b => (!b.status || b.status === "Active"))
+      .forEach(b => {
+        const provKey = (b.province || "").toLowerCase().trim();
+        const region = provinceLookup[provKey]
+          || (b.region ? { code: b.region, name: b.region } : null);
+        if (!region) return;
+        const key = region.code;
+        if (!groups[key]) groups[key] = { code: region.code, name: region.name, branches: [] };
+        groups[key].branches.push(b);
+      });
+    const regionOrder = ["CAR", "Region I", "Region II", "Region III", "NCR", "Region IV-A", "Region VII", "Region XIII"];
+    return Object.values(groups).sort((a, b) => {
+      const ai = regionOrder.indexOf(a.code);
+      const bi = regionOrder.indexOf(b.code);
+      if (ai === -1 && bi === -1) return a.code.localeCompare(b.code);
+      if (ai === -1) return 1;
+      if (bi === -1) return 1;
+      return ai - bi;
+    });
+  }, [dynamicBranches, provinceLookup]);
 
   const update = (key, val) => {
     setForm((p) => ({ ...p, [key]: val }));
@@ -345,8 +416,27 @@ export default function SignupScreen({ navigation }) {
 
   const openModal = (field) => {
     setModalField(field);
+    setBranchSearch("");
+    setExpandedRegion(null);
     setModalOpen(true);
   };
+
+  // Filtered regions based on search query
+  const filteredRegions = useMemo(() => {
+    if (!branchSearch.trim()) return groupedByRegion;
+    const q = branchSearch.toLowerCase().trim();
+    return groupedByRegion
+      .map(region => ({
+        ...region,
+        branches: region.branches.filter(b =>
+          b.name.toLowerCase().includes(q) ||
+          (b.province || "").toLowerCase().includes(q) ||
+          region.name.toLowerCase().includes(q) ||
+          region.code.toLowerCase().includes(q)
+        ),
+      }))
+      .filter(region => region.branches.length > 0);
+  }, [groupedByRegion, branchSearch]);
 
   const selectOption = (item) => {
     // If it's a branch, we might want the full name or just the ID. 
@@ -849,6 +939,36 @@ export default function SignupScreen({ navigation }) {
                 : "Select Gender"}
             </Text>
 
+            {/* Search bar for communities */}
+            {modalField === "branch" && !loadingBranches && (
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#F1F5F9',
+                borderRadius: s(10),
+                marginHorizontal: s(16),
+                marginBottom: s(10),
+                paddingHorizontal: s(12),
+                paddingVertical: Platform.OS === 'ios' ? s(10) : s(4),
+              }}>
+                <Text style={{ fontSize: fs(16), color: '#94A3B8', marginRight: s(8) }}>🔍</Text>
+                <TextInput
+                  style={{ flex: 1, fontSize: fs(14), color: '#0F172A', padding: 0 }}
+                  placeholder="Search community..."
+                  placeholderTextColor="#94A3B8"
+                  value={branchSearch}
+                  onChangeText={setBranchSearch}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                />
+                {branchSearch.length > 0 && (
+                  <TouchableOpacity onPress={() => setBranchSearch("")} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Text style={{ fontSize: fs(16), color: '#94A3B8' }}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
             <ScrollView 
               style={styles.modalScroll}
               showsVerticalScrollIndicator={true}
@@ -860,19 +980,66 @@ export default function SignupScreen({ navigation }) {
                     <Text style={{ marginTop: 12, color: colors.textMuted }}>Loading communities...</Text>
                   </View>
                 ) : (
-                  Object.entries(groupedBranches).map(([province, branches]) => (
-                    <View key={province}>
-                      <BranchCategory title={province} />
-                      {branches.map((opt) => (
-                        <BranchOption 
-                          key={opt._id || opt.name} 
-                          option={opt} 
-                          selected={form.branch === `${opt.province} - ${opt.name}`}
-                          onSelect={() => selectOption(opt)}
-                        />
-                      ))}
+                  filteredRegions.length === 0 ? (
+                    <View style={{ padding: s(30), alignItems: 'center' }}>
+                      <Text style={{ fontSize: fs(14), color: '#64748B', textAlign: 'center' }}>
+                        No communities found for "{branchSearch}"
+                      </Text>
                     </View>
-                  ))
+                  ) : (
+                  filteredRegions.map((region) => {
+                    const isExpanded = expandedRegion === region.code || branchSearch.trim().length > 0;
+                    return (
+                      <View key={region.code}>
+                        <TouchableOpacity
+                          activeOpacity={0.7}
+                          onPress={() => setExpandedRegion(isExpanded ? null : region.code)}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: isExpanded ? 'rgba(13,31,69,0.04)' : '#F8FAFC',
+                            paddingVertical: s(13),
+                            paddingHorizontal: s(16),
+                            borderBottomWidth: 1,
+                            borderBottomColor: C.modalDivider || '#F1F5F9',
+                          }}
+                        >
+                          <View style={{
+                            paddingHorizontal: s(8),
+                            paddingVertical: s(3),
+                            borderRadius: s(6),
+                            borderWidth: 1.5,
+                            borderColor: '#0D1F45',
+                            marginRight: s(10),
+                            minWidth: s(44),
+                            alignItems: 'center',
+                          }}>
+                            <Text style={{ fontSize: fs(10), fontWeight: '800', color: '#0D1F45', letterSpacing: 0.3 }}>
+                              {region.code}
+                            </Text>
+                          </View>
+                          <Text style={{ flex: 1, fontSize: fs(13), fontWeight: '700', color: C.textDark || '#0F172A' }} numberOfLines={1}>
+                            {region.name}
+                          </Text>
+                          <Text style={{ fontSize: fs(12), fontWeight: '600', color: '#0D1F45', marginRight: s(6) }}>
+                            {region.branches.length}
+                          </Text>
+                          <Text style={{ fontSize: fs(14), color: C.textMuted || '#64748B' }}>
+                            {isExpanded ? '▴' : '▾'}
+                          </Text>
+                        </TouchableOpacity>
+                        {isExpanded && region.branches.map((opt) => (
+                          <BranchOption
+                            key={opt._id || opt.name}
+                            option={opt}
+                            selected={form.branch === `${opt.province} - ${opt.name}`}
+                            onSelect={() => selectOption(opt)}
+                          />
+                        ))}
+                      </View>
+                    );
+                  })
+                  )
                 )
               ) : (
                 (modalField === "position" ? POSITIONS : ["Male", "Female", "Prefer not to say"]).map((opt, i, arr) => (
@@ -915,11 +1082,10 @@ export default function SignupScreen({ navigation }) {
         animationType="slide"
         onRequestClose={() => setDocModal(null)}
       >
-        <TouchableOpacity
-          style={styles.modalBackdrop}
-          activeOpacity={1}
-          onPress={() => setDocModal(null)}
-        >
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" }}>
+          <TouchableWithoutFeedback onPress={() => setDocModal(null)}>
+            <View style={{ flex: 1 }} />
+          </TouchableWithoutFeedback>
           <View style={styles.docSheet}>
             <View style={styles.modalHandle} />
             <Text style={styles.docTitle}>
@@ -929,6 +1095,8 @@ export default function SignupScreen({ navigation }) {
             <ScrollView
               style={styles.docScroll}
               showsVerticalScrollIndicator={true}
+              nestedScrollEnabled={true}
+              bounces={true}
             >
               {(docModal === "terms" ? TERMS_SECTIONS : PRIVACY_SECTIONS).map(
                 (section, i) => (
@@ -948,7 +1116,7 @@ export default function SignupScreen({ navigation }) {
               <Text style={styles.docCloseBtnText}>Close</Text>
             </TouchableOpacity>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
     </View>
   );

@@ -9,6 +9,7 @@ const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getToken } from "../services/AuthService";
 import { useTheme } from "../components/ThemeContext";
+import { useMaintenanceMode } from "../components/MaintenanceContext";
 
 const LOGO = require("../assets/puac_logo.png");
 
@@ -19,6 +20,7 @@ export default function SplashScreen({ navigation }) {
   const { colors } = useTheme();
   const C = colors;
   const styles = useMemo(() => getStyles(C), [C]);
+  const { checkMaintenance } = useMaintenanceMode();
   const logoScale = useRef(new Animated.Value(0.3)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
   const textOpacity = useRef(new Animated.Value(0)).current;
@@ -66,6 +68,12 @@ export default function SplashScreen({ navigation }) {
 
     // Check session after splash animation
     const timer = setTimeout(async () => {
+      // Check maintenance mode before proceeding
+      try {
+        const isMaintenance = await checkMaintenance();
+        if (isMaintenance) return; // Overlay will show, don't navigate
+      } catch {}
+
       try {
         const raw = await AsyncStorage.getItem(SESSION_KEY);
 
