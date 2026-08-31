@@ -329,7 +329,7 @@ async function webGet(path, requiresAuth = false, retries = 1) {
       if (token) headers["Authorization"] = `Bearer ${token}`;
     }
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000);
+    const timeoutId = setTimeout(() => controller.abort(), 90000);
     try {
       const res = await fetch(url, { method: "GET", headers, signal: controller.signal });
       clearTimeout(timeoutId);
@@ -372,8 +372,8 @@ async function webGet(path, requiresAuth = false, retries = 1) {
       return data;
     } catch (error) {
       if (attempt < retries && (error.name === "AbortError" || error.message?.includes("Network") || error.message?.includes("fetch"))) {
-        console.log(`[Web Network] Retrying ${path}...`);
-        await new Promise(res => setTimeout(res, 1000));
+        console.log(`[Web Network] Retrying ${path} (${error.name}: ${error.message})...`);
+        await new Promise(res => setTimeout(res, 3000));
         continue;
       }
       if (error.name === "AbortError") throw new Error("Network request timed out.");
@@ -799,7 +799,7 @@ export function createLoan(loanData) {
 }
 
 export function getLoans(page = 1, limit = 50) {
-  return webGet(`/loans/my-loans?page=${page}&limit=${limit}`, true, 2);
+  return webGet(`/loans/my-loans?page=${page}&limit=${limit}`, true, 3);
 }
 
 export function getLoanById(loanId) {

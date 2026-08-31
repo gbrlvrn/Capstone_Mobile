@@ -20,7 +20,7 @@ import FloatingNavBar from "../components/FloatingNavBar";
 import { SkeletonMemberCard, SkeletonCard, SkeletonQuickAction } from "../components/SkeletonLoader";
 import { useToast } from "../components/ToastContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getVerificationStatus, getProfile, getAnnouncements, getDonations, getSavingsData, getAttendanceHistory, getLoans, getProfilePhotoUri } from "../services/AuthService";
+import { getVerificationStatus, getProfile, getAnnouncements, getDonations, getSavingsData, getAttendanceHistory, getLoans, getProfilePhotoUri, getNotificationsFeed } from "../services/AuthService";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTheme } from "../components/ThemeContext";
 import OfflineBanner from "../components/OfflineBanner";
@@ -534,149 +534,183 @@ export default function HomeScreen({ navigation, route }) {
           console.error("Announcement load error:", e);
         }
 
+        // ── Load unread count from local notifications cache ──
         try {
           const savedData = await AsyncStorage.getItem(`faithly_notifications_${userEmail}`);
           if (savedData) {
             const notifs = JSON.parse(savedData) || [];
-            const unreadCount = notifs.filter(n => !n.read).length;
-            setNotificationCount(unreadCount);
-
-            // Grab top 3 for Recent Activity from notifications
-            const notifRecent = notifs.slice(0, 3).map(n => {
-              let icon, iconBg, iconColor;
-              switch (n.category) {
-                case "transaction":
-                  icon = ICONS.heart; iconColor = C.green; iconBg = "rgba(52,199,89,0.1)"; break;
-                case "announcement":
-                  icon = ICONS.branches; iconColor = C.purple; iconBg = "rgba(175,82,222,0.1)"; break;
-                case "loan":
-                  icon = ICONS.loans; iconColor = C.blue; iconBg = C.blueLight; break;
-                default:
-                  icon = ICONS.notification; iconColor = C.orange; iconBg = "rgba(255,149,0,0.1)"; break;
-              }
-              return {
-                id: n.id,
-                title: n.title,
-                subtitle: n.message,
-                time: n.time,
-                icon,
-                iconBg,
-                iconColor,
-                sortDate: n.createdAt || n.time || "",
-              };
-            });
             setNotificationCount(notifs.filter(n => !n.read).length);
-
-            // Also build activity from real API data (donations, attendance, etc.)
-            try {
-              const donSaved = await AsyncStorage.getItem(`faithly_donations_${userEmail}`);
-              const attSaved = await AsyncStorage.getItem(`faithly_attendance_${userEmail}`);
-              const loanSaved = await AsyncStorage.getItem(`faithly_loans_${userEmail}`);
-              const donItems = donSaved ? JSON.parse(donSaved) : [];
-              const attItems = attSaved ? JSON.parse(attSaved) : [];
-              const loanItems = loanSaved ? JSON.parse(loanSaved) : [];
-
-              const apiActivity = [];
-
-              // Donations
-              donItems.slice(0, 5).forEach(d => {
-                const amt = parseFloat(String(d.amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
-                apiActivity.push({
-                  id: `don-${d._id || d.id}`,
-                  title: "Donation",
-                  subtitle: `₱${amt.toLocaleString()} — ${d.type || d.category || "General"}`,
-                  time: d.createdAt || d.date || "",
-                  icon: ICONS.heart,
-                  iconBg: "rgba(52,199,89,0.1)",
-                  iconColor: C.green,
-                  sortDate: d.createdAt || d.date || "",
-                });
-              });
-
-              // Attendance
-              attItems.slice(0, 5).forEach(a => {
-                apiActivity.push({
-                  id: `att-${a._id || a.id}`,
-                  title: "Attendance",
-                  subtitle: a.eventName || a.event || "Church Service",
-                  time: a.date || a.createdAt || "",
-                  icon: ICONS.clock,
-                  iconBg: "rgba(175,82,222,0.1)",
-                  iconColor: C.purple,
-                  sortDate: a.date || a.createdAt || "",
-                });
-              });
-
-              // Loans
-              loanItems.slice(0, 3).forEach(l => {
-                apiActivity.push({
-                  id: `loan-${l._id || l.id}`,
-                  title: `Loan — ${l.status || "Pending"}`,
-                  subtitle: `₱${parseFloat(String(l.amount || "0").replace(/[^0-9.-]+/g, "")).toLocaleString()}`,
-                  time: l.createdAt || l.applicationDate || "",
-                  icon: ICONS.loans,
-                  iconBg: C.blueLight,
-                  iconColor: C.blue,
-                  sortDate: l.createdAt || l.applicationDate || "",
-                });
-              });
-
-              // Merge notif + API activity, sort by date, take top 5
-              const combined = [...notifRecent, ...apiActivity]
-                .sort((a, b) => new Date(b.sortDate || 0) - new Date(a.sortDate || 0))
-                .slice(0, 5);
-
-              setRecentActivity(combined.length > 0 ? combined : notifRecent);
-            } catch {
-              setRecentActivity(notifRecent);
-            }
           } else {
             setNotificationCount(0);
-            // No notifications, but still try to show activity from API data
-            try {
-              const donSaved = await AsyncStorage.getItem(`faithly_donations_${userEmail}`);
-              const attSaved = await AsyncStorage.getItem(`faithly_attendance_${userEmail}`);
-              const loanSaved = await AsyncStorage.getItem(`faithly_loans_${userEmail}`);
-              const donItems = donSaved ? JSON.parse(donSaved) : [];
-              const attItems = attSaved ? JSON.parse(attSaved) : [];
-              const loanItems = loanSaved ? JSON.parse(loanSaved) : [];
-              const apiActivity = [];
-              donItems.slice(0, 5).forEach(d => {
-                const amt = parseFloat(String(d.amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
-                apiActivity.push({
-                  id: `don-${d._id || d.id}`, title: "Donation",
-                  subtitle: `₱${amt.toLocaleString()} — ${d.type || d.category || "General"}`,
-                  time: d.createdAt || d.date || "", icon: ICONS.heart,
-                  iconBg: "rgba(52,199,89,0.1)", iconColor: C.green,
-                  sortDate: d.createdAt || d.date || "",
-                });
-              });
-              attItems.slice(0, 5).forEach(a => {
-                apiActivity.push({
-                  id: `att-${a._id || a.id}`, title: "Attendance",
-                  subtitle: a.eventName || a.event || "Church Service",
-                  time: a.date || a.createdAt || "", icon: ICONS.clock,
-                  iconBg: "rgba(175,82,222,0.1)", iconColor: C.purple,
-                  sortDate: a.date || a.createdAt || "",
-                });
-              });
-              loanItems.slice(0, 3).forEach(l => {
-                apiActivity.push({
-                  id: `loan-${l._id || l.id}`, title: `Loan — ${l.status || "Pending"}`,
-                  subtitle: `₱${parseFloat(String(l.amount || "0").replace(/[^0-9.-]+/g, "")).toLocaleString()}`,
-                  time: l.createdAt || l.applicationDate || "", icon: ICONS.loans,
-                  iconBg: C.blueLight, iconColor: C.blue,
-                  sortDate: l.createdAt || l.applicationDate || "",
-                });
-              });
-              const sorted = apiActivity.sort((a, b) => new Date(b.sortDate || 0) - new Date(a.sortDate || 0)).slice(0, 5);
-              setRecentActivity(sorted);
-            } catch {
-              setRecentActivity([]);
-            }
           }
-        } catch (e) {
-          console.error("Home Notification Error", e);
+        } catch {
+          setNotificationCount(0);
+        }
+
+        // ── Build Recent Activity from notifications feed API ──
+        // This returns ALL activity types: loans, payments, donations, savings, attendance
+        const formatActivityTime = (dateStr) => {
+          if (!dateStr) return "";
+          const d = new Date(dateStr);
+          if (isNaN(d.getTime())) return "";
+          const now = new Date();
+          const diffMs = now - d;
+          const diffMins = Math.floor(diffMs / 60000);
+          if (diffMins < 1) return "Just now";
+          if (diffMins < 60) return `${diffMins}m ago`;
+          const diffHrs = Math.floor(diffMins / 60);
+          if (diffHrs < 24) return `${diffHrs}h ago`;
+          const diffDays = Math.floor(diffHrs / 24);
+          if (diffDays < 7) return `${diffDays}d ago`;
+          return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        };
+
+        try {
+          const feed = await getNotificationsFeed();
+          const activityItems = [];
+
+          // Loans
+          (feed.loans || []).forEach(loan => {
+            activityItems.push({
+              id: `loan-${loan._id || loan.loanId}`,
+              title: `Loan ${loan.status ? loan.status.charAt(0).toUpperCase() + loan.status.slice(1) : "Update"}`,
+              subtitle: `₱${(loan.amount || 0).toLocaleString()} — ${loan.loanType || loan.type || "Loan"}`,
+              time: formatActivityTime(loan.updatedAt || loan.createdAt || loan.appliedDate),
+              icon: ICONS.loans,
+              iconBg: C.blueLight,
+              iconColor: C.blue,
+              sortDate: loan.updatedAt || loan.createdAt || loan.appliedDate || "",
+            });
+          });
+
+          // Loan Payments
+          (feed.payments || []).forEach(payment => {
+            activityItems.push({
+              id: `payment-${payment._id}`,
+              title: "Loan Payment",
+              subtitle: `₱${(payment.amount || 0).toLocaleString()} payment recorded`,
+              time: formatActivityTime(payment.createdAt || payment.date),
+              icon: ICONS.wallet,
+              iconBg: "rgba(52,199,89,0.1)",
+              iconColor: C.green,
+              sortDate: payment.createdAt || payment.date || "",
+            });
+          });
+
+          // Donations
+          (feed.donations || []).forEach(donation => {
+            const statusLabel = donation.status === "confirmed" ? "✅" : donation.status === "rejected" ? "❌" : "⏳";
+            activityItems.push({
+              id: `donation-${donation._id || donation.donationId}`,
+              title: `Donation ${statusLabel}`,
+              subtitle: `₱${(donation.amount || 0).toLocaleString()} — ${donation.category || "General"}`,
+              time: formatActivityTime(donation.createdAt || donation.date),
+              icon: ICONS.heart,
+              iconBg: "rgba(52,199,89,0.1)",
+              iconColor: C.green,
+              sortDate: donation.createdAt || donation.date || "",
+            });
+          });
+
+          // Savings (deposits & withdrawals)
+          (feed.savings || []).forEach(txn => {
+            const isWithdrawal = txn.type === "withdrawal";
+            activityItems.push({
+              id: `savings-${txn._id}`,
+              title: isWithdrawal ? "Savings Withdrawal" : "Savings Deposit",
+              subtitle: `₱${(txn.amount || 0).toLocaleString()} — ${txn.status || "pending"}`,
+              time: formatActivityTime(txn.createdAt || txn.date),
+              icon: ICONS.wallet,
+              iconBg: isWithdrawal ? "rgba(231,76,60,0.1)" : "rgba(52,199,89,0.1)",
+              iconColor: isWithdrawal ? C.red : C.green,
+              sortDate: txn.createdAt || txn.date || "",
+            });
+          });
+
+          // Attendance
+          (feed.attendance || []).forEach(att => {
+            activityItems.push({
+              id: `att-${att._id}`,
+              title: "Attendance",
+              subtitle: att.eventName || att.event || "Church Service",
+              time: formatActivityTime(att.date || att.createdAt),
+              icon: ICONS.attendance,
+              iconBg: "rgba(175,82,222,0.1)",
+              iconColor: C.purple,
+              sortDate: att.date || att.createdAt || "",
+            });
+          });
+
+          // Sort by date (newest first) and take top 5
+          activityItems.sort((a, b) => new Date(b.sortDate || 0) - new Date(a.sortDate || 0));
+          setRecentActivity(activityItems.slice(0, 5));
+        } catch (feedError) {
+          console.log("Feed API failed, falling back to cache:", feedError.message);
+          // ── Fallback: build activity from local AsyncStorage cache ──
+          try {
+            const donSaved = await AsyncStorage.getItem(`faithly_donations_${userEmail}`);
+            const attSaved = await AsyncStorage.getItem(`faithly_attendance_${userEmail}`);
+            const loanSaved = await AsyncStorage.getItem(`faithly_loans_${userEmail}`);
+            const savingsSaved = await AsyncStorage.getItem(`faithly_savings_${userEmail}`);
+            const donItems = donSaved ? JSON.parse(donSaved) : [];
+            const attItems = attSaved ? JSON.parse(attSaved) : [];
+            const loanItems = loanSaved ? JSON.parse(loanSaved) : [];
+            const savingsItems = savingsSaved ? JSON.parse(savingsSaved) : [];
+
+            const apiActivity = [];
+
+            // Donations
+            donItems.slice(0, 5).forEach(d => {
+              const amt = parseFloat(String(d.amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
+              apiActivity.push({
+                id: `don-${d._id || d.id}`, title: "Donation",
+                subtitle: `₱${amt.toLocaleString()} — ${d.type || d.category || "General"}`,
+                time: formatActivityTime(d.createdAt || d.date || ""), icon: ICONS.heart,
+                iconBg: "rgba(52,199,89,0.1)", iconColor: C.green,
+                sortDate: d.createdAt || d.date || "",
+              });
+            });
+
+            // Attendance
+            attItems.slice(0, 5).forEach(a => {
+              apiActivity.push({
+                id: `att-${a._id || a.id}`, title: "Attendance",
+                subtitle: a.eventName || a.event || "Church Service",
+                time: formatActivityTime(a.date || a.createdAt || ""), icon: ICONS.attendance,
+                iconBg: "rgba(175,82,222,0.1)", iconColor: C.purple,
+                sortDate: a.date || a.createdAt || "",
+              });
+            });
+
+            // Loans
+            loanItems.slice(0, 3).forEach(l => {
+              apiActivity.push({
+                id: `loan-${l._id || l.id}`, title: `Loan — ${l.status || "Pending"}`,
+                subtitle: `₱${parseFloat(String(l.amount || l.amountNum || "0").replace(/[^0-9.-]+/g, "")).toLocaleString()}`,
+                time: formatActivityTime(l.createdAt || l.applied || l.applicationDate || ""), icon: ICONS.loans,
+                iconBg: C.blueLight, iconColor: C.blue,
+                sortDate: l.createdAt || l.applied || l.applicationDate || "",
+              });
+            });
+
+            // Savings
+            savingsItems.slice(0, 5).forEach(s => {
+              const isWithdrawal = s.type === "withdrawal";
+              apiActivity.push({
+                id: `sav-${s._id || s.id}`, title: isWithdrawal ? "Savings Withdrawal" : "Savings Deposit",
+                subtitle: `₱${parseFloat(String(s.amount || "0").replace(/[^0-9.-]+/g, "")).toLocaleString()} — ${s.status || "pending"}`,
+                time: formatActivityTime(s.createdAt || s.date || ""), icon: ICONS.wallet,
+                iconBg: isWithdrawal ? "rgba(231,76,60,0.1)" : "rgba(52,199,89,0.1)",
+                iconColor: isWithdrawal ? C.red : C.green,
+                sortDate: s.createdAt || s.date || "",
+              });
+            });
+
+            const sorted = apiActivity.sort((a, b) => new Date(b.sortDate || 0) - new Date(a.sortDate || 0)).slice(0, 5);
+            setRecentActivity(sorted);
+          } catch {
+            setRecentActivity([]);
+          }
         }
       };
       checkUnreadAndActivity();

@@ -290,7 +290,11 @@ export default function NotificationsScreen({ navigation, route }) {
     await markNotificationsRead(unreadIds);
   };
 
-  const getIconForCategory = (category) => {
+  const getIconForCategory = (category, notifId) => {
+    // Attendance gets its own calendar/attendance icon to distinguish from savings
+    if (notifId?.startsWith("attendance")) {
+      return { icon: ICONS.attendance, color: C.blue, bg: C.blueLight };
+    }
     switch (category) {
       case "transaction":
         return { icon: ICONS.heart, color: C.green, bg: C.greenLight };
@@ -416,7 +420,7 @@ export default function NotificationsScreen({ navigation, route }) {
           </View>
         ) : (
           filteredNotifications.map((notif, idx) => {
-            const iconData = getIconForCategory(notif.category);
+            const iconData = getIconForCategory(notif.category, notif.id);
             return (
               <TouchableOpacity
                 key={notif.id || idx}
@@ -496,14 +500,14 @@ export default function NotificationsScreen({ navigation, route }) {
                   paddingVertical: 5,
                   paddingHorizontal: 12,
                   borderRadius: 10,
-                  backgroundColor: getIconForCategory(selectedNotif?.category).bg,
+                  backgroundColor: getIconForCategory(selectedNotif?.category, selectedNotif?.id).bg,
                 }}
               >
                 <Text
                   style={{
                     fontSize: 11,
                     fontWeight: "800",
-                    color: getIconForCategory(selectedNotif?.category).color,
+                    color: getIconForCategory(selectedNotif?.category, selectedNotif?.id).color,
                     letterSpacing: 0.5,
                     textTransform: "uppercase",
                   }}

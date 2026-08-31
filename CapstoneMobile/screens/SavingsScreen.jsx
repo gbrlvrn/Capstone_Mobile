@@ -499,11 +499,6 @@ export default function SavingsScreen({ navigation, route }) {
       setSubmitting(false);
       return;
     }
-    if (amount > 500000) {
-      setFormError("Maximum deposit amount is \u20B1500,000.");
-      setSubmitting(false);
-      return;
-    }
     const selectedGoal = goals.find(g => g.id === activeDepositGoalId);
     if (selectedGoal) {
       const remaining = (selectedGoal.target || 0) - (selectedGoal.amountSaved || 0);
@@ -1563,7 +1558,7 @@ export default function SavingsScreen({ navigation, route }) {
                     />
                   </View>
                   <View style={styles.quickPillsRow}>
-                    {[500, 1000, 2000, 5000].map(amt => (
+                    {[100, 250, 500, 1000].map(amt => (
                       <TouchableOpacity key={amt} style={styles.quickPill} activeOpacity={0.7} onPress={() => setDepositAmount(amt.toLocaleString())}>
                         <Text style={styles.quickPillText}>₱{amt.toLocaleString()}</Text>
                       </TouchableOpacity>

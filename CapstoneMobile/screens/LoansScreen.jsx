@@ -814,6 +814,8 @@ export default function LoansScreen({ navigation, route }) {
       if (!Array.isArray(serverLoans)) {
         console.log("[Loans] Unexpected response shape:", JSON.stringify(response).slice(0, 200));
       }
+      // Debug: Log loan count and field names from server to diagnose missing loans
+      console.log(`[Loans] Server returned ${serverLoans.length} loans. Fields:`, serverLoans.length > 0 ? Object.keys(serverLoans[0]) : "empty");
       const formatCurrency = (val) => {
         if (val === null || val === undefined || val === "") return "₱0.00";
         if (typeof val === "string" && val.startsWith("₱")) return val;
@@ -828,30 +830,48 @@ export default function LoansScreen({ navigation, route }) {
         const rawMonthly = typeof loan.monthlyPayment === 'number' ? loan.monthlyPayment : (parseFloat(loan.monthlyPayment) || 0);
         const rawRem = typeof loan.remainingBalance === 'number' ? loan.remainingBalance : (parseFloat(loan.remainingBalance) || 0);
 
+        // Auto-sync: A loan is completed when EITHER remainingBalance <= 0
+        // OR paidMonths >= termMonths (backend walk-in payment completion rule)
+        // IMPORTANT: Only apply the zero-balance check if remainingBalance is
+        // explicitly provided by the server (not undefined/null). Otherwise loans
+        // without this field would be falsely marked as completed.
+        const hasExplicitBalance = loan.remainingBalance != null && loan.remainingBalance !== undefined;
+        const isEffectivelyCompleted =
+          loan.status === "active" &&
+          ((hasExplicitBalance && rawRem <= 0) || (loan.paidMonths >= loan.termMonths && loan.termMonths > 0));
+        const effectiveStatus = isEffectivelyCompleted ? "completed" : loan.status;
+        const effectivePaidMonths = isEffectivelyCompleted
+          ? (loan.termMonths || loan.paidMonths || 0)
+          : (loan.paidMonths || 0);
+        const effectiveNextPayment = isEffectivelyCompleted ? null : (loan.nextPayment || "-");
+
         return {
-          id: loan.loanId,
-          _id: loan._id,
-          type: loan.loanType,
+          // ID fields: mobile backend uses loanId, web may use id or _id
+          id: loan.loanId || loan.id || loan._id,
+          _id: loan._id || loan.id,
+          // Type: mobile backend uses loanType, web may use type
+          type: loan.loanType || loan.type || "Personal",
           amount: formatCurrency(rawAmt),
           amountNum: rawAmt,
-          status: loan.status,
+          status: effectiveStatus,
           monthlyPayment: formatCurrency(rawMonthly),
           monthlyPaymentNum: rawMonthly,
-          remainingBalance: formatCurrency(rawRem),
-          remainingBalanceNum: rawRem,
-          totalRepayment: formatCurrency(loan.totalRepayment || (rawMonthly * (loan.termMonths || 1))),
-          totalInterest: formatCurrency(loan.totalInterest || 0),
-          termMonths: loan.termMonths,
-          paidMonths: loan.paidMonths || 0,
-          disbursed: loan.disbursed,
-          nextPayment: loan.nextPayment || "-",
-          applied: loan.appliedDate,
-          purpose: loan.purpose,
-          phoneNumber: loan.phoneNumber,
-          memberName: loan.memberName,
-          disbursementMethod: loan.disbursementMethod,
-          accountNumber: loan.accountNumber,
-          interestRate: loan.interestRate,
+          remainingBalance: formatCurrency(isEffectivelyCompleted ? 0 : rawRem),
+          remainingBalanceNum: isEffectivelyCompleted ? 0 : rawRem,
+          totalRepayment: formatCurrency(loan.totalRepayment || loan.totalAmount || (rawMonthly * (loan.termMonths || loan.term || 1))),
+          totalInterest: formatCurrency(loan.totalInterest || loan.interest || 0),
+          termMonths: loan.termMonths || loan.term || 0,
+          paidMonths: effectivePaidMonths,
+          disbursed: loan.disbursed || false,
+          nextPayment: effectiveNextPayment,
+          // Date: mobile backend uses appliedDate, web may use createdAt or dateApplied
+          applied: loan.appliedDate || loan.createdAt || loan.dateApplied || loan.applicationDate,
+          purpose: loan.purpose || "",
+          phoneNumber: loan.phoneNumber || loan.phone || "",
+          memberName: loan.memberName || loan.fullName || loan.name || "",
+          disbursementMethod: loan.disbursementMethod || "",
+          accountNumber: loan.accountNumber || loan.disbursementAccount || "",
+          interestRate: loan.interestRate || 0,
           adminModified: loan.adminModified || false,
           originalAmount: loan.originalAmount,
           originalTermMonths: loan.originalTermMonths,
@@ -1417,6 +1437,12 @@ export default function LoansScreen({ navigation, route }) {
 
   // Open Pay Now modal
   const handleOpenPayNow = (loan) => {
+    // Block if loan is already fully paid (remainingBalance <= 0 or completed status)
+    if (loan.remainingBalanceNum <= 0 || loan.status === "completed") {
+      showAlert("Loan Fully Paid", "This loan has already been fully settled. No further payments are required.");
+      return;
+    }
+
     // Open immediately to avoid blocking user
     setPayNowLoan(loan);
     setPayType("regular");
@@ -1430,13 +1456,13 @@ export default function LoansScreen({ navigation, route }) {
     
     // Refresh data in background
     loadLoansFromAPI().then(() => {
-       // Optional: Check if status changed in background
+       // Check if status changed in background (e.g. walk-in payment completed the loan)
        AsyncStorage.getItem(`faithly_loans_${userEmail}`).then(latest => {
          if (latest) {
            const current = JSON.parse(latest).find(l => l.id === loan.id);
-           if (current && current.status === "completed") {
+           if (current && (current.status === "completed" || current.remainingBalanceNum <= 0)) {
              setPayNowModalOpen(false);
-             Alert.alert("Loan Completed", "This loan has already been fully paid.");
+             showAlert("Loan Fully Paid", "This loan has been fully settled via a recent payment. No further payments are required.");
            }
          }
        });
@@ -1751,12 +1777,14 @@ export default function LoansScreen({ navigation, route }) {
             const completedCount = loansData.filter(l => ["completed", "paid", "finished"].includes((l.status || "").toLowerCase())).length;
             const activeCount = loansData.filter(l => ["active", "approved", "member_accepted"].includes((l.status || "").toLowerCase())).length;
             const pendingCount = loansData.filter(l => ["pending", "under_review", "in_review"].includes((l.status || "").toLowerCase())).length;
+            const rejectedCount = loansData.filter(l => (l.status || "").toLowerCase() === "rejected").length;
 
             const tabs = [
               { id: "all", label: `All (${loansData.length})` },
               { id: "active", label: `Active (${activeCount})` },
               { id: "completed", label: `Completed (${completedCount})` },
               { id: "pending", label: `Pending (${pendingCount})` },
+              { id: "rejected", label: `Rejected (${rejectedCount})` },
             ];
 
             return (
@@ -1794,6 +1822,7 @@ export default function LoansScreen({ navigation, route }) {
               if (loanFilterTab === "active") return ["active", "approved", "member_accepted"].includes(st);
               if (loanFilterTab === "completed") return ["completed", "paid", "finished"].includes(st);
               if (loanFilterTab === "pending") return ["pending", "under_review", "in_review"].includes(st);
+              if (loanFilterTab === "rejected") return st === "rejected";
               return true;
             });
 
@@ -1917,15 +1946,35 @@ export default function LoansScreen({ navigation, route }) {
                   )}
 
                   {/* Active Loan: Repayment Progress + Stats + Buttons */}
-                  {loan.status === "active" && (
+                  {loan.status === "active" && (() => {
+                    // Detect if loan is fully paid (walk-in lump-sum or balance zeroed)
+                    const isFullyPaid = loan.remainingBalanceNum <= 0;
+                    // Progress: 100% if fully paid, otherwise based on paidMonths
+                    const progressPct = isFullyPaid
+                      ? 100
+                      : (loan.termMonths ? Math.min(100, ((loan.paidMonths || 0) / loan.termMonths) * 100) : 0);
+
+                    return (
                     <>
+                      {/* Fully Paid Banner */}
+                      {isFullyPaid && (
+                        <View style={{ backgroundColor: "rgba(52,199,89,0.12)", paddingVertical: s(10), paddingHorizontal: s(14), borderRadius: s(8), marginBottom: s(10), borderWidth: 1, borderColor: "rgba(52,199,89,0.25)", alignItems: "center" }}>
+                          <Text style={{ color: C.green, fontSize: fs(13), fontWeight: "700" }}>✓ Loan Fully Paid</Text>
+                          <Text style={{ color: colors.textMuted, fontSize: fs(11), marginTop: 2 }}>This loan has been fully settled. No further payments required.</Text>
+                        </View>
+                      )}
+
                       <View style={{ marginTop: 4, marginBottom: 14 }}>
                         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                           <Text style={{ fontSize: fs(12), color: "#0D1F45", fontWeight: "600" }}>Repayment progress</Text>
-                          <Text style={{ fontSize: fs(12), color: colors.textMuted }}>{loan.paidMonths || 0} of {loan.termMonths || 0} payments made</Text>
+                          <Text style={{ fontSize: fs(12), color: colors.textMuted }}>
+                            {isFullyPaid
+                              ? `${loan.termMonths || loan.paidMonths || 0} of ${loan.termMonths || 0} payments made`
+                              : `${loan.paidMonths || 0} of ${loan.termMonths || 0} payments made`}
+                          </Text>
                         </View>
                         <View style={{ height: 6, backgroundColor: colors.inputBg || "#E8ECF0", borderRadius: 3, overflow: "hidden" }}>
-                          <View style={{ height: "100%", backgroundColor: "#0D1F45", borderRadius: 3, width: `${loan.termMonths ? Math.min(100, ((loan.paidMonths || 0) / loan.termMonths) * 100) : 0}%` }} />
+                          <View style={{ height: "100%", backgroundColor: isFullyPaid ? C.green : "#0D1F45", borderRadius: 3, width: `${progressPct}%` }} />
                         </View>
                       </View>
 
@@ -1938,13 +1987,13 @@ export default function LoansScreen({ navigation, route }) {
                         </View>
                         <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
                           <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Remaining balance</Text>
-                          <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>
-                            {typeof loan.remainingBalance === 'number' ? `₱${loan.remainingBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : loan.remainingBalance}
+                          <Text style={{ fontSize: fs(14), fontWeight: "700", color: isFullyPaid ? C.green : colors.textDark }}>
+                            {isFullyPaid ? "₱0.00" : (typeof loan.remainingBalance === 'number' ? `₱${loan.remainingBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : loan.remainingBalance)}
                           </Text>
                         </View>
                         <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
-                          <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Next due date</Text>
-                          <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>{loan.nextPayment || "-"}</Text>
+                          <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>{isFullyPaid ? "Status" : "Next due date"}</Text>
+                          <Text style={{ fontSize: fs(14), fontWeight: "700", color: isFullyPaid ? C.green : colors.textDark }}>{isFullyPaid ? "Settled" : (loan.nextPayment || "-")}</Text>
                         </View>
                       </View>
 
@@ -1966,16 +2015,23 @@ export default function LoansScreen({ navigation, route }) {
                         >
                           <Text style={{ fontSize: 12.5, fontWeight: "700", color: colors.textDark }}>Loan details</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
-                          style={{ flex: 1, backgroundColor: C.blue, borderRadius: s(8), paddingVertical: s(10), alignItems: "center" }}
-                          activeOpacity={0.8}
-                          onPress={() => handleOpenPayNow(loan)}
-                        >
-                          <Text style={{ fontSize: 12.5, fontWeight: "700", color: "#FFF" }}>Pay now</Text>
-                        </TouchableOpacity>
+                        {isFullyPaid ? (
+                          <View style={{ flex: 1, backgroundColor: "rgba(52,199,89,0.12)", borderRadius: s(8), paddingVertical: s(10), alignItems: "center", borderWidth: 1, borderColor: "rgba(52,199,89,0.3)" }}>
+                            <Text style={{ fontSize: 12.5, fontWeight: "700", color: C.green }}>✓ Fully Paid</Text>
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            style={{ flex: 1, backgroundColor: C.blue, borderRadius: s(8), paddingVertical: s(10), alignItems: "center" }}
+                            activeOpacity={0.8}
+                            onPress={() => handleOpenPayNow(loan)}
+                          >
+                            <Text style={{ fontSize: 12.5, fontWeight: "700", color: "#FFF" }}>Pay now</Text>
+                          </TouchableOpacity>
+                        )}
                       </View>
                     </>
-                  )}
+                    );
+                  })()}
 
                   {/* Non-Active Loans (Completed, Pending, Approved, Member Accepted, Rejected) */}
                   {loan.status !== "active" && (
