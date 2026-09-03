@@ -889,7 +889,7 @@ export default function LoansScreen({ navigation, route }) {
           totalBorrowed += loan.amountNum || 0;
         }
         if (loan.status === "active") {
-          totalRemaining += loan.remainingBalance || 0;
+          totalRemaining += loan.remainingBalanceNum || 0;
           activeCount++;
         }
       });
@@ -925,7 +925,7 @@ export default function LoansScreen({ navigation, route }) {
         totalBorrowed += loan.amountNum || 0;
       }
       if (loan.status === "active") {
-        totalRemaining += loan.remainingBalanceNum || loan.remainingBalance || 0;
+        totalRemaining += loan.remainingBalanceNum || 0;
         activeCount++;
       }
     });
@@ -3365,7 +3365,7 @@ export default function LoansScreen({ navigation, route }) {
                       )}
                     </View>
                     <Text style={{ fontSize: fs(26), fontWeight: "800", color: colors.textDark, marginBottom: 2 }}>
-                      ₱{payType === "regular" ? (payNowLoan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }) : payType === "full" ? (payNowLoan.remainingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }) : customPayAmount ? customPayAmount : "0.00"}
+                      ₱{payType === "regular" ? (payNowLoan.monthlyPaymentNum || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }) : payType === "full" ? (payNowLoan.remainingBalanceNum || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }) : customPayAmount ? customPayAmount : "0.00"}
                     </Text>
                     <Text style={{ fontSize: fs(11), color: colors.textMuted }}>{payType === "full" ? "Full Remaining Balance" : payType === "custom" ? "Custom Amount" : `Due ${payNowLoan.nextPayment || "-"}`}</Text>
                   </View>
