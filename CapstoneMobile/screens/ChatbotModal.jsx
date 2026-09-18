@@ -15,6 +15,7 @@ import {
 import Markdown from "react-native-markdown-display";
 import { useTheme } from "../components/ThemeContext";
 import { chatWithBot } from "../services/AuthService";
+import { fmtTime } from "../services/dateUtils";
 
 const CHATBOT_LOGO = require("../assets/puac_logo.png");
 
@@ -101,10 +102,7 @@ export default function ChatbotModal({ visible, onClose }) {
       id: Date.now(),
       type: "user",
       text: userText,
-      time: new Date().toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-      }),
+      time: fmtTime(new Date()),
     };
 
     // Format history for backend (last 8 messages) before adding new user message.
@@ -138,10 +136,7 @@ export default function ChatbotModal({ visible, onClose }) {
           id: Date.now() + 1,
           type: "bot",
           text: response.reply,
-          time: new Date().toLocaleTimeString("en-US", {
-            hour: "numeric",
-            minute: "2-digit",
-          }),
+          time: fmtTime(new Date()),
         };
         setMessages((prev) => [...prev, botResponse]);
         if (response.quickReplies && response.quickReplies.length > 0) {
@@ -156,10 +151,7 @@ export default function ChatbotModal({ visible, onClose }) {
         id: Date.now() + 1,
         type: "bot",
         text: "I'm sorry, I am having trouble connecting to the server right now. Please try again later.",
-        time: new Date().toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
+        time: fmtTime(new Date()),
       };
       setMessages((prev) => [...prev, errorResponse]);
     } finally {

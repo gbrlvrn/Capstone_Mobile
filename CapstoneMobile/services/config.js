@@ -55,7 +55,7 @@ function getBaseUrl() {
   // The local backend (port 5001) is only a subset of routes and lacks
   // /login, /register, /notifications/feed, etc. which live on the web server.
   // Override this ONLY if you are actively developing local backend routes.
-  const FORCE_LOCAL_IN_DEV = false;
+  const FORCE_LOCAL_IN_DEV = true;
   if (FORCE_LOCAL_IN_DEV) {
     const ip = getDevIP();
     if (ip) {

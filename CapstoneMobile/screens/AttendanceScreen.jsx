@@ -25,6 +25,7 @@ import { useToast } from "../components/ToastContext";
 import FloatingNavBar from "../components/FloatingNavBar";
 import OfflineBanner from "../components/OfflineBanner";
 import { scanQRAttendance, getAttendanceHistory, getAttendanceStats } from "../services/AuthService";
+import { fmtDateSlash, fmtDateWithWeekday, fmtTime } from "../services/dateUtils";
 
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -599,10 +600,10 @@ export default function AttendanceScreen({ navigation, route }) {
                     {record.service || record.type || "Check-in"}
                   </Text>
                   <Text style={[styles.tableCell, styles.tableCol2]}>
-                    {record.date || (record.createdAt ? new Date(record.createdAt).toLocaleDateString("en-US") : "-")}
+                    {record.date || (record.createdAt ? fmtDateSlash(record.createdAt) : "-")}
                   </Text>
                   <Text style={[styles.tableCell, styles.tableCol3]}>
-                    {record.time || (record.createdAt ? new Date(record.createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "-")}
+                    {record.time || (record.createdAt ? fmtTime(record.createdAt) : "-")}
                   </Text>
                   <Ionicons name="chevron-forward" size={14} color={colors.textMuted} style={{ marginLeft: 4 }} />
                 </TouchableOpacity>
@@ -952,7 +953,7 @@ export default function AttendanceScreen({ navigation, route }) {
                       <Text style={[styles.detailRowLabel, { color: colors.textMuted }]}>Date</Text>
                     </View>
                     <Text style={[styles.detailRowValue, { color: colors.textDark }]}>
-                      {selectedRecord?.date || (selectedRecord?.createdAt ? new Date(selectedRecord.createdAt).toLocaleDateString("en-US", { weekday: "short", year: "numeric", month: "short", day: "numeric" }) : "-")}
+                      {selectedRecord?.date || (selectedRecord?.createdAt ? fmtDateWithWeekday(selectedRecord.createdAt) : "-")}
                     </Text>
                   </View>
 
@@ -962,7 +963,7 @@ export default function AttendanceScreen({ navigation, route }) {
                       <Text style={[styles.detailRowLabel, { color: colors.textMuted }]}>Time</Text>
                     </View>
                     <Text style={[styles.detailRowValue, { color: colors.textDark }]}>
-                      {selectedRecord?.time || (selectedRecord?.createdAt ? new Date(selectedRecord.createdAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "-")}
+                      {selectedRecord?.time || (selectedRecord?.createdAt ? fmtTime(selectedRecord.createdAt) : "-")}
                     </Text>
                   </View>
 

@@ -20,6 +20,7 @@ import { getNotificationsFeed, getReadNotificationIds, markNotificationsRead } f
 import * as Notifications from 'expo-notifications';
 import OfflineBanner from "../components/OfflineBanner";
 import { SkeletonBlock, SkeletonLine, SkeletonAvatar } from "../components/SkeletonLoader";
+import { fmtDateMonthDay } from "../services/dateUtils";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
@@ -158,7 +159,7 @@ function formatTime(dateStr) {
   if (diffHrs < 24) return `${diffHrs}h ago`;
   const diffDays = Math.floor(diffHrs / 24);
   if (diffDays < 7) return `${diffDays}d ago`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return fmtDateMonthDay(d);
 }
 
 // Legacy helper — kept for backward compatibility with addNotification calls from other screens

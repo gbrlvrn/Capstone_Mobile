@@ -163,6 +163,8 @@ export default function DonationsScreen({ navigation, route }) {
   const [summaryDropdownOpen, setSummaryDropdownOpen] = useState(false);
   const [showAllLegendCategories, setShowAllLegendCategories] = useState(false);
   const [showBreakdown, setShowBreakdown] = useState(false);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [donorAcknowledged, setDonorAcknowledged] = useState(false);
 
   const [paymentApprovalMethod, setPaymentApprovalMethod] = useState("manual");
   const [subMethod, setSubMethod] = useState("GCash");
@@ -666,6 +668,7 @@ export default function DonationsScreen({ navigation, route }) {
       paymentMethod: resolvedMethod,  // send both for maximum compatibility
       isRecurring: isRecurring,
       type: isRecurring ? "Recurring" : "One-time",
+      showDonorName: donorAcknowledged,
     };
 
     console.log("[Donation] community=", communityValue || "(empty—backend will use user.branch)", "| method=", resolvedMethod);
@@ -741,6 +744,7 @@ export default function DonationsScreen({ navigation, route }) {
       setAccountNumber("");
       setIsRecurring(false);
       setProofImage(null);
+      setDonorAcknowledged(false);
       setSubmitting(false);
 
       // Haptic success feedback
@@ -1426,7 +1430,25 @@ export default function DonationsScreen({ navigation, route }) {
           <TouchableOpacity 
             style={[styles.donateBtn, submitting && { opacity: 0.7 }]} 
             activeOpacity={0.85}
-            onPress={handleSubmitDonation}
+            onPress={() => {
+              // Run validation before showing confirmation modal
+              setFormError("");
+              const amt = parseFloat(donationAmount.replace(/,/g, "")) || 0;
+              if (amt <= 0) { setFormError("Please enter a valid donation amount."); return; }
+              if (amt > 500000) { setFormError("Maximum donation amount is \u20B1500,000."); return; }
+              if (!selectedCategory) { setFormError("Please select a donation category."); return; }
+              if (!selectedBranch) { setFormError("Please select a community to donate to."); return; }
+              const isManual = paymentApprovalMethod === "manual";
+              const isCash = selectedPayment === "cash";
+              if (isManual && !isCash) {
+                if (!accountName || !accountName.trim()) { setFormError("Please enter your account name."); return; }
+                if (!accountNumber || !accountNumber.trim() || (selectedPayment === "gcash" && accountNumber === "+63")) { setFormError(selectedPayment === "gcash" ? "Please enter your phone number." : "Please enter your account number."); return; }
+                if (selectedPayment === "gcash" && !/^\+63\d{10}$/.test(accountNumber.replace(/\s/g, ""))) { setFormError("Phone number must have exactly 10 digits after +63."); return; }
+                if (selectedPayment === "bank" && accountNumber.length < 8) { setFormError("Bank account number must be at least 8 digits."); return; }
+                if (!proofImage || !proofImage.base64) { setFormError("Please upload proof of payment before submitting."); return; }
+              }
+              setConfirmModalOpen(true);
+            }}
             disabled={submitting}
           >
             {submitting ? (
@@ -1646,6 +1668,71 @@ export default function DonationsScreen({ navigation, route }) {
                 activeOpacity={0.8}
               >
                 <Text style={[styles.confirmBtnCancelText, { color: "#FFF" }]}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Donation Confirmation Modal */}
+      <Modal
+        visible={confirmModalOpen}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setConfirmModalOpen(false)}
+      >
+        <View style={styles.confirmOverlay}>
+          <View style={[styles.confirmDialog, { padding: 0, overflow: "hidden", backgroundColor: colors.cardBg, maxWidth: 400, alignItems: "stretch" }]}>
+            {/* Header */}
+            <View style={{ backgroundColor: C.blue, paddingVertical: s(20), paddingHorizontal: s(24), flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={{ fontSize: fs(19), fontWeight: "800", color: "#FFF", letterSpacing: 0.2 }}>Confirm Your Donation</Text>
+              <TouchableOpacity onPress={() => setConfirmModalOpen(false)} activeOpacity={0.7} style={{ padding: 6 }}>
+                <Text style={{ fontSize: fs(22), color: "rgba(255,255,255,0.8)", fontWeight: "bold" }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Summary */}
+            <View style={{ paddingHorizontal: s(24), paddingTop: s(22), paddingBottom: s(24) }}>
+              {[
+                { label: "Amount", value: `₱${parseFloat(donationAmount.replace(/,/g, "") || "0").toLocaleString()}` },
+                { label: "Category", value: selectedCategory },
+                { label: "Community", value: selectedBranch },
+                { label: "Payment Method", value: `${selectedPayment === "gcash" ? "E-Wallet" : selectedPayment === "bank" ? "Bank Transfer" : "Cash"} — ${subMethod}` },
+                { label: "Type", value: isRecurring ? "Recurring (Monthly)" : "One-time" },
+              ].map((item, i) => (
+                <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: s(13), borderBottomWidth: i < 4 ? 1 : 0, borderBottomColor: colors.cardBorder || "#F1F5F9" }}>
+                  <Text style={{ fontSize: fs(14), color: colors.textMuted, fontWeight: "500" }}>{item.label}</Text>
+                  <Text style={{ fontSize: fs(14), color: colors.textDark, fontWeight: "700", maxWidth: "58%", textAlign: "right" }}>{item.value}</Text>
+                </View>
+              ))}
+
+              {/* Divider */}
+              <View style={{ height: 1, backgroundColor: colors.cardBorder || "#F1F5F9", marginVertical: s(16) }} />
+
+              {/* Acknowledgment Checkbox */}
+              <TouchableOpacity
+                style={{ flexDirection: "row", alignItems: "center", gap: s(14), paddingVertical: s(8) }}
+                onPress={() => setDonorAcknowledged(!donorAcknowledged)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.checkbox, donorAcknowledged && styles.checkboxActive]}>
+                  {donorAcknowledged && <Text style={styles.checkmarkText}>✓</Text>}
+                </View>
+                <Text style={{ flex: 1, fontSize: fs(13), color: colors.textDark, fontWeight: "500", lineHeight: fs(19) }}>
+                  I agree to have my name displayed as a donor
+                </Text>
+              </TouchableOpacity>
+
+              {/* Confirm Button */}
+              <TouchableOpacity
+                style={[styles.donateBtn, { marginTop: s(22) }]}
+                activeOpacity={0.85}
+                onPress={() => {
+                  setConfirmModalOpen(false);
+                  handleSubmitDonation();
+                }}
+              >
+                <Text style={styles.donateBtnText}>Confirm & Submit</Text>
               </TouchableOpacity>
             </View>
           </View>

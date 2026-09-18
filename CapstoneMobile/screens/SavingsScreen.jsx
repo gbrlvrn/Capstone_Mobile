@@ -26,9 +26,21 @@ import { useAlert } from "../components/AlertContext";
 import { useFocusEffect } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import * as ExpoLinking from "expo-linking";
-import { getPublicSettings, getVerificationStatus, createSavingsDeposit, createSavingsTransfer, getSavingsData, createSavingsWithdrawal, createSavingsGoal } from "../services/AuthService";
+import { getPublicSettings, getVerificationStatus, createSavingsDeposit, createSavingsTransfer, getSavingsData, createSavingsWithdrawal, createSavingsGoal, verifyReceiptImage } from "../services/AuthService";
 import EmptyState from "../components/EmptyState";
 import OfflineBanner from "../components/OfflineBanner";
+import { fmtDateSlash, fmtDateTime } from "../services/dateUtils";
+import { safeFmtNum } from "../services/dateUtils";
+
+// Safe number formatting for Android Hermes (toLocaleString can crash)
+const _safeFmtNum = (num, decimals = 2) => {
+  if (num === null || num === undefined || isNaN(num)) num = 0;
+  const fixed = Math.abs(num).toFixed(decimals);
+  const [intPart, decPart] = fixed.split(".");
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const result = decPart !== undefined ? `${withCommas}.${decPart}` : withCommas;
+  return num < 0 ? `-${result}` : result;
+};
 
 
 
@@ -149,6 +161,7 @@ export default function SavingsScreen({ navigation, route }) {
   const [accountNumber, setAccountNumber] = useState("");
   const [referenceNumber, setReferenceNumber] = useState("");
   const [proofImage, setProofImage] = useState(null);
+  const [receiptVerification, setReceiptVerification] = useState(null); // { valid, provider, reason, verifying }
   const [activeDepositGoalId, setActiveDepositGoalId] = useState(null);
   const [showGoalDropdown, setShowGoalDropdown] = useState(false);
 
@@ -503,7 +516,7 @@ export default function SavingsScreen({ navigation, route }) {
     if (selectedGoal) {
       const remaining = (selectedGoal.target || 0) - (selectedGoal.amountSaved || 0);
       if (remaining > 0 && amount > remaining) {
-        setFormError(`Amount exceeds remaining goal balance of \u20B1${remaining.toLocaleString()}.`);
+        setFormError(`Amount exceeds remaining goal balance of \u20B1${_safeFmtNum(remaining)}.`);
         setSubmitting(false);
         return;
       }
@@ -516,9 +529,8 @@ export default function SavingsScreen({ navigation, route }) {
     }
 
     const isManual = paymentApprovalMethod === "manual";
-    const isCash = selectedPayment === "cash";
 
-    if (isManual && !isCash) {
+    if (isManual) {
       if (!accountName || !accountName.trim()) {
         setFormError("Please enter your account name.");
         setSubmitting(false);
@@ -534,15 +546,23 @@ export default function SavingsScreen({ navigation, route }) {
         setSubmitting(false);
         return;
       }
+      if (receiptVerification && receiptVerification.verifying) {
+        setFormError("Please wait for receipt verification to complete.");
+        setSubmitting(false);
+        return;
+      }
+      if (!receiptVerification || !receiptVerification.valid) {
+        setFormError(receiptVerification?.reason || "Please upload a valid e-wallet or bank transfer receipt.");
+        setSubmitting(false);
+        return;
+      }
     }
 
     const activeGoal = goals.find(g => g.id === activeDepositGoalId);
 
     // Build payload matching the web backend API spec exactly:
     // description (not note), paymentMethod as readable string, source field
-    const readableMethod = selectedPayment === "gcash" ? "GCash"
-                         : selectedPayment === "bank"  ? "Bank Transfer"
-                         : "Cash";
+    const readableMethod = selectedPayment === "bank" ? "Bank Transfer" : "GCash";
 
     let payload = {
       goalId: activeDepositGoalId,
@@ -557,7 +577,7 @@ export default function SavingsScreen({ navigation, route }) {
     // Always include reference number if provided
     if (referenceNumber.trim()) backendPayload.referenceNumber = referenceNumber.trim();
 
-    if (isManual && !isCash) {
+    if (isManual) {
       backendPayload.subMethod = subMethod;
       backendPayload.accountName = accountName;
       backendPayload.accountNumber = accountNumber;
@@ -565,14 +585,14 @@ export default function SavingsScreen({ navigation, route }) {
       backendPayload.proofFileName = "screenshot.jpg";
     }
 
-    if (!isManual && !isCash) {
+    if (!isManual) {
       backendPayload.successUrl = ExpoLinking.createURL("payment/success", { queryParams: { type: "savings" } });
       backendPayload.cancelUrl = ExpoLinking.createURL("payment/cancel");
     }
 
     try {
       const response = await createSavingsDeposit(backendPayload);
-      if (!isManual && !isCash && response && response.checkoutUrl) {
+      if (!isManual && response && response.checkoutUrl) {
         Linking.openURL(response.checkoutUrl);
       } else {
         // Show in-app success modal with deposit details
@@ -582,7 +602,7 @@ export default function SavingsScreen({ navigation, route }) {
           paymentMethod: backendPayload.paymentMethod,
           referenceNumber: backendPayload.referenceNumber || response?.deposit?.referenceNumber || "",
           goalName: goals.find(g => g.id === activeDepositGoalId)?.name || "Savings",
-          date: new Date().toLocaleString(),
+          date: fmtDateTime(new Date()),
         });
         loadSavingsData();
       }
@@ -598,10 +618,12 @@ export default function SavingsScreen({ navigation, route }) {
     setDepositAmount("");
     setDepositNote("");
     setProofImage(null);
+    setReceiptVerification(null);
     setAccountName("");
     setAccountNumber("");
     setReferenceNumber("");
     setActiveDepositGoalId(null);
+    setSelectedPayment("gcash");
     setDepositModalOpen(false);
     setSubmitting(false);
   };
@@ -642,13 +664,7 @@ export default function SavingsScreen({ navigation, route }) {
       fromGoalName: fromGoal?.name || "Source Goal",
       toGoalName: toGoal?.name || "Destination Goal",
       amount: amount,
-      date: new Date().toLocaleString(undefined, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      date: fmtDateTime(new Date()),
     };
 
     try {
@@ -1104,7 +1120,7 @@ export default function SavingsScreen({ navigation, route }) {
                 <Text style={[styles.statLabel, { color: colors.textMuted, fontSize: fs(11), textTransform: "uppercase" }]}>Total Savings</Text>
                 <Image source={ICONS.wallet} style={{ width: 14, height: 14, tintColor: C.blue }} resizeMode="contain" />
               </View>
-              <Text style={[styles.statValue, { color: C.green, marginTop: 4, fontSize: 18 }]}>₱{(totalSavingsToDisplay || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+              <Text style={[styles.statValue, { color: C.green, marginTop: 4, fontSize: 18 }]}>₱{_safeFmtNum(totalSavingsToDisplay || 0)}</Text>
               <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 4 }}>Current balance</Text>
             </Animated.View>
 
@@ -1114,7 +1130,7 @@ export default function SavingsScreen({ navigation, route }) {
                 <Text style={[styles.statLabel, { color: colors.textMuted, fontSize: fs(11), textTransform: "uppercase" }]}>This Month</Text>
                 <Image source={ICONS.calendar} style={{ width: 14, height: 14, tintColor: C.blue }} resizeMode="contain" />
               </View>
-              <Text style={[styles.statValue, { color: colors.textDark, marginTop: 4, fontSize: 18 }]}>₱{thisMonthTotalToDisplay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+              <Text style={[styles.statValue, { color: colors.textDark, marginTop: 4, fontSize: 18 }]}>₱{_safeFmtNum(thisMonthTotalToDisplay)}</Text>
               <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 4 }}>Deposited in {currentMonthName} {currentYearNum}</Text>
             </Animated.View>
 
@@ -1136,7 +1152,7 @@ export default function SavingsScreen({ navigation, route }) {
                 <Text style={[styles.statLabel, { color: colors.textMuted, fontSize: fs(11), textTransform: "uppercase" }]}>Max Loanable</Text>
                 <Image source={ICONS.document} style={{ width: 14, height: 14, tintColor: C.blue }} resizeMode="contain" />
               </View>
-              <Text style={[styles.statValue, { color: colors.textDark, marginTop: 4, fontSize: 18 }]}>₱{(totalSavingsToDisplay * 2).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+              <Text style={[styles.statValue, { color: colors.textDark, marginTop: 4, fontSize: 18 }]}>₱{_safeFmtNum(totalSavingsToDisplay * 2)}</Text>
               <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 4 }}>Personal loan (2x limits)</Text>
             </Animated.View>
           </View>
@@ -1164,11 +1180,11 @@ export default function SavingsScreen({ navigation, route }) {
                    <View style={styles.sleekGoalHeaderRow}>
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.sleekGoalName, { color: colors.textDark }]}>{goal.name}</Text>
-                        <Text style={[styles.sleekGoalSub, { color: colors.textMuted }]}>Target ₱{goal.target.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                        <Text style={[styles.sleekGoalSub, { color: colors.textMuted }]}>Target ₱{_safeFmtNum(goal.target)}</Text>
                       </View>
                       <View style={{ alignItems: "flex-end" }}>
-                        <Text style={[styles.sleekGoalSavedText, { color: colors.textDark }]}>₱{amountSaved.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-                        <Text style={[styles.sleekGoalSub, { color: colors.textMuted }]}>of ₱{goal.target.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                        <Text style={[styles.sleekGoalSavedText, { color: colors.textDark }]}>₱{_safeFmtNum(amountSaved)}</Text>
+                        <Text style={[styles.sleekGoalSub, { color: colors.textMuted }]}>of ₱{_safeFmtNum(goal.target)}</Text>
                       </View>
                    </View>
                    
@@ -1223,7 +1239,7 @@ export default function SavingsScreen({ navigation, route }) {
             {(showAllTransactions ? deposits : deposits.slice(0, 5)).map((dep, idx, arr) => {
               const displayStatus = (dep.status === "pending" && paymentApprovalMethod !== "manual") ? "confirmed" : (dep.status || "pending");
               const isWithdrawal = dep.type === "withdrawal";
-              const dateStr = (() => { try { const dt = new Date(dep.date || dep.createdAt); return isNaN(dt.getTime()) ? "" : dt.toLocaleDateString(); } catch { return ""; } })();
+              const dateStr = (() => { try { const dt = new Date(dep.date || dep.createdAt); return isNaN(dt.getTime()) ? "" : fmtDateSlash(dt); } catch { return ""; } })();
               return (
                 <TouchableOpacity
                   key={dep._id || dep.id || idx}
@@ -1247,7 +1263,7 @@ export default function SavingsScreen({ navigation, route }) {
                     ) : null}
                   </View>
                   <Text style={[styles.historyAmount, { color: isWithdrawal ? C.red : C.green }]}>
-                    {isWithdrawal ? "-" : "+"}₱{parseFloat(dep.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {isWithdrawal ? "-" : "+"}₱{_safeFmtNum(parseFloat(dep.amount))}
                   </Text>
                 </TouchableOpacity>
               );
@@ -1282,7 +1298,7 @@ export default function SavingsScreen({ navigation, route }) {
             {/* Receipt rows */}
             {[
               { label: "Goal", value: successDeposit?.goalName },
-              { label: "Amount", value: successDeposit ? `₱${successDeposit.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "" },
+              { label: "Amount", value: successDeposit ? `₱${_safeFmtNum(successDeposit.amount)}` : "" },
               { label: "Method", value: successDeposit?.paymentMethod },
               { label: "Description", value: successDeposit?.description },
               successDeposit?.referenceNumber ? { label: "Reference ID", value: successDeposit.referenceNumber } : null,
@@ -1337,7 +1353,7 @@ export default function SavingsScreen({ navigation, route }) {
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
                 <Text style={{ fontSize: fs(13), color: colors.textMuted || "#6B7FA3", fontWeight: "500" }}>Amount</Text>
                 <Text style={{ fontSize: fs(16), fontWeight: "800", color: "#34C759" }}>
-                  ₱{successTransfer ? successTransfer.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}
+                  ₱{successTransfer ? _safeFmtNum(successTransfer.amount) : "0.00"}
                 </Text>
               </View>
 
@@ -1376,7 +1392,7 @@ export default function SavingsScreen({ navigation, route }) {
                 <Text style={{ fontSize: fs(24), color: receiptTxn?.type === "withdrawal" ? C.red : C.green }}>{receiptTxn?.type === "withdrawal" ? "↓" : "↑"}</Text>
               </View>
               <Text style={{ fontSize: fs(26), fontWeight: "800", color: receiptTxn?.type === "withdrawal" ? C.red : C.green }}>
-                {receiptTxn?.type === "withdrawal" ? "-" : "+"}₱{receiptTxn ? parseFloat(receiptTxn.amount).toLocaleString(undefined, { minimumFractionDigits: 2 }) : ""}
+                {receiptTxn?.type === "withdrawal" ? "-" : "+"}₱{receiptTxn ? _safeFmtNum(parseFloat(receiptTxn.amount)) : ""}
               </Text>
               <View style={{ marginTop: 6, paddingHorizontal: s(12), paddingVertical: 3, borderRadius: s(20), backgroundColor: receiptTxn?.displayStatus === "confirmed" ? "rgba(52,199,89,0.12)" : receiptTxn?.displayStatus === "rejected" ? "rgba(231,76,60,0.12)" : "rgba(255,149,0,0.12)" }}>
                 <Text style={{ fontSize: fs(11), fontWeight: "700", color: receiptTxn?.displayStatus === "confirmed" ? C.green : receiptTxn?.displayStatus === "rejected" ? C.red : "#FF9500" }}>{(receiptTxn?.displayStatus || "").toUpperCase()}</Text>
@@ -1520,20 +1536,47 @@ export default function SavingsScreen({ navigation, route }) {
 
                 <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: SCREEN_WIDTH * 1.2 }}>
                   <Text style={styles.customLabel}>GOAL</Text>
-                  <View style={{ zIndex: 10, position: "relative" }}>
-                    <TouchableOpacity style={styles.dropdownSelectBox} activeOpacity={0.8} onPress={() => setShowGoalDropdown(!showGoalDropdown)}>
+                  <View style={{ marginBottom: 0 }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.dropdownSelectBox,
+                        showGoalDropdown && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderColor: C.navBg }
+                      ]}
+                      activeOpacity={0.8}
+                      onPress={() => setShowGoalDropdown(!showGoalDropdown)}
+                    >
                       <Text style={[styles.dropdownSelectedText, !activeDepositGoalId && {color: "#6B7FA3"}]}>
                         {activeDepositGoalId 
                           ? (() => { const g = goals.find(x => x.id === activeDepositGoalId); return g ? `${g.name} · ₱${(g.amountSaved || 0).toLocaleString()} saved` : "Select a goal"; })()
                           : "Select a goal"}
                       </Text>
-                      <Text style={{ color: "#6B7FA3", fontSize: 16 }}>▾</Text>
+                      <Text style={{ color: "#6B7FA3", fontSize: 16 }}>{showGoalDropdown ? "▴" : "▾"}</Text>
                     </TouchableOpacity>
                     {showGoalDropdown && (
-                      <View style={styles.dropdownOptionsContainer}>
-                        {goals.map(g => (
-                          <TouchableOpacity key={g.id} style={styles.dropdownOption} onPress={() => { setActiveDepositGoalId(g.id); setShowGoalDropdown(false); }}>
-                            <Text style={styles.dropdownOptionText}>{g.name} · ₱{(g.amountSaved || 0).toLocaleString()} saved</Text>
+                      <View style={{
+                        borderWidth: 1,
+                        borderTopWidth: 0,
+                        borderColor: C.navBg,
+                        borderBottomLeftRadius: s(10),
+                        borderBottomRightRadius: s(10),
+                        backgroundColor: C.cardBg,
+                        overflow: "hidden"
+                      }}>
+                        {goals.map((g, idx) => (
+                          <TouchableOpacity
+                            key={g.id}
+                            style={{
+                              paddingHorizontal: s(14),
+                              paddingVertical: s(12),
+                              borderBottomWidth: idx < goals.length - 1 ? 1 : 0,
+                              borderBottomColor: C.cardBorder,
+                              backgroundColor: activeDepositGoalId === g.id ? "rgba(13,31,69,0.06)" : "transparent"
+                            }}
+                            onPress={() => { setActiveDepositGoalId(g.id); setShowGoalDropdown(false); }}
+                          >
+                            <Text style={[styles.dropdownOptionText, activeDepositGoalId === g.id && { fontWeight: "700", color: C.navBg }]}>
+                              {g.name} · ₱{(g.amountSaved || 0).toLocaleString()} saved
+                            </Text>
                           </TouchableOpacity>
                         ))}
                       </View>
@@ -1583,13 +1626,6 @@ export default function SavingsScreen({ navigation, route }) {
 
                   <Text style={[styles.customLabel, { marginTop: 18 }]}>PAYMENT METHOD</Text>
                   <View style={styles.radioMethodRow}>
-                    <TouchableOpacity style={[styles.radioMethodBox, selectedPayment === "cash" && styles.radioMethodBoxActive]} activeOpacity={0.9} onPress={() => setSelectedPayment("cash")}>
-                      <View style={[styles.radioOuter, selectedPayment === "cash" && styles.radioOuterActive]}>
-                        {selectedPayment === "cash" && <View style={styles.radioInner} />}
-                      </View>
-                      <Text style={styles.radioMethodText} numberOfLines={1} adjustsFontSizeToFit>Cash</Text>
-                    </TouchableOpacity>
-
                     <TouchableOpacity style={[styles.radioMethodBox, selectedPayment === "gcash" && styles.radioMethodBoxActive]} activeOpacity={0.9} onPress={() => setSelectedPayment("gcash")}>
                       <View style={[styles.radioOuter, selectedPayment === "gcash" && styles.radioOuterActive]}>
                         {selectedPayment === "gcash" && <View style={styles.radioInner} />}
@@ -1605,21 +1641,46 @@ export default function SavingsScreen({ navigation, route }) {
                     </TouchableOpacity>
                   </View>
 
-                  {paymentApprovalMethod === "manual" && selectedPayment !== "cash" && (
+                  {paymentApprovalMethod === "manual" && (
                     <View style={{ marginTop: 18 }}>
                       <Text style={styles.customLabel}>SUB-METHOD</Text>
-                      <View style={{ zIndex: 9, position: "relative" }}>
-                        <TouchableOpacity style={styles.dropdownSelectBox} activeOpacity={0.8} onPress={() => setSubMethodDropdownOpen(!subMethodDropdownOpen)}>
+                      <View style={{ marginBottom: 0 }}>
+                        <TouchableOpacity
+                          style={[
+                            styles.dropdownSelectBox,
+                            subMethodDropdownOpen && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderColor: C.navBg }
+                          ]}
+                          activeOpacity={0.8}
+                          onPress={() => setSubMethodDropdownOpen(!subMethodDropdownOpen)}
+                        >
                           <Text style={[styles.dropdownSelectedText]}>
                             {subMethod || "Select sub-method"}
                           </Text>
-                          <Text style={{ color: "#6B7FA3", fontSize: 16 }}>▾</Text>
+                          <Text style={{ color: "#6B7FA3", fontSize: 16 }}>{subMethodDropdownOpen ? "▴" : "▾"}</Text>
                         </TouchableOpacity>
                         {subMethodDropdownOpen && (
-                          <View style={styles.dropdownOptionsContainer}>
-                            {(selectedPayment === "gcash" ? ["GCash", "Maya"] : ["BDO", "BPI"]).map((sm) => (
-                              <TouchableOpacity key={sm} style={styles.dropdownOption} onPress={() => { setSubMethod(sm); setSubMethodDropdownOpen(false); }}>
-                                <Text style={styles.dropdownOptionText}>{sm}</Text>
+                          <View style={{
+                            borderWidth: 1,
+                            borderTopWidth: 0,
+                            borderColor: C.navBg,
+                            borderBottomLeftRadius: s(10),
+                            borderBottomRightRadius: s(10),
+                            backgroundColor: C.cardBg,
+                            overflow: "hidden"
+                          }}>
+                            {(selectedPayment === "gcash" ? ["GCash", "Maya"] : ["BDO", "BPI"]).map((sm, idx, arr) => (
+                              <TouchableOpacity
+                                key={sm}
+                                style={{
+                                  paddingHorizontal: s(14),
+                                  paddingVertical: s(12),
+                                  borderBottomWidth: idx < arr.length - 1 ? 1 : 0,
+                                  borderBottomColor: C.cardBorder,
+                                  backgroundColor: subMethod === sm ? "rgba(13,31,69,0.06)" : "transparent"
+                                }}
+                                onPress={() => { setSubMethod(sm); setSubMethodDropdownOpen(false); }}
+                              >
+                                <Text style={[styles.dropdownOptionText, subMethod === sm && { fontWeight: "700", color: C.navBg }]}>{sm}</Text>
                               </TouchableOpacity>
                             ))}
                           </View>
@@ -1681,24 +1742,55 @@ export default function SavingsScreen({ navigation, route }) {
                     onChangeText={setDepositNote}
                   />
 
-                  {paymentApprovalMethod === "manual" && selectedPayment !== "cash" && (
+                  {paymentApprovalMethod === "manual" && (
                     <View>
                       <Text style={[styles.customLabel, { marginTop: 18 }]}>PROOF OF PAYMENT *</Text>
                       {proofImage ? (
                         <View style={styles.proofPreviewContainer}>
                           <Image source={{ uri: proofImage.uri }} style={styles.proofPreview} resizeMode="cover" />
-                          <TouchableOpacity style={styles.proofRemoveBtn} onPress={() => setProofImage(null)}>
+                          <TouchableOpacity style={styles.proofRemoveBtn} onPress={() => { setProofImage(null); setReceiptVerification(null); }}>
                             <Text style={styles.proofRemoveText}>×</Text>
                           </TouchableOpacity>
-                          <View style={styles.proofAttachedBadge}>
-                            <Text style={styles.proofAttachedText}>✓ Attached</Text>
-                          </View>
+                          {receiptVerification?.verifying ? (
+                            <View style={[styles.proofAttachedBadge, { backgroundColor: "rgba(245,166,35,0.92)" }]}>
+                              <ActivityIndicator color="#FFFFFF" size="small" style={{ marginRight: 6 }} />
+                              <Text style={styles.proofAttachedText}>Verifying receipt...</Text>
+                            </View>
+                          ) : receiptVerification?.valid ? (
+                            <View style={[styles.proofAttachedBadge, { backgroundColor: "rgba(52,199,89,0.92)" }]}>
+                              <Text style={styles.proofAttachedText}>✓ Verified {receiptVerification.provider || "Receipt"}</Text>
+                            </View>
+                          ) : receiptVerification && !receiptVerification.valid ? (
+                            <View style={[styles.proofAttachedBadge, { backgroundColor: "rgba(231,76,60,0.92)" }]}>
+                              <Text style={styles.proofAttachedText}>✕ Invalid Receipt</Text>
+                            </View>
+                          ) : (
+                            <View style={styles.proofAttachedBadge}>
+                              <Text style={styles.proofAttachedText}>✓ Attached</Text>
+                            </View>
+                          )}
+                          {receiptVerification && !receiptVerification.verifying && !receiptVerification.valid && (
+                            <View style={{ position: "absolute", bottom: 8, left: 8, right: 8, backgroundColor: "rgba(231,76,60,0.9)", borderRadius: 8, padding: 8 }}>
+                              <Text style={{ color: "#fff", fontSize: 11, textAlign: "center", fontWeight: "600" }}>{receiptVerification.reason}</Text>
+                            </View>
+                          )}
                         </View>
                       ) : (
                         <TouchableOpacity style={styles.uploadDashedBox} activeOpacity={0.7} onPress={async () => {
                           const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: true, mediaTypes: "images", base64: true });
                           if (!result.canceled && result.assets?.[0]?.base64) {
-                            setProofImage({ uri: result.assets[0].uri, base64: result.assets[0].base64 }); setFormError("");
+                            const asset = result.assets[0];
+                            setProofImage({ uri: asset.uri, base64: asset.base64 }); setFormError("");
+                            // Auto-verify receipt via Gemini Vision
+                            setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
+                            verifyReceiptImage(asset.base64).then(verdict => {
+                              setReceiptVerification({ ...verdict, verifying: false });
+                              if (!verdict.valid) {
+                                setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");
+                              }
+                            }).catch(() => {
+                              setReceiptVerification({ valid: false, verifying: false, provider: null, reason: "Receipt verification failed. Please try again." });
+                            });
                           }
                         }}>
                           <Image source={ICONS.document} style={styles.uploadDashedIcon} resizeMode="contain" />
@@ -1713,11 +1805,11 @@ export default function SavingsScreen({ navigation, route }) {
               </View>
 
               <View style={styles.depositFooterBtns}>
-                 <TouchableOpacity style={styles.depositCancelBtn} activeOpacity={0.7} onPress={() => { setDepositModalOpen(false); setFormError(""); setProofImage(null); setShowGoalDropdown(false); }}>
+                 <TouchableOpacity style={styles.depositCancelBtn} activeOpacity={0.7} onPress={() => { setDepositModalOpen(false); setFormError(""); setProofImage(null); setReceiptVerification(null); setShowGoalDropdown(false); setSelectedPayment("gcash"); }}>
                    <Text style={styles.depositCancelText}>Cancel</Text>
                  </TouchableOpacity>
                  <TouchableOpacity style={[styles.depositConfirmBtn, submitting && { opacity: 0.7 }]} activeOpacity={0.8} onPress={handleAddDeposit} disabled={submitting}>
-                   {submitting ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.depositConfirmText}>{paymentApprovalMethod === "gateway" && selectedPayment !== "cash" ? "Proceed to Payment" : "Confirm deposit"}</Text>}
+                   {submitting ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.depositConfirmText}>{paymentApprovalMethod === "gateway" ? "Proceed to Payment" : "Confirm deposit"}</Text>}
                  </TouchableOpacity>
               </View>
 
@@ -1745,24 +1837,51 @@ export default function SavingsScreen({ navigation, route }) {
 
                 <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: SCREEN_WIDTH * 1.2 }}>
                   <Text style={styles.customLabel}>WITHDRAW FROM GOAL</Text>
-                  <View style={{ zIndex: 10, position: "relative" }}>
-                    <TouchableOpacity style={styles.dropdownSelectBox} activeOpacity={0.8} onPress={() => setShowWithdrawDropdown(!showWithdrawDropdown)}>
+                  <View style={{ marginBottom: 0 }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.dropdownSelectBox,
+                        showWithdrawDropdown && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderColor: C.navBg }
+                      ]}
+                      activeOpacity={0.8}
+                      onPress={() => setShowWithdrawDropdown(!showWithdrawDropdown)}
+                    >
                       <Text style={[styles.dropdownSelectedText, !withdrawGoalId && {color: "#6B7FA3"}]}>
                         {withdrawGoalId 
                           ? (() => { const g = goals.find(x => x.id === withdrawGoalId); return g ? `${g.name} · ₱${(g.amountSaved || 0).toLocaleString()} available` : "Select a goal"; })()
                           : "Select a goal"}
                       </Text>
-                      <Text style={{ color: "#6B7FA3", fontSize: 16 }}>▾</Text>
+                      <Text style={{ color: "#6B7FA3", fontSize: 16 }}>{showWithdrawDropdown ? "▴" : "▾"}</Text>
                     </TouchableOpacity>
                     {showWithdrawDropdown && (
-                      <View style={styles.dropdownOptionsContainer}>
-                        {goals.filter(g => (g.amountSaved || 0) > 0).map(g => (
-                          <TouchableOpacity key={g.id} style={styles.dropdownOption} onPress={() => { setWithdrawGoalId(g.id); setShowWithdrawDropdown(false); }}>
-                            <Text style={styles.dropdownOptionText}>{g.name} · ₱{(g.amountSaved || 0).toLocaleString()} available</Text>
+                      <View style={{
+                        borderWidth: 1,
+                        borderTopWidth: 0,
+                        borderColor: C.navBg,
+                        borderBottomLeftRadius: s(10),
+                        borderBottomRightRadius: s(10),
+                        backgroundColor: C.cardBg,
+                        overflow: "hidden"
+                      }}>
+                        {goals.filter(g => (g.amountSaved || 0) > 0).map((g, idx, arr) => (
+                          <TouchableOpacity
+                            key={g.id}
+                            style={{
+                              paddingHorizontal: s(14),
+                              paddingVertical: s(12),
+                              borderBottomWidth: idx < arr.length - 1 ? 1 : 0,
+                              borderBottomColor: C.cardBorder,
+                              backgroundColor: withdrawGoalId === g.id ? "rgba(13,31,69,0.06)" : "transparent"
+                            }}
+                            onPress={() => { setWithdrawGoalId(g.id); setShowWithdrawDropdown(false); }}
+                          >
+                            <Text style={[styles.dropdownOptionText, withdrawGoalId === g.id && { fontWeight: "700", color: C.navBg }]}>
+                              {g.name} · ₱{(g.amountSaved || 0).toLocaleString()} available
+                            </Text>
                           </TouchableOpacity>
                         ))}
                         {goals.filter(g => (g.amountSaved || 0) > 0).length === 0 && (
-                          <View style={styles.dropdownOption}>
+                          <View style={{ paddingHorizontal: s(14), paddingVertical: s(12) }}>
                             <Text style={[styles.dropdownOptionText, { color: "#6B7FA3" }]}>No goals with balance found.</Text>
                           </View>
                         )}
@@ -1903,20 +2022,47 @@ export default function SavingsScreen({ navigation, route }) {
 
                 <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: SCREEN_WIDTH * 1.2 }}>
                   <Text style={styles.customLabel}>FROM GOAL</Text>
-                  <View style={{ zIndex: 11, position: "relative", marginBottom: 18 }}>
-                    <TouchableOpacity style={styles.dropdownSelectBox} activeOpacity={0.8} onPress={() => { setShowTransferFromDropdown(!showTransferFromDropdown); setShowTransferToDropdown(false); }}>
+                  <View style={{ marginBottom: 18 }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.dropdownSelectBox,
+                        showTransferFromDropdown && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderColor: C.navBg }
+                      ]}
+                      activeOpacity={0.8}
+                      onPress={() => { setShowTransferFromDropdown(!showTransferFromDropdown); setShowTransferToDropdown(false); }}
+                    >
                       <Text style={[styles.dropdownSelectedText, !transferFromGoalId && {color: "#6B7FA3"}]}>
                         {transferFromGoalId 
                           ? (() => { const g = goals.find(x => x.id === transferFromGoalId); return g ? `${g.name} · ₱${(g.amountSaved || 0).toLocaleString()} available` : "Select source goal"; })()
                           : "Select source goal"}
                       </Text>
-                      <Text style={{ color: "#6B7FA3", fontSize: 16 }}>▾</Text>
+                      <Text style={{ color: "#6B7FA3", fontSize: 16 }}>{showTransferFromDropdown ? "▴" : "▾"}</Text>
                     </TouchableOpacity>
                     {showTransferFromDropdown && (
-                      <View style={styles.dropdownOptionsContainer}>
-                        {goals.map(g => (
-                          <TouchableOpacity key={g.id} style={styles.dropdownOption} onPress={() => { setTransferFromGoalId(g.id); setShowTransferFromDropdown(false); }}>
-                            <Text style={styles.dropdownOptionText}>{g.name} · ₱{(g.amountSaved || 0).toLocaleString()} available</Text>
+                      <View style={{
+                        borderWidth: 1,
+                        borderTopWidth: 0,
+                        borderColor: C.navBg,
+                        borderBottomLeftRadius: s(10),
+                        borderBottomRightRadius: s(10),
+                        backgroundColor: C.cardBg,
+                        overflow: "hidden"
+                      }}>
+                        {goals.map((g, idx) => (
+                          <TouchableOpacity
+                            key={g.id}
+                            style={{
+                              paddingHorizontal: s(14),
+                              paddingVertical: s(12),
+                              borderBottomWidth: idx < goals.length - 1 ? 1 : 0,
+                              borderBottomColor: C.cardBorder,
+                              backgroundColor: transferFromGoalId === g.id ? "rgba(13,31,69,0.06)" : "transparent"
+                            }}
+                            onPress={() => { setTransferFromGoalId(g.id); setShowTransferFromDropdown(false); }}
+                          >
+                            <Text style={[styles.dropdownOptionText, transferFromGoalId === g.id && { fontWeight: "700", color: C.navBg }]}>
+                              {g.name} · ₱{(g.amountSaved || 0).toLocaleString()} available
+                            </Text>
                           </TouchableOpacity>
                         ))}
                       </View>
@@ -1924,20 +2070,47 @@ export default function SavingsScreen({ navigation, route }) {
                   </View>
 
                   <Text style={styles.customLabel}>TO GOAL</Text>
-                  <View style={{ zIndex: 10, position: "relative", marginBottom: 18 }}>
-                    <TouchableOpacity style={styles.dropdownSelectBox} activeOpacity={0.8} onPress={() => { setShowTransferToDropdown(!showTransferToDropdown); setShowTransferFromDropdown(false); }}>
+                  <View style={{ marginBottom: 18 }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.dropdownSelectBox,
+                        showTransferToDropdown && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderColor: C.navBg }
+                      ]}
+                      activeOpacity={0.8}
+                      onPress={() => { setShowTransferToDropdown(!showTransferToDropdown); setShowTransferFromDropdown(false); }}
+                    >
                       <Text style={[styles.dropdownSelectedText, !transferToGoalId && {color: "#6B7FA3"}]}>
                         {transferToGoalId 
                           ? (() => { const g = goals.find(x => x.id === transferToGoalId); return g ? `${g.name}` : "Select destination goal"; })()
                           : "Select destination goal"}
                       </Text>
-                      <Text style={{ color: "#6B7FA3", fontSize: 16 }}>▾</Text>
+                      <Text style={{ color: "#6B7FA3", fontSize: 16 }}>{showTransferToDropdown ? "▴" : "▾"}</Text>
                     </TouchableOpacity>
                     {showTransferToDropdown && (
-                      <View style={styles.dropdownOptionsContainer}>
-                        {goals.map(g => (
-                          <TouchableOpacity key={g.id} style={styles.dropdownOption} onPress={() => { setTransferToGoalId(g.id); setShowTransferToDropdown(false); }}>
-                            <Text style={styles.dropdownOptionText}>{g.name}</Text>
+                      <View style={{
+                        borderWidth: 1,
+                        borderTopWidth: 0,
+                        borderColor: C.navBg,
+                        borderBottomLeftRadius: s(10),
+                        borderBottomRightRadius: s(10),
+                        backgroundColor: C.cardBg,
+                        overflow: "hidden"
+                      }}>
+                        {goals.map((g, idx) => (
+                          <TouchableOpacity
+                            key={g.id}
+                            style={{
+                              paddingHorizontal: s(14),
+                              paddingVertical: s(12),
+                              borderBottomWidth: idx < goals.length - 1 ? 1 : 0,
+                              borderBottomColor: C.cardBorder,
+                              backgroundColor: transferToGoalId === g.id ? "rgba(13,31,69,0.06)" : "transparent"
+                            }}
+                            onPress={() => { setTransferToGoalId(g.id); setShowTransferToDropdown(false); }}
+                          >
+                            <Text style={[styles.dropdownOptionText, transferToGoalId === g.id && { fontWeight: "700", color: C.navBg }]}>
+                              {g.name}
+                            </Text>
                           </TouchableOpacity>
                         ))}
                       </View>

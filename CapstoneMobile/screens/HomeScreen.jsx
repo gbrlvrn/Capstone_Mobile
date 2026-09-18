@@ -20,11 +20,12 @@ import FloatingNavBar from "../components/FloatingNavBar";
 import { SkeletonMemberCard, SkeletonCard, SkeletonQuickAction } from "../components/SkeletonLoader";
 import { useToast } from "../components/ToastContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getVerificationStatus, getProfile, getAnnouncements, getDonations, getSavingsData, getAttendanceHistory, getLoans, getProfilePhotoUri, getNotificationsFeed } from "../services/AuthService";
+import { getVerificationStatus, getProfile, getAnnouncements, getDonations, getSavingsData, getAttendanceHistory, getLoans, getProfilePhotoUri, getNotificationsFeed, getPublicDonations } from "../services/AuthService";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTheme } from "../components/ThemeContext";
 import OfflineBanner from "../components/OfflineBanner";
 import { API_CONFIG } from "../services/config";
+import { fmtDateMonthDay, fmtDateShort, fmtDayMonth, safeFmtNum } from "../services/dateUtils";
 
 const getImageUrl = (url) => {
   if (!url) return null;
@@ -225,6 +226,7 @@ export default function HomeScreen({ navigation, route }) {
   const [userName, setUserName] = useState("");
   const [userProfilePhoto, setUserProfilePhoto] = useState("");
   const [isEmailVisible, setIsEmailVisible] = useState(false);
+  const [publicDonations, setPublicDonations] = useState([]);
 
   // Live stats
   const [activeLoans, setActiveLoans] = useState(0);
@@ -241,6 +243,11 @@ export default function HomeScreen({ navigation, route }) {
   const [rawDonations, setRawDonations] = useState([]);
   const slideX = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
   const indicatorPosition = useRef(new Animated.Value(0)).current;
+  const donorListRef = useRef(null);
+  const donorScrollOffset = useRef(0);
+  const donorScrollPaused = useRef(false);
+  const donorContentWidth = useRef(0);
+  const donorViewWidth = useRef(0);
 
   const displayAttendanceCount = useMemo(() => {
     const now = new Date();
@@ -562,7 +569,7 @@ export default function HomeScreen({ navigation, route }) {
           if (diffHrs < 24) return `${diffHrs}h ago`;
           const diffDays = Math.floor(diffHrs / 24);
           if (diffDays < 7) return `${diffDays}d ago`;
-          return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          return fmtDateMonthDay(d);
         };
 
         try {
@@ -840,6 +847,39 @@ export default function HomeScreen({ navigation, route }) {
       loadStats();
     }, [userEmail])
   );
+
+  // Fetch public donations for donor wall
+  useFocusEffect(
+    useCallback(() => {
+      const loadPublicDonations = async () => {
+        try {
+          const result = await getPublicDonations();
+          if (result?.donations && Array.isArray(result.donations)) {
+            setPublicDonations(result.donations);
+          }
+        } catch {
+          // Silently ignore — donor wall is optional
+        }
+      };
+      loadPublicDonations();
+    }, [])
+  );
+
+  // Auto-scroll donor wall
+  useEffect(() => {
+    if (publicDonations.length < 2) return;
+    const interval = setInterval(() => {
+      if (donorScrollPaused.current || !donorListRef.current) return;
+      const maxScroll = donorContentWidth.current - donorViewWidth.current;
+      if (maxScroll <= 0) return;
+      donorScrollOffset.current += 0.6;
+      if (donorScrollOffset.current >= maxScroll) {
+        donorScrollOffset.current = 0;
+      }
+      donorListRef.current.scrollToOffset({ offset: donorScrollOffset.current, animated: false });
+    }, 30);
+    return () => clearInterval(interval);
+  }, [publicDonations]);
 
   // Filtered tabs based on role (members don't see Loans)
   const TAB_ITEMS = userRole !== "officer"
@@ -1132,7 +1172,7 @@ export default function HomeScreen({ navigation, route }) {
                           numberOfLines={1}
                           minimumFontScale={0.5}
                         >
-                          ₱{remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          ₱{safeFmtNum(remainingBalance)}
                         </Text>
                     </View>
                     <View style={styles.loanHubDivider} />
@@ -1149,7 +1189,7 @@ export default function HomeScreen({ navigation, route }) {
                           if (!nextPaymentDate) return "No upcoming payments";
                           const d = new Date(nextPaymentDate);
                           if (isNaN(d.getTime())) return nextPaymentDate; // Fallback to raw string if invalid
-                          return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                          return fmtDateShort(d);
                         })()}
                       </Text>
                       {nextPaymentDate && (
@@ -1253,7 +1293,7 @@ export default function HomeScreen({ navigation, route }) {
                     adjustsFontSizeToFit
                     minimumFontScale={0.7}
                   >
-                    ₱{displayDonatedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ₱{safeFmtNum(displayDonatedAmount)}
                   </Text>
                   <Text style={{ fontSize: fs(10), color: colors.textMuted, marginTop: 2 }}>
                     {activityFilter === "month"
@@ -1471,6 +1511,75 @@ export default function HomeScreen({ navigation, route }) {
           )}
         </View>
 
+        {/* ── Recent Donors Section ────────────────────────── */}
+        {publicDonations.length > 0 && (
+          <View style={[styles.section, { marginBottom: 18 }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: s(14), paddingHorizontal: 2 }}>
+              <Text style={[styles.sectionTitle, { color: colors.textDark, marginBottom: 0 }]}>Recent Donors</Text>
+            </View>
+            <FlatList
+              ref={donorListRef}
+              data={publicDonations}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingRight: 16 }}
+              keyExtractor={(item) => item.donationId || item._id || Math.random().toString()}
+              onContentSizeChange={(w) => { donorContentWidth.current = w; }}
+              onLayout={(e) => { donorViewWidth.current = e.nativeEvent.layout.width; }}
+              onScrollBeginDrag={() => { donorScrollPaused.current = true; }}
+              onScrollEndDrag={() => { donorScrollPaused.current = false; }}
+              onMomentumScrollEnd={(e) => { donorScrollOffset.current = e.nativeEvent.contentOffset.x; }}
+              renderItem={({ item }) => {
+                const timeAgo = (() => {
+                  if (!item.confirmedAt) return "";
+                  const diff = Date.now() - new Date(item.confirmedAt).getTime();
+                  const mins = Math.floor(diff / 60000);
+                  if (mins < 1) return "Just now";
+                  if (mins < 60) return `${mins}m ago`;
+                  const hrs = Math.floor(mins / 60);
+                  if (hrs < 24) return `${hrs}h ago`;
+                  const days = Math.floor(hrs / 24);
+                  if (days < 7) return `${days}d ago`;
+                  return fmtDateMonthDay(item.confirmedAt);
+                })();
+                return (
+                  <View style={{
+                    backgroundColor: colors.cardBg,
+                    borderRadius: s(14),
+                    padding: s(14),
+                    marginRight: s(12),
+                    width: s(170),
+                    borderWidth: 1,
+                    borderColor: colors.cardBorder || "#F1F5F9",
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.06,
+                    shadowRadius: 6,
+                    elevation: 2,
+                    borderLeftWidth: 3,
+                    borderLeftColor: C.green,
+                  }}>
+                    <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark, marginBottom: 4 }} numberOfLines={1}>
+                      {item.member || "Anonymous"}
+                    </Text>
+                    <Text style={{ fontSize: fs(16), fontWeight: "800", color: C.blue, marginBottom: 4 }}>
+                      {`₱${(item.amount || 0).toLocaleString()}`}
+                    </Text>
+                    <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: 2 }} numberOfLines={1}>
+                      {item.category || "General"}
+                    </Text>
+                    {timeAgo ? (
+                      <Text style={{ fontSize: fs(10), color: colors.textDimmed || "#9CA3AF", marginTop: 2 }}>
+                        {timeAgo}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              }}
+            />
+          </View>
+        )}
+
         {/* ── Announcements Carousel ────────────────────────── */}
         {Array.isArray(announcements) && announcements.length > 0 && (() => {
           const visibleAnns = announcements.filter(a => !dismissedAnnouncements.includes(a.id));
@@ -1479,7 +1588,7 @@ export default function HomeScreen({ navigation, route }) {
           const formatDay = (dateStr) => {
             if (!dateStr) return { day: "", month: "" };
             const d = new Date(dateStr);
-            return { day: d.getDate().toString(), month: d.toLocaleString("en-US", { month: "short" }).toUpperCase() };
+            return fmtDayMonth(dateStr);
           };
           return (
             <View style={[styles.section, { marginBottom: 18 }]}>

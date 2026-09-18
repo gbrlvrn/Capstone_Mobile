@@ -12,6 +12,7 @@ import { useToast } from "../components/ToastContext";
 import { API_CONFIG } from "../services/config";
 import OfflineBanner from "../components/OfflineBanner";
 import { SkeletonFeedCard } from "../components/SkeletonLoader";
+import { fmtDateWithWeekday, fmtDayMonth } from "../services/dateUtils";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
@@ -67,14 +68,12 @@ const CATEGORY_COLORS = [
 
 function formatDate(dateStr) {
   if (!dateStr) return "";
-  const d = new Date(dateStr);
-  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  return fmtDateWithWeekday(dateStr);
 }
 
 function formatDay(dateStr) {
   if (!dateStr) return { day: "", month: "" };
-  const d = new Date(dateStr);
-  return { day: d.getDate().toString(), month: d.toLocaleString("en-US", { month: "short" }).toUpperCase() };
+  return fmtDayMonth(dateStr);
 }
 
 function cleanEmail(v) { return typeof v === "string" ? v.trim().toLowerCase() : ""; }

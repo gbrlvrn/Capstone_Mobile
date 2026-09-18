@@ -22,6 +22,7 @@ import { useTheme } from "../components/ThemeContext";
 import { getDailyVerse, saveJournalEntry, getJournalEntry, getAllJournalEntries } from "../services/DevotionalService";
 import OfflineBanner from "../components/OfflineBanner";
 import { SkeletonDevotionalCard } from "../components/SkeletonLoader";
+import { fmtDateLong } from "../services/dateUtils";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
@@ -281,7 +282,7 @@ export default function DevotionalScreen({ navigation, route }) {
                 <Image source={ICONS.document} style={{width: s(20), height: s(20), tintColor: C.gold}} resizeMode="contain"/>
               </View>
               <Text style={[styles.verseDate, { color: colors.textMuted }]}>
-                {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+                {fmtDateLong(new Date())}
               </Text>
             </View>
 

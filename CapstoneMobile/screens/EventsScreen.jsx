@@ -23,6 +23,7 @@ import * as Calendar from "expo-calendar";
 import { useToast } from "../components/ToastContext";
 import OfflineBanner from "../components/OfflineBanner";
 import { SkeletonBlock, SkeletonLine } from "../components/SkeletonLoader";
+import { fmtDateWithWeekday } from "../services/dateUtils";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
@@ -102,8 +103,7 @@ function cleanEmail(value) {
 }
 
 function formatEventDate(dateStr) {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  return fmtDateWithWeekday(dateStr);
 }
 
 function daysUntil(dateStr) {

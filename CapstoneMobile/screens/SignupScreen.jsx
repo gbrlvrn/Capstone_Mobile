@@ -16,9 +16,10 @@ import {
   ActivityIndicator,
   Dimensions,
   Animated,
+  findNodeHandle,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { signupUser, getBranches, saveUserData } from "../services/AuthService";
+import { signupUser, getBranches, saveUserData, checkEmailExists } from "../services/AuthService";
 import { useAlert } from "../components/AlertContext";
 import { useTheme } from "../components/ThemeContext";
 
@@ -200,6 +201,22 @@ export default function SignupScreen({ navigation }) {
   const [branchSearch, setBranchSearch] = useState("");
   const [touched, setTouched] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const [emailExistsError, setEmailExistsError] = useState("");
+  const [emailChecking, setEmailChecking] = useState(false);
+
+  // Refs for scrolling to errors
+  const scrollViewRef = useRef(null);
+  const fieldRefs = useRef({
+    firstName: null,
+    lastName: null,
+    email: null,
+    phone: null,
+    gender: null,
+    dob: null,
+    branch: null,
+    password: null,
+    confirmPassword: null,
+  });
 
   // Entrance animation
   const cardTranslateY = useRef(new Animated.Value(40)).current;
@@ -220,6 +237,36 @@ export default function SignupScreen({ navigation }) {
       }),
     ]).start();
   }, []);
+
+  // Debounced real-time email duplicate check
+  useEffect(() => {
+    const trimmed = form.email.trim();
+    if (!trimmed || !isValidEmail(trimmed)) {
+      setEmailExistsError("");
+      setEmailChecking(false);
+      return;
+    }
+    setEmailChecking(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const response = await checkEmailExists(trimmed);
+        if (response && response.exists === true) {
+          setEmailExistsError("This email is already registered");
+        } else {
+          setEmailExistsError("");
+        }
+      } catch {
+        // Silently ignore network errors — don't block signup for a check failure
+        setEmailExistsError("");
+      } finally {
+        setEmailChecking(false);
+      }
+    }, 500);
+    return () => {
+      clearTimeout(timeout);
+      setEmailChecking(false);
+    };
+  }, [form.email]);
 
   // Fetch branches from API on mount
   useEffect(() => {
@@ -378,7 +425,9 @@ export default function SignupScreen({ navigation }) {
     email: !form.email.trim()
       ? "Email is required"
       : !isValidEmail(form.email)
-      ? "Enter a valid email address (disposable domains blocked)"
+      ? "Enter a valid email address"
+      : emailExistsError
+      ? emailExistsError
       : "",
     phone: !form.phone.trim() || form.phone.trim() === "+63" || form.phone.trim() === "+63 "
       ? "Phone number is required"
@@ -513,8 +562,35 @@ export default function SignupScreen({ navigation }) {
     );
     setTouched(allTouched);
 
+    // Also block submission if an email duplicate was detected
+    if (emailExistsError) {
+      showAlert("Validation Error", emailExistsError);
+      return;
+    }
     const firstError = Object.keys(errors).find((k) => errors[k]);
     if (firstError) {
+      // Scroll to the first field with an error so inline messages are visible
+      const errorFieldRef = fieldRefs.current[firstError];
+      if (errorFieldRef && scrollViewRef.current) {
+        try {
+          const scrollNode = findNodeHandle(scrollViewRef.current);
+          if (scrollNode) {
+            errorFieldRef.measureLayout(
+              scrollNode,
+              (_x, y) => {
+                scrollViewRef.current.scrollTo({ y: Math.max(0, y - 100), animated: true });
+              },
+              () => {
+                scrollViewRef.current.scrollTo({ y: 0, animated: true });
+              }
+            );
+          } else {
+            scrollViewRef.current.scrollTo({ y: 0, animated: true });
+          }
+        } catch {
+          scrollViewRef.current.scrollTo({ y: 0, animated: true });
+        }
+      }
       showAlert("Validation Error", errors[firstError]);
       return;
     }
@@ -586,6 +662,7 @@ export default function SignupScreen({ navigation }) {
       <View style={styles.circleTopRight} pointerEvents="none" />
       <View style={styles.circleBottomLeft} pointerEvents="none" />
       <ScrollView
+        ref={scrollViewRef}
         style={{ flex: 1 }}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -615,6 +692,7 @@ export default function SignupScreen({ navigation }) {
 
 
           {/* First Name */}
+          <View ref={(r) => (fieldRefs.current.firstName = r)}>
           <Text style={styles.label}>First Name</Text>
           <View style={[styles.inputRow, { borderColor: borderFor("firstName") }]}>
             <Image source={ICONS.person} style={styles.inputIcon} resizeMode="contain" />
@@ -633,8 +711,10 @@ export default function SignupScreen({ navigation }) {
           ) : (
             <Text style={styles.hintMsg}>Letters only, max 15 characters</Text>
           )}
+          </View>
 
           {/* Last Name */}
+          <View ref={(r) => (fieldRefs.current.lastName = r)}>
           <Text style={styles.label}>Last Name</Text>
           <View style={[styles.inputRow, { borderColor: borderFor("lastName") }]}>
             <Image source={ICONS.person} style={styles.inputIcon} resizeMode="contain" />
@@ -653,8 +733,10 @@ export default function SignupScreen({ navigation }) {
           ) : (
             <Text style={styles.hintMsg}>Letters only, max 15 characters</Text>
           )}
+          </View>
 
           {/* Email */}
+          <View ref={(r) => (fieldRefs.current.email = r)}>
           <Text style={styles.label}>Email Address</Text>
           <View style={[styles.inputRow, { borderColor: borderFor("email") }]}>
             <Image source={ICONS.email} style={styles.inputIcon} resizeMode="contain" />
@@ -669,12 +751,19 @@ export default function SignupScreen({ navigation }) {
               autoCapitalize="none"
               autoCorrect={false}
             />
+            {emailChecking && (
+              <ActivityIndicator size="small" color={C.textMuted} style={{ marginRight: s(8) }} />
+            )}
           </View>
           {touched.email && errors.email ? (
             <Text style={styles.errorMsg}>{errors.email}</Text>
+          ) : emailChecking ? (
+            <Text style={{ fontSize: fs(11), color: C.textMuted, marginTop: 4, marginLeft: 2 }}>Checking availability...</Text>
           ) : null}
+          </View>
 
           {/* Phone */}
+          <View ref={(r) => (fieldRefs.current.phone = r)}>
           <Text style={styles.label}>Phone Number</Text>
           <View style={[styles.inputRow, { borderColor: borderFor("phone") }]}>
             <Image source={ICONS.phone} style={styles.inputIcon} resizeMode="contain" />
@@ -692,9 +781,10 @@ export default function SignupScreen({ navigation }) {
           {touched.phone && errors.phone ? (
             <Text style={styles.errorMsg}>{errors.phone}</Text>
           ) : null}
+          </View>
 
           {/* Gender & DOB Row */}
-          <View style={styles.rowContainer}>
+          <View style={styles.rowContainer} ref={(r) => { fieldRefs.current.gender = r; fieldRefs.current.dob = r; }}>
             <View style={styles.halfWidth}>
               <Text style={styles.label}>Gender</Text>
               <View style={styles.genderCardContainer}>
@@ -767,6 +857,7 @@ export default function SignupScreen({ navigation }) {
           </View>
 
           {/* Branch */}
+          <View ref={(r) => (fieldRefs.current.branch = r)}>
           <Text style={styles.label}>Community</Text>
           <TouchableOpacity
             style={[styles.inputRow, { borderColor: borderFor("branch") }]}
@@ -790,10 +881,12 @@ export default function SignupScreen({ navigation }) {
           {touched.branch && errors.branch ? (
             <Text style={styles.errorMsg}>{errors.branch}</Text>
           ) : null}
+          </View>
 
 
 
           {/* Password */}
+          <View ref={(r) => (fieldRefs.current.password = r)}>
           <Text style={styles.label}>Password</Text>
           <View style={[styles.inputRow, { borderColor: borderFor("password") }]}>
             <Image source={ICONS.lock} style={styles.inputIcon} resizeMode="contain" />
@@ -817,6 +910,7 @@ export default function SignupScreen({ navigation }) {
           {touched.password && errors.password ? (
             <Text style={styles.errorMsg}>{errors.password}</Text>
           ) : null}
+          </View>
 
           {/* Password strength meter */}
           {form.password.length > 0 && (
@@ -849,6 +943,7 @@ export default function SignupScreen({ navigation }) {
           </View>
 
           {/* Confirm Password */}
+          <View ref={(r) => (fieldRefs.current.confirmPassword = r)}>
           <Text style={styles.label}>Confirm Password</Text>
           <View style={[styles.inputRow, { borderColor: borderFor("confirmPassword") }]}>
             <Image source={ICONS.lock} style={styles.inputIcon} resizeMode="contain" />
@@ -872,6 +967,7 @@ export default function SignupScreen({ navigation }) {
           {touched.confirmPassword && errors.confirmPassword ? (
             <Text style={styles.errorMsg}>{errors.confirmPassword}</Text>
           ) : null}
+          </View>
 
           {/* Terms checkbox */}
           <View style={styles.termsRow}>

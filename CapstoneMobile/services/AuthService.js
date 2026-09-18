@@ -566,6 +566,10 @@ export function checkEmailExists(email) {
   return get(`/auth/exists?email=${clean}`);
 }
 
+export function getPublicDonations() {
+  return get("/donations/public");
+}
+
 export function verifyOTP(email, otp) {
   return request("POST", "/verify-otp", { email, otp });
 }
@@ -896,6 +900,45 @@ export function getDonations(page = 1, limit = 50, category = "") {
   let url = `/donations/my-donations?page=${page}&limit=${limit}`;
   if (category) url += `&category=${encodeURIComponent(category)}`;
   return get(url, true);
+}
+
+/**
+ * Verify a proof-of-payment image is a real e-wallet receipt (GCash, Maya, Maribank).
+ * Uses Gemini Vision on the backend, same pattern as verifyIdImage().
+ * @param {string} base64 - raw base64 or data-URI of the image
+ * @param {string} mimeType - image MIME type (default "image/jpeg")
+ * @returns {{ valid: boolean, provider: string|null, confidence: string, reason: string }}
+ */
+export async function verifyReceiptImage(base64, mimeType = "image/jpeg") {
+  try {
+    const rawBase64 = base64.startsWith("data:")
+      ? base64.replace(/^data:image\/\w+;base64,/, "")
+      : base64;
+
+    const res = await request("POST", "/donations/verify-receipt", {
+      base64: rawBase64,
+      mimeType,
+    }, true);
+
+    if (res && typeof res.valid !== "undefined") {
+      return {
+        valid: Boolean(res.valid),
+        provider: res.provider || null,
+        confidence: res.confidence || (res.valid ? "high" : "low"),
+        reason: res.reason || (res.valid
+          ? "Valid e-wallet receipt detected."
+          : "The image does not appear to be a valid e-wallet payment receipt."),
+      };
+    }
+  } catch (e) {
+    console.log("Receipt verification request failed:", e.message || e);
+  }
+  return {
+    valid: false,
+    provider: null,
+    confidence: "low",
+    reason: "Unable to verify receipt. Please check your internet connection and try again.",
+  };
 }
 
 // ── Savings Endpoints ───────────────────────────────────────────────

@@ -26,6 +26,7 @@ import { getPrayerRequests, createPrayerRequest, prayForRequest } from "../servi
 import * as Haptics from "expo-haptics";
 import OfflineBanner from "../components/OfflineBanner";
 import { SkeletonPrayerCard } from "../components/SkeletonLoader";
+import { fmtDateMonthDay } from "../services/dateUtils";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
@@ -104,7 +105,7 @@ function timeAgo(dateStr) {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return fmtDateMonthDay(dateStr);
 }
 
 export default function PrayerWallScreen({ navigation, route }) {

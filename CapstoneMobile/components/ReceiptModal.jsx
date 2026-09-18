@@ -14,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import ViewShot from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
 import { useTheme } from "./ThemeContext";
+import { fmtDateShort, fmtDateTime, safeFmtNum } from "../services/dateUtils";
 
 /**
  * ReceiptModal — Professional transaction receipt that appears after a loan or donation submission.
@@ -57,38 +58,25 @@ export default function ReceiptModal({ visible, onClose, type = "loan", data = {
     try {
       const dateObj = d ? new Date(d) : new Date();
       if (isNaN(dateObj.getTime())) return String(d);
-      return dateObj.toLocaleDateString("en-PH", {
-        timeZone: "Asia/Manila",
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      });
+      return fmtDateShort(dateObj);
     } catch (e) {
-      return new Date().toLocaleDateString();
+      return fmtDateShort(new Date());
     }
   };
 
   const formatReceiptDateTime = (d) => {
     try {
       const dateObj = d ? new Date(d) : new Date();
-      if (isNaN(dateObj.getTime())) return new Date().toLocaleDateString("en-PH", { timeZone: "Asia/Manila" });
-      return dateObj.toLocaleString("en-PH", {
-        timeZone: "Asia/Manila",
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      });
+      if (isNaN(dateObj.getTime())) return fmtDateShort(new Date());
+      return fmtDateTime(dateObj);
     } catch (e) {
-      return new Date().toLocaleDateString();
+      return fmtDateShort(new Date());
     }
   };
 
   const formatCurrency = (val) => {
     const n = typeof val === "number" ? val : parseFloat(String(val).replace(/[^0-9.-]+/g, "")) || 0;
-    return `₱${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `₱${safeFmtNum(n)}`;
   };
 
   const loanRows = [

@@ -24,7 +24,7 @@ import DraggableChatButton from "../components/DraggableChatButton";
 import FloatingNavBar from "../components/FloatingNavBar";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { getPublicSettings, getVerificationStatus, createLoan, getLoans, submitLoanPayment, getMyLoanPayments, cancelLoan, getLoanSchedule, verifyIdImage, getSavingsData } from "../services/AuthService";
+import { getPublicSettings, getVerificationStatus, createLoan, getLoans, submitLoanPayment, getMyLoanPayments, cancelLoan, getLoanSchedule, verifyIdImage, verifyReceiptImage, getSavingsData } from "../services/AuthService";
 import { addNotification } from "./NotificationsScreen";
 import LoanProgressCircle from "../components/LoanProgressCircle";
 import EmptyState from "../components/EmptyState";
@@ -41,6 +41,41 @@ const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
 const s = (v) => Math.round(v * _WR);
 const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
 const SIDEBAR_WIDTH = s(260);
+
+// ── Safe Number Formatting ─────────────────────────────────────────────
+// Android Hermes has incomplete Intl support — toLocaleString("en-US", opts)
+// can throw or return unformatted values, crashing the loan data pipeline.
+// This helper always returns a correctly formatted string on every platform.
+const _fmtNumber = (num, decimals = 2) => {
+  if (num === null || num === undefined || isNaN(num)) num = 0;
+  const fixed = Math.abs(num).toFixed(decimals);
+  const [intPart, decPart] = fixed.split(".");
+  // Add thousands separators manually
+  const withCommas = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const result = decPart !== undefined ? `${withCommas}.${decPart}` : withCommas;
+  return num < 0 ? `-${result}` : result;
+};
+const fmtCurrency = (num, decimals = 2) => `₱${_fmtNumber(num, decimals)}`;
+const fmtNum = (num) => {
+  if (num === null || num === undefined || isNaN(num)) num = 0;
+  const str = String(Math.abs(Math.round(num)));
+  const withCommas = str.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return num < 0 ? `-${withCommas}` : withCommas;
+};
+
+// ── Safe Date Formatting ──────────────────────────────────────────────
+// Android Hermes: toLocaleDateString("en-US", opts) can throw or return
+// garbage. This helper manually formats dates to avoid Intl entirely.
+const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const fmtDate = (dateInput) => {
+  try {
+    const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+    if (isNaN(d.getTime())) return "-";
+    return `${MONTH_ABBR[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  } catch {
+    return "-";
+  }
+};
 
 const LOGO = require("../assets/puac_logo.png");
 
@@ -313,6 +348,7 @@ export default function LoansScreen({ navigation, route }) {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [formError, setFormError] = useState("");
   const [loanFilterTab, setLoanFilterTab] = useState("all"); // "all" | "active" | "completed" | "pending"
+  const [loanFilterDropdownOpen, setLoanFilterDropdownOpen] = useState(false);
   const [expandedCompletedLoans, setExpandedCompletedLoans] = useState({});
   const [fieldErrors, setFieldErrors] = useState({});
   const [loanLoading, setLoanLoading] = useState(true);
@@ -481,8 +517,20 @@ export default function LoansScreen({ navigation, route }) {
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("gcash");
   const [payProof, setPayProof] = useState(null);
+  const [payProofVerification, setPayProofVerification] = useState(null); // { valid, provider, reason, verifying }
   const [paySubmitting, setPaySubmitting] = useState(false);
   const paySubmittingRef = useRef(false);
+
+  // Bank & E-Wallet transfer details for Pay Now
+  const [bankOption, setBankOption] = useState("");
+  const [bankOptionDropdownOpen, setBankOptionDropdownOpen] = useState(false);
+  const [bankSenderName, setBankSenderName] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
+
+  const [ewalletOption, setEwalletOption] = useState("");
+  const [ewalletOptionDropdownOpen, setEwalletOptionDropdownOpen] = useState(false);
+  const [ewalletSenderName, setEwalletSenderName] = useState("");
+  const [ewalletNumber, setEwalletNumber] = useState("");
 
   // Schedule modal state
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
@@ -570,6 +618,15 @@ export default function LoansScreen({ navigation, route }) {
           } finally {
             setIdVerifying(false);
           }
+        }
+        // Auto-verify receipt when uploading proof of payment
+        if (setter === setPayProof) {
+          setPayProofVerification({ verifying: true, valid: false, provider: null, reason: "" });
+          verifyReceiptImage(asset.base64, type).then(verdict => {
+            setPayProofVerification({ ...verdict, verifying: false });
+          }).catch(() => {
+            setPayProofVerification({ valid: false, verifying: false, provider: null, reason: "Receipt verification failed. Please try again." });
+          });
         }
       }
     } catch (err) {
@@ -798,7 +855,9 @@ export default function LoansScreen({ navigation, route }) {
 
   const existingLoanBalance = loansData.reduce((acc, loan) => {
     if (loan.status !== "rejected" && loan.status !== "completed") {
-      const val = loan.remainingBalance || loan.amountNum || 0;
+      const val = typeof loan.remainingBalanceNum === 'number'
+        ? loan.remainingBalanceNum
+        : (parseFloat(String(loan.remainingBalance || "").replace(/[^0-9.]/g, "")) || (typeof loan.amountNum === 'number' ? loan.amountNum : (parseFloat(String(loan.amount || "").replace(/[^0-9.]/g, "")) || 0)));
       return acc + val;
     }
     return acc;
@@ -816,19 +875,24 @@ export default function LoansScreen({ navigation, route }) {
       }
       // Debug: Log loan count and field names from server to diagnose missing loans
       console.log(`[Loans] Server returned ${serverLoans.length} loans. Fields:`, serverLoans.length > 0 ? Object.keys(serverLoans[0]) : "empty");
+      const parseClean = (val) => {
+        if (val === null || val === undefined || val === "") return 0;
+        if (typeof val === "number") return isNaN(val) ? 0 : val;
+        const num = parseFloat(String(val).replace(/[^0-9.-]/g, ""));
+        return isNaN(num) ? 0 : num;
+      };
+
       const formatCurrency = (val) => {
         if (val === null || val === undefined || val === "") return "₱0.00";
-        if (typeof val === "string" && val.startsWith("₱")) return val;
-        const num = typeof val === "number" ? val : parseFloat(val);
-        if (isNaN(num)) return String(val);
-        return `₱${num.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const num = parseClean(val);
+        return fmtCurrency(num);
       };
 
       // Map server data to UI format
       const mapped = serverLoans.map(loan => {
-        const rawAmt = typeof loan.amount === 'number' ? loan.amount : (parseFloat(loan.amount) || 0);
-        const rawMonthly = typeof loan.monthlyPayment === 'number' ? loan.monthlyPayment : (parseFloat(loan.monthlyPayment) || 0);
-        const rawRem = typeof loan.remainingBalance === 'number' ? loan.remainingBalance : (parseFloat(loan.remainingBalance) || 0);
+        const rawAmt = typeof loan.amount === 'number' ? loan.amount : parseClean(loan.amount);
+        const rawMonthly = typeof loan.monthlyPayment === 'number' ? loan.monthlyPayment : parseClean(loan.monthlyPayment);
+        const rawRem = typeof loan.remainingBalance === 'number' ? loan.remainingBalance : parseClean(loan.remainingBalance);
 
         // Auto-sync: A loan is completed when EITHER remainingBalance <= 0
         // OR paidMonths >= termMonths (backend walk-in payment completion rule)
@@ -895,8 +959,8 @@ export default function LoansScreen({ navigation, route }) {
       });
 
       const newSummary = [...SUMMARY_DATA];
-      newSummary[0] = { ...newSummary[0], value: `₱${totalBorrowed.toLocaleString()}` };
-      newSummary[1] = { ...newSummary[1], value: `₱${totalRemaining.toLocaleString()}` };
+      newSummary[0] = { ...newSummary[0], value: fmtCurrency(totalBorrowed) };
+      newSummary[1] = { ...newSummary[1], value: fmtCurrency(totalRemaining) };
       newSummary[2] = { ...newSummary[2], value: String(activeCount) };
       setSummaryData(newSummary);
     } catch (e) {
@@ -921,17 +985,19 @@ export default function LoansScreen({ navigation, route }) {
     let totalRemaining = 0;
     let activeCount = 0;
     loans.forEach(loan => {
+      const amt = typeof loan.amountNum === 'number' ? loan.amountNum : (parseFloat(String(loan.amount || "").replace(/[^0-9.]/g, "")) || 0);
+      const rem = typeof loan.remainingBalanceNum === 'number' ? loan.remainingBalanceNum : (parseFloat(String(loan.remainingBalance || "").replace(/[^0-9.]/g, "")) || 0);
       if (loan.status === "active" || loan.status === "completed") {
-        totalBorrowed += loan.amountNum || 0;
+        totalBorrowed += amt;
       }
       if (loan.status === "active") {
-        totalRemaining += loan.remainingBalanceNum || 0;
+        totalRemaining += rem;
         activeCount++;
       }
     });
     const newSummary = [...SUMMARY_DATA];
-    newSummary[0] = { ...newSummary[0], value: `₱${totalBorrowed.toLocaleString()}` };
-    newSummary[1] = { ...newSummary[1], value: `₱${totalRemaining.toLocaleString()}` };
+    newSummary[0] = { ...newSummary[0], value: fmtCurrency(totalBorrowed) };
+    newSummary[1] = { ...newSummary[1], value: fmtCurrency(totalRemaining) };
     newSummary[2] = { ...newSummary[2], value: String(activeCount) };
     setSummaryData(newSummary);
   }, []);
@@ -1202,7 +1268,7 @@ export default function LoansScreen({ navigation, route }) {
     } else if (principal < 1000) {
       errors.amount = "Minimum loan amount: ₱1,000.";
     } else if (principal > availableLimit) {
-      errors.amount = `Amount exceeds your maximum available limit of ₱${availableLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`;
+      errors.amount = `Amount exceeds your maximum available limit of ${fmtCurrency(availableLimit)}.`;
     }
 
     if (!phoneNumber.trim() || phoneNumber.trim() === "+63 ") errors.phone = "Please enter your phone number.";
@@ -1294,7 +1360,7 @@ export default function LoansScreen({ navigation, route }) {
     const availableLimit = Math.max(0, maxLoanable - existingLoanBalance);
 
     if (principal > availableLimit) {
-      return showError(`Insufficient Limit:\nYour Maximum Loanable Amount for a ${loanType} loan is ₱${maxLoanable.toLocaleString()} (${multiplier}x of your ₱${totalSavings.toLocaleString()} Total Savings).\n\nAvailable limit after active balance: ₱${availableLimit.toLocaleString()}.`);
+      return showError(`Insufficient Limit:\nYour Maximum Loanable Amount for a ${loanType} loan is ${fmtCurrency(maxLoanable)} (${multiplier}x of your ${fmtCurrency(totalSavings)} Total Savings).\n\nAvailable limit after active balance: ${fmtCurrency(availableLimit)}.`);
     }
 
     submittingRef.current = true;
@@ -1348,7 +1414,7 @@ export default function LoansScreen({ navigation, route }) {
           userEmail,
           "loan",
           "Loan Application Received",
-          `Your application for a ${capturedLoanType} loan of ₱${principal.toLocaleString()} is being processed. You will be notified once it is approved.`
+          `Your application for a ${capturedLoanType} loan of ${fmtCurrency(principal)} is being processed. You will be notified once it is approved.`
         );
       }
 
@@ -1390,7 +1456,7 @@ export default function LoansScreen({ navigation, route }) {
         totalRepayment: serverLoan.totalRepayment || 0,
         status: "pending",
         statusBg: C.orangeLight,
-        appliedDate: new Date().toLocaleDateString(),
+        appliedDate: fmtDate(new Date()),
         paymentsMade: 0,
         totalPayments: capturedMonths,
         purpose: backendPayload.purpose,
@@ -1449,9 +1515,18 @@ export default function LoansScreen({ navigation, route }) {
     setCustomPayAmount("");
     setCustomPayMonths(0);
     setShowMonthPicker(false);
-    setPayAmount(String(loan.monthlyPayment || 0));
+    setPayAmount(String(loan.monthlyPaymentNum ?? (parseFloat(String(loan.monthlyPayment || "").replace(/[^0-9.]/g, "")) || 0)));
     setPayMethod("gcash");
     setPayProof(null);
+    setPayProofVerification(null);
+    setBankOption("");
+    setBankOptionDropdownOpen(false);
+    setBankSenderName("");
+    setBankAccountNumber("");
+    setEwalletOption("");
+    setEwalletOptionDropdownOpen(false);
+    setEwalletSenderName("");
+    setEwalletNumber("");
     setPayNowModalOpen(true);
     
     // Refresh data in background
@@ -1477,10 +1552,16 @@ export default function LoansScreen({ navigation, route }) {
     let amount = 0;
     if (payType === "regular") {
       // Server auto-calculates — use local value only for UI display
-      amount = Number(payNowLoan.monthlyPayment || payNowLoan.upcomingPaymentAmount || 1);
+      const monthlyRate = typeof payNowLoan.monthlyPaymentNum === 'number'
+        ? payNowLoan.monthlyPaymentNum
+        : (parseFloat(String(payNowLoan.monthlyPayment || "").replace(/[^0-9.]/g, "")) || 0);
+      amount = monthlyRate || Number(payNowLoan.upcomingPaymentAmount) || 1;
     } else if (payType === "full") {
       // Server auto-calculates the full remaining balance
-      amount = Number(payNowLoan.remainingBalance || payNowLoan.totalRepayment || 1);
+      const remBalance = typeof payNowLoan.remainingBalanceNum === 'number'
+        ? payNowLoan.remainingBalanceNum
+        : (parseFloat(String(payNowLoan.remainingBalance || "").replace(/[^0-9.]/g, "")) || 0);
+      amount = remBalance || Number(payNowLoan.totalRepayment) || 1;
     } else if (payType === "custom") {
       amount = Number(customPayAmount.replace(/,/g, "")) || 0;
       if (amount < 500) {
@@ -1494,9 +1575,39 @@ export default function LoansScreen({ navigation, route }) {
     const isManual = paymentApprovalMethod === "manual";
     const isCash = payMethod === "cash";
 
-    // Require proof for GCash and Bank Transfer
-    if (isManual && !isCash && !payProof) {
-      return Alert.alert("Proof Required", "Please upload proof of payment for this payment method.");
+    if (isManual && !isCash) {
+      if (payMethod === "bank") {
+        if (!bankOption) {
+          return Alert.alert("Required Field", "Please select a Bank Option.");
+        }
+        if (!bankSenderName.trim()) {
+          return Alert.alert("Required Field", "Please enter your Sender Account Name.");
+        }
+        if (!bankAccountNumber.trim() || bankAccountNumber.length < 10) {
+          return Alert.alert("Invalid Account Number", "Please enter a valid Bank Account Number (10-16 digits).");
+        }
+      } else if (payMethod === "gcash") {
+        if (!ewalletOption) {
+          return Alert.alert("Required Field", "Please select an E-Wallet Option.");
+        }
+        if (!ewalletSenderName.trim()) {
+          return Alert.alert("Required Field", "Please enter your Sender Account Name.");
+        }
+        if (!ewalletNumber.trim() || ewalletNumber.length < 11) {
+          return Alert.alert("Invalid Phone Number", "Please enter an 11-digit Sender E-Wallet Number (e.g. 09123456789).");
+        }
+      }
+
+      // Require proof for GCash and Bank Transfer
+      if (!payProof) {
+        return Alert.alert("Proof Required", "Please upload proof of payment for this payment method.");
+      }
+      if (payProofVerification && payProofVerification.verifying) {
+        return Alert.alert("Verifying", "Please wait for receipt verification to complete.");
+      }
+      if (!payProofVerification || !payProofVerification.valid) {
+        return Alert.alert("Invalid Receipt", payProofVerification?.reason || "Please upload a valid e-wallet or bank transfer receipt.");
+      }
     }
 
     paySubmittingRef.current = true;
@@ -1529,10 +1640,12 @@ export default function LoansScreen({ navigation, route }) {
       }
 
       if (isManual && !isCash) {
-        // Manual GCash / Bank Transfer — attach proof
-        payload.subMethod     = apiMethod;
+        // Manual GCash / Bank Transfer — attach proof and sender info matching web backend
+        payload.subMethod     = payMethod === "bank" ? bankOption : ewalletOption;
+        payload.accountName   = payMethod === "bank" ? bankSenderName.trim() : ewalletSenderName.trim();
+        payload.accountNumber = payMethod === "bank" ? bankAccountNumber.trim() : ewalletNumber.trim();
         payload.proofData     = payProof?.base64 ? `data:image/jpeg;base64,${payProof.base64}` : "";
-        payload.proofFileName = "gcash_receipt.jpg";
+        payload.proofFileName = payMethod === "bank" ? "bank_receipt.jpg" : "ewallet_receipt.jpg";
       }
 
       // Use MongoDB _id for the route param (web backend resolves by _id or loanId)
@@ -1551,12 +1664,13 @@ export default function LoansScreen({ navigation, route }) {
           userEmail,
           "loan",
           "Payment Submitted",
-          `Payment of ₱${amount.toLocaleString()} for loan ${payNowLoan.id} is pending confirmation.`
+          `Payment of ${fmtCurrency(amount)} for loan ${payNowLoan.id} is pending confirmation.`
         );
       }
       
       setPayNowModalOpen(false);
       setPayProof(null);
+      setPayProofVerification(null);
       await loadLoansFromAPI();
     } catch (err) {
       // Enhanced error reporting to help diagnose the issue
@@ -1699,7 +1813,7 @@ export default function LoansScreen({ navigation, route }) {
                 <Text style={{ fontSize: fs(16), fontWeight: '800', color: C.red }}>Savings Required</Text>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 2 }}>
                   <Text style={{ fontSize: fs(13), color: C.red, opacity: 0.85, lineHeight: 18 }}>
-                    Requires ₱1,000 threshold.{"\n"}Current balances: ₱{totalSavings.toLocaleString()}
+                    Requires ₱1,000 threshold.{"\n"}Current balances: {fmtCurrency(totalSavings)}
                   </Text>
                   <Text style={{ fontSize: fs(13), fontWeight: '700', color: C.red, marginBottom: 2 }}>
                     Go to Savings →
@@ -1772,7 +1886,7 @@ export default function LoansScreen({ navigation, route }) {
             <Text style={[styles.sectionTitle, { color: colors.textDark, marginBottom: 0 }]}>All Loans</Text>
           </View>
 
-          {/* Filter Tabs: All, Active, Completed, Pending */}
+          {/* Filter Dropdown: All, Active, Completed, Pending, Rejected */}
           {loansData.length > 0 && (() => {
             const completedCount = loansData.filter(l => ["completed", "paid", "finished"].includes((l.status || "").toLowerCase())).length;
             const activeCount = loansData.filter(l => ["active", "approved", "member_accepted"].includes((l.status || "").toLowerCase())).length;
@@ -1787,31 +1901,100 @@ export default function LoansScreen({ navigation, route }) {
               { id: "rejected", label: `Rejected (${rejectedCount})` },
             ];
 
+            const selectedTab = tabs.find(t => t.id === loanFilterTab) || tabs[0];
+
             return (
-              <View style={{ flexDirection: "row", gap: s(8), marginBottom: s(14), flexWrap: "wrap" }}>
-                {tabs.map((tab) => (
-                  <TouchableOpacity
-                    key={tab.id}
-                    style={{
-                      paddingHorizontal: s(14),
-                      paddingVertical: s(6),
-                      borderRadius: s(20),
-                      backgroundColor: loanFilterTab === tab.id ? C.blue : colors.inputBg,
+              <View style={{ position: "relative", zIndex: 100, marginBottom: s(14) }}>
+                {/* Dropdown Trigger */}
+                <TouchableOpacity
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    backgroundColor: colors.inputBg || "#FFF",
+                    borderWidth: 1,
+                    borderColor: loanFilterDropdownOpen ? C.blue : (colors.inputBorder || "#E8ECF0"),
+                    borderRadius: s(12),
+                    paddingHorizontal: s(16),
+                    paddingVertical: s(12),
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 1 },
+                    shadowOpacity: 0.04,
+                    shadowRadius: 3,
+                    elevation: 1,
+                  }}
+                  onPress={() => setLoanFilterDropdownOpen(!loanFilterDropdownOpen)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{ fontSize: fs(14), fontWeight: "600", color: colors.textDark }}>
+                    {selectedTab.label}
+                  </Text>
+                  <Text style={{ fontSize: fs(11), color: colors.textMuted }}>
+                    {loanFilterDropdownOpen ? "▲" : "▼"}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Dropdown List */}
+                {loanFilterDropdownOpen && (
+                  <>
+                    {/* Invisible overlay to close dropdown on outside tap */}
+                    <TouchableOpacity
+                      style={{ position: "absolute", top: -2000, left: -2000, right: -2000, bottom: -2000, zIndex: 99 }}
+                      activeOpacity={1}
+                      onPress={() => setLoanFilterDropdownOpen(false)}
+                    />
+                    <View style={{
+                      position: "absolute",
+                      top: s(12) * 2 + fs(14) + s(4),
+                      left: 0,
+                      right: 0,
+                      marginTop: s(4),
+                      backgroundColor: colors.inputBg || "#FFF",
                       borderWidth: 1,
-                      borderColor: loanFilterTab === tab.id ? C.blue : colors.inputBorder,
-                    }}
-                    onPress={() => setLoanFilterTab(tab.id)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={{
-                      fontSize: fs(12),
-                      fontWeight: loanFilterTab === tab.id ? "700" : "500",
-                      color: loanFilterTab === tab.id ? "#FFF" : colors.textDark,
+                      borderColor: colors.inputBorder || "#E8ECF0",
+                      borderRadius: s(12),
+                      shadowColor: "#000",
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.12,
+                      shadowRadius: 8,
+                      elevation: 6,
+                      zIndex: 101,
+                      overflow: "hidden",
                     }}>
-                      {tab.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      {tabs.map((tab, i) => (
+                        <TouchableOpacity
+                          key={tab.id}
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            paddingHorizontal: s(16),
+                            paddingVertical: s(12),
+                            backgroundColor: loanFilterTab === tab.id ? (colors.inputBorderFocus ? "rgba(13,31,69,0.05)" : "rgba(13,31,69,0.05)") : "transparent",
+                            borderBottomWidth: i < tabs.length - 1 ? 1 : 0,
+                            borderBottomColor: colors.inputBorder || "#F1F5F9",
+                          }}
+                          onPress={() => {
+                            setLoanFilterTab(tab.id);
+                            setLoanFilterDropdownOpen(false);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={{
+                            fontSize: fs(13),
+                            fontWeight: loanFilterTab === tab.id ? "700" : "500",
+                            color: loanFilterTab === tab.id ? C.blue : colors.textDark,
+                          }}>
+                            {tab.label}
+                          </Text>
+                          {loanFilterTab === tab.id && (
+                            <Text style={{ fontSize: fs(14), fontWeight: "700", color: C.blue }}>✓</Text>
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                )}
               </View>
             );
           })()}
@@ -1867,7 +2050,7 @@ export default function LoansScreen({ navigation, route }) {
                         })()}
                       </Text>
                       <Text style={{ fontSize: fs(12), fontWeight: "500", color: colors.textMuted }}>
-                        Applied {loan.applied ? new Date(loan.applied).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "-"}
+                        Applied {loan.applied ? fmtDate(loan.applied) : "-"}
                       </Text>
                     </View>
 
@@ -1899,10 +2082,10 @@ export default function LoansScreen({ navigation, route }) {
                         </Text>
                       </View>
                       <Text style={[styles.loanAmount, { color: colors.textDark }]}>
-                        ₱{((loan.adminModified && loan.originalAmount) ? loan.originalAmount : (loan.amountNum || loan.amount || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {fmtCurrency((loan.adminModified && loan.originalAmount) ? loan.originalAmount : (loan.amountNum || loan.amount || 0))}
                       </Text>
                       {loan.adminModified && loan.originalAmount && loan.originalAmount !== (loan.amountNum || loan.amount) ? (
-                        <Text style={{ fontSize: fs(11), color: C.orange, marginTop: 2 }}>Modified → ₱{(loan.amountNum || loan.amount || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                        <Text style={{ fontSize: fs(11), color: C.orange, marginTop: 2 }}>Modified → {fmtCurrency(loan.amountNum || loan.amount || 0)}</Text>
                       ) : (
                         <Text style={{ fontSize: fs(11), color: colors.textMuted, marginTop: 2 }}>
                           {isCompleted ? "Settled amount" : "Applied amount"}
@@ -1918,7 +2101,7 @@ export default function LoansScreen({ navigation, route }) {
                         <Text style={{ color: C.orange, fontSize: fs(12), fontWeight: "700", marginBottom: 4 }}>⚠️ Admin Modified Your Loan Terms:</Text>
                         {loan.originalAmount != null && loan.originalAmount !== loan.amountNum && (
                           <Text style={{ color: colors.textDark, fontSize: fs(12), marginBottom: 2 }}>
-                            • Amount: ₱{loan.originalAmount.toLocaleString()} → ₱{(loan.amountNum || 0).toLocaleString()}
+                            • Amount: {fmtCurrency(loan.originalAmount)} → {fmtCurrency(loan.amountNum || 0)}
                           </Text>
                         )}
                         {loan.originalTermMonths != null && loan.originalTermMonths !== loan.termMonths && (
@@ -1982,13 +2165,20 @@ export default function LoansScreen({ navigation, route }) {
                         <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
                           <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Monthly payment</Text>
                           <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>
-                            {typeof loan.monthlyPayment === 'number' ? `₱${loan.monthlyPayment.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : loan.monthlyPayment}
+                            {(() => {
+                              const num = typeof loan.monthlyPaymentNum === 'number' ? loan.monthlyPaymentNum : (parseFloat(String(loan.monthlyPayment || "").replace(/[^0-9.]/g, "")) || 0);
+                              return fmtCurrency(num);
+                            })()}
                           </Text>
                         </View>
                         <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
                           <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: s(4), fontWeight: "600" }}>Remaining balance</Text>
                           <Text style={{ fontSize: fs(14), fontWeight: "700", color: isFullyPaid ? C.green : colors.textDark }}>
-                            {isFullyPaid ? "₱0.00" : (typeof loan.remainingBalance === 'number' ? `₱${loan.remainingBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : loan.remainingBalance)}
+                            {(() => {
+                              if (isFullyPaid) return "₱0.00";
+                              const num = typeof loan.remainingBalanceNum === 'number' ? loan.remainingBalanceNum : (parseFloat(String(loan.remainingBalance || "").replace(/[^0-9.]/g, "")) || 0);
+                              return fmtCurrency(num);
+                            })()}
                           </Text>
                         </View>
                         <View style={{ flex: 1, backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(10), padding: 12 }}>
@@ -2324,7 +2514,7 @@ export default function LoansScreen({ navigation, route }) {
                             <View style={styles.expandedBadge}><Text style={styles.expandedBadgeText}>{type.rateLabel}</Text></View>
                             <View style={styles.expandedBadge}><Text style={styles.expandedBadgeText}>{type.monthsLabel}</Text></View>
                           </View>
-                          <Text style={[styles.expandedMax, isSelected && { color: C.blue }]}>Max: ₱{maxLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                          <Text style={[styles.expandedMax, isSelected && { color: C.blue }]}>Max: {fmtCurrency(maxLimit)}</Text>
                         </View>
                       </TouchableOpacity>
                     );
@@ -2360,18 +2550,18 @@ export default function LoansScreen({ navigation, route }) {
                   return (
                     <View style={{ marginTop: 8, backgroundColor: "rgba(46,107,240,0.06)", borderRadius: s(8), padding: s(10), borderWidth: 1, borderColor: "rgba(46,107,240,0.15)" }}>
                       <Text style={{ fontSize: fs(12), color: colors.textDark, fontWeight: "600" }}>
-                        Total Savings: <Text style={{ fontWeight: "800", color: C.blue }}>₱{totalSavings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                        Total Savings: <Text style={{ fontWeight: "800", color: C.blue }}>{fmtCurrency(totalSavings)}</Text>
                       </Text>
                       <Text style={{ fontSize: fs(12), color: colors.textDark, marginTop: 2 }}>
-                        Max Loanable ({loanType}): <Text style={{ fontWeight: "800", color: C.green }}>₱{maxLoanable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text> ({multiplier}x of Total Savings)
+                        Max Loanable ({loanType}): <Text style={{ fontWeight: "800", color: C.green }}>{fmtCurrency(maxLoanable)}</Text> ({multiplier}x of Total Savings)
                       </Text>
                       {existingLoanBalance > 0 && (
                         <Text style={{ fontSize: fs(11.5), color: C.orange, marginTop: 2 }}>
-                          Active Loan Balance: -₱{existingLoanBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          Active Loan Balance: -{fmtCurrency(existingLoanBalance)}
                         </Text>
                       )}
                       <Text style={{ fontSize: fs(12), color: colors.textDark, fontWeight: "700", marginTop: 4, paddingTop: 4, borderTopWidth: 1, borderTopColor: "rgba(46,107,240,0.15)" }}>
-                        Available Limit: <Text style={{ fontWeight: "800", color: C.blue }}>₱{availableLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                        Available Limit: <Text style={{ fontWeight: "800", color: C.blue }}>{fmtCurrency(availableLimit)}</Text>
                       </Text>
                     </View>
                   );
@@ -2955,20 +3145,20 @@ export default function LoansScreen({ navigation, route }) {
                 <Text style={styles.breakdownTitle}>Financial Breakdown</Text>
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>Principal:</Text>
-                  <Text style={styles.breakdownValue}>₱{(parseFloat(loanAmount) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={styles.breakdownValue}>{fmtCurrency(parseFloat(loanAmount) || 0)}</Text>
                 </View>
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>Interest ({loanType === "Emergency" ? "1.5%/mo" : loanType === "Personal" ? "2%/mo" : "1%/mo"}):</Text>
-                  <Text style={[styles.breakdownValue, { color: C.red }]}>+ ₱{interestAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={[styles.breakdownValue, { color: C.red }]}>+ {fmtCurrency(interestAmount)}</Text>
                 </View>
                 <View style={[styles.breakdownRow, styles.breakdownTotalRow]}>
                   <Text style={styles.breakdownLabelTotal}>Total Repayment:</Text>
-                  <Text style={styles.breakdownValueTotal}>₱{totalRepayment.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                  <Text style={styles.breakdownValueTotal}>{fmtCurrency(totalRepayment)}</Text>
                 </View>
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>Monthly Installment:</Text>
                   <Text style={[styles.breakdownValue, { color: C.blue, fontWeight: "800" }]}>
-                    ₱{monthlyInstallment.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / mo
+                    {fmtCurrency(monthlyInstallment)} / mo
                   </Text>
                 </View>
               </View>
@@ -3115,7 +3305,7 @@ export default function LoansScreen({ navigation, route }) {
                     </View>
                     <View style={styles.detailsRow}>
                       <Text style={styles.detailsLabel}>Months to Pay</Text>
-                      <Text style={styles.detailsValue}>{selectedLoan.monthsToPay} Months</Text>
+                      <Text style={styles.detailsValue}>{selectedLoan.termMonths} Months</Text>
                     </View>
                     <View style={styles.detailsRow}>
                       <Text style={styles.detailsLabel}>Monthly Installment</Text>
@@ -3123,6 +3313,10 @@ export default function LoansScreen({ navigation, route }) {
                     </View>
                     <View style={styles.detailsRow}>
                       <Text style={styles.detailsLabel}>Total Repayment</Text>
+                      <Text style={styles.detailsValue}>{selectedLoan.totalRepayment}</Text>
+                    </View>
+                    <View style={styles.detailsRow}>
+                      <Text style={styles.detailsLabel}>Remaining Balance</Text>
                       <Text style={styles.detailsValue}>{selectedLoan.remainingBalance}</Text>
                     </View>
                     <View style={[styles.detailsRow, { borderBottomWidth: 0, paddingBottom: 0, marginBottom: 0 }]}>
@@ -3298,7 +3492,14 @@ export default function LoansScreen({ navigation, route }) {
                         onPress={() => setShowMonthPicker(!showMonthPicker)}
                       >
                         <Text style={{ color: customPayMonths > 0 ? colors.textDark : colors.textMuted, fontSize: fs(14), fontWeight: customPayMonths > 0 ? "700" : "600" }}>
-                          {customPayMonths > 0 ? `${customPayMonths} month${customPayMonths > 1 ? "s" : ""} — ₱${(customPayMonths * (payNowLoan?.monthlyPayment || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "- Select months -"}
+                          {(() => {
+                            const monthlyRate = typeof payNowLoan?.monthlyPaymentNum === 'number'
+                              ? payNowLoan.monthlyPaymentNum
+                              : (parseFloat(String(payNowLoan?.monthlyPayment || '').replace(/[^0-9.]/g, '')) || 0);
+                            return customPayMonths > 0
+                              ? `${customPayMonths} month${customPayMonths > 1 ? "s" : ""} — ${fmtCurrency(customPayMonths * monthlyRate)}`
+                              : "- Select months -";
+                          })()}
                         </Text>
                         <Text style={{ color: colors.textMuted, fontSize: 14 }}>{showMonthPicker ? "▲" : "▼"}</Text>
                       </TouchableOpacity>
@@ -3307,6 +3508,9 @@ export default function LoansScreen({ navigation, route }) {
                       {showMonthPicker && (
                         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: s(6), marginTop: 6, marginBottom: 8 }}>
                           {(() => {
+                            const monthlyRate = typeof payNowLoan?.monthlyPaymentNum === 'number'
+                              ? payNowLoan.monthlyPaymentNum
+                              : (parseFloat(String(payNowLoan?.monthlyPayment || '').replace(/[^0-9.]/g, '')) || 0);
                             const remaining = (payNowLoan?.termMonths || 12) - (payNowLoan?.paidMonths || 0);
                             const maxMonths = Math.max(1, remaining);
                             return Array.from({ length: maxMonths }, (_, i) => i + 1).map(m => (
@@ -3314,8 +3518,8 @@ export default function LoansScreen({ navigation, route }) {
                                 key={m}
                                 onPress={() => {
                                   setCustomPayMonths(m);
-                                  const amt = m * (payNowLoan?.monthlyPayment || 0);
-                                  setCustomPayAmount(Math.round(amt).toLocaleString());
+                                  const amt = m * monthlyRate;
+                                  setCustomPayAmount(fmtNum(Math.round(amt)));
                                   setShowMonthPicker(false);
                                 }}
                                 style={{
@@ -3327,7 +3531,7 @@ export default function LoansScreen({ navigation, route }) {
                                 }}
                               >
                                 <Text style={{ fontSize: fs(13), fontWeight: "700", color: customPayMonths === m ? C.blue : colors.textDark }}>{m}mo</Text>
-                                <Text style={{ fontSize: 9, color: colors.textMuted, marginTop: 1 }}>₱{Math.round(m * (payNowLoan?.monthlyPayment || 0)).toLocaleString()}</Text>
+                                <Text style={{ fontSize: 9, color: colors.textMuted, marginTop: 1 }}>₱{fmtNum(Math.round(m * monthlyRate))}</Text>
                               </TouchableOpacity>
                             ));
                           })()}
@@ -3365,7 +3569,21 @@ export default function LoansScreen({ navigation, route }) {
                       )}
                     </View>
                     <Text style={{ fontSize: fs(26), fontWeight: "800", color: colors.textDark, marginBottom: 2 }}>
-                      ₱{payType === "regular" ? (payNowLoan.monthlyPaymentNum || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }) : payType === "full" ? (payNowLoan.remainingBalanceNum || 0).toLocaleString(undefined, { minimumFractionDigits: 2 }) : customPayAmount ? customPayAmount : "0.00"}
+                      {(() => {
+                        let num = 0;
+                        if (payType === "regular") {
+                          num = typeof payNowLoan?.monthlyPaymentNum === 'number'
+                            ? payNowLoan.monthlyPaymentNum
+                            : (parseFloat(String(payNowLoan?.monthlyPayment || "").replace(/[^0-9.]/g, "")) || 0);
+                        } else if (payType === "full") {
+                          num = typeof payNowLoan?.remainingBalanceNum === 'number'
+                            ? payNowLoan.remainingBalanceNum
+                            : (parseFloat(String(payNowLoan?.remainingBalance || "").replace(/[^0-9.]/g, "")) || 0);
+                        } else {
+                          num = parseFloat(String(customPayAmount || "").replace(/[^0-9.]/g, "")) || 0;
+                        }
+                        return fmtCurrency(num);
+                      })()}
                     </Text>
                     <Text style={{ fontSize: fs(11), color: colors.textMuted }}>{payType === "full" ? "Full Remaining Balance" : payType === "custom" ? "Custom Amount" : `Due ${payNowLoan.nextPayment || "-"}`}</Text>
                   </View>
@@ -3377,7 +3595,7 @@ export default function LoansScreen({ navigation, route }) {
                   <TouchableOpacity
                     style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: s(10), borderWidth: 1.5, borderColor: payMethod === "cash" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payMethod === "cash" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 8 }}
                     activeOpacity={0.7}
-                    onPress={() => { setPayMethod("cash"); setPayProof(null); }}
+                    onPress={() => { setPayMethod("cash"); setPayProof(null); setPayProofVerification(null); }}
                   >
                     <View style={{ width: 38, height: 38, borderRadius: s(10), backgroundColor: payMethod === "cash" ? "rgba(46,107,240,0.1)" : (colors.inputBg || "#F0F2F5"), alignItems: "center", justifyContent: "center", marginRight: 10 }}>
                       <Image source={ICONS.wallet} style={{ width: s(20), height: s(20), tintColor: payMethod === "cash" ? C.blue : colors.textMuted }} resizeMode="contain" />
@@ -3395,7 +3613,7 @@ export default function LoansScreen({ navigation, route }) {
                   <TouchableOpacity
                     style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: s(10), borderWidth: 1.5, borderColor: payMethod === "bank" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payMethod === "bank" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 8 }}
                     activeOpacity={0.7}
-                    onPress={() => { setPayMethod("bank"); setPayProof(null); }}
+                    onPress={() => { setPayMethod("bank"); setPayProof(null); setPayProofVerification(null); }}
                   >
                     <View style={{ width: 38, height: 38, borderRadius: s(10), backgroundColor: payMethod === "bank" ? "rgba(46,107,240,0.1)" : (colors.inputBg || "#F0F2F5"), alignItems: "center", justifyContent: "center", marginRight: 10 }}>
                       <Image source={ICONS.bank} style={{ width: s(20), height: s(20), tintColor: payMethod === "bank" ? C.blue : colors.textMuted }} resizeMode="contain" />
@@ -3413,7 +3631,7 @@ export default function LoansScreen({ navigation, route }) {
                   <TouchableOpacity
                     style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: s(10), borderWidth: 1.5, borderColor: payMethod === "gcash" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payMethod === "gcash" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 14 }}
                     activeOpacity={0.7}
-                    onPress={() => { setPayMethod("gcash"); setPayProof(null); }}
+                    onPress={() => { setPayMethod("gcash"); setPayProof(null); setPayProofVerification(null); }}
                   >
                     <View style={{ width: 38, height: 38, borderRadius: s(10), backgroundColor: payMethod === "gcash" ? "rgba(0,126,51,0.08)" : (colors.inputBg || "#F0F2F5"), alignItems: "center", justifyContent: "center", marginRight: 10 }}>
                       <Image source={ICONS.gcash} style={{ width: s(22), height: 22 }} resizeMode="contain" />
@@ -3426,6 +3644,256 @@ export default function LoansScreen({ navigation, route }) {
                       {payMethod === "gcash" && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: C.blue }} />}
                     </View>
                   </TouchableOpacity>
+
+                  {/* Bank Transfer Details & Form (matches web app) */}
+                  {payMethod === "bank" && (
+                    <>
+                      <View style={{ backgroundColor: colors.cardBg, borderRadius: s(12), borderWidth: 1, borderColor: colors.cardBorder || "#E8ECF0", padding: s(16), marginBottom: 14 }}>
+                        <Text style={{ fontSize: fs(14), fontWeight: "800", color: colors.textDark, marginBottom: 12 }}>How to pay via Bank Transfer</Text>
+                        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 14 }}>
+                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>1</Text>
+                          </View>
+                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 18 }}>Please transfer to our Bank account and upload your receipt below.</Text>
+                        </View>
+
+                        {/* Bank Details Box */}
+                        <View style={{ backgroundColor: "rgba(46,107,240,0.06)", borderRadius: s(10), borderWidth: 1, borderColor: "rgba(46,107,240,0.25)", padding: s(14) }}>
+                          <Text style={{ fontSize: fs(11), fontWeight: "800", color: "#2563EB", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 6 }}>BANK DETAILS</Text>
+                          <Text style={{ fontSize: fs(15), fontWeight: "800", color: colors.textDark, marginBottom: 4 }}>BDO Unibank</Text>
+                          <Text style={{ fontSize: fs(12.5), color: colors.textMuted, marginBottom: 8 }}>
+                            Account Name: <Text style={{ fontWeight: "700", color: colors.textDark }}>Philippine United Apostolic Church</Text>
+                          </Text>
+                          <Text style={{ fontSize: fs(18), fontWeight: "800", color: "#2563EB", letterSpacing: 1.2 }}>0012 3456 7890</Text>
+                        </View>
+                      </View>
+
+                      {/* Bank Option Form Card */}
+                      <View style={{ backgroundColor: colors.cardBg, borderRadius: s(12), borderWidth: 1, borderColor: colors.cardBorder || "#E8ECF0", padding: s(16), marginBottom: 14 }}>
+                        <Text style={{ fontSize: fs(12), fontWeight: "700", color: colors.textDark, marginBottom: 6 }}>
+                          Bank Option <Text style={{ color: "#E74C3C" }}>*</Text>
+                        </Text>
+                        <View style={{ marginBottom: 14 }}>
+                          <TouchableOpacity
+                            style={{
+                              flexDirection: "row",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              borderWidth: 1,
+                              borderColor: bankOptionDropdownOpen ? C.blue : (colors.inputBorder || "#E8ECF0"),
+                              borderRadius: s(8),
+                              borderBottomLeftRadius: bankOptionDropdownOpen ? 0 : s(8),
+                              borderBottomRightRadius: bankOptionDropdownOpen ? 0 : s(8),
+                              paddingHorizontal: s(14),
+                              paddingVertical: 12,
+                              backgroundColor: colors.inputBg,
+                            }}
+                            activeOpacity={0.8}
+                            onPress={() => setBankOptionDropdownOpen(!bankOptionDropdownOpen)}
+                          >
+                            <Text style={{ fontSize: fs(14), color: bankOption ? colors.textDark : colors.textMuted, fontWeight: bankOption ? "600" : "400" }}>
+                              {bankOption || "Select Bank"}
+                            </Text>
+                            <Text style={{ color: colors.textMuted, fontSize: 14 }}>{bankOptionDropdownOpen ? "▲" : "▼"}</Text>
+                          </TouchableOpacity>
+                          {bankOptionDropdownOpen && (
+                            <View style={{
+                              borderWidth: 1,
+                              borderTopWidth: 0,
+                              borderColor: C.blue,
+                              borderBottomLeftRadius: s(8),
+                              borderBottomRightRadius: s(8),
+                              backgroundColor: colors.cardBg,
+                              overflow: "hidden",
+                            }}>
+                              {["BDO Unibank", "BPI", "Metrobank", "Landbank", "UnionBank", "Security Bank", "RCBC", "Other Bank"].map((b, idx, arr) => (
+                                <TouchableOpacity
+                                  key={b}
+                                  style={{
+                                    paddingHorizontal: s(14),
+                                    paddingVertical: 12,
+                                    borderBottomWidth: idx < arr.length - 1 ? 1 : 0,
+                                    borderBottomColor: colors.cardBorder || "#F0F2F5",
+                                    backgroundColor: bankOption === b ? "rgba(46,107,240,0.08)" : "transparent",
+                                  }}
+                                  onPress={() => { setBankOption(b); setBankOptionDropdownOpen(false); }}
+                                >
+                                  <Text style={{ fontSize: fs(13.5), color: bankOption === b ? C.blue : colors.textDark, fontWeight: bankOption === b ? "700" : "500" }}>{b}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          )}
+                        </View>
+
+                        <Text style={{ fontSize: fs(12), fontWeight: "700", color: colors.textDark, marginBottom: 6 }}>
+                          Sender Account Name <Text style={{ color: "#E74C3C" }}>*</Text>
+                        </Text>
+                        <TextInput
+                          style={{ borderWidth: 1, borderColor: colors.inputBorder || "#E8ECF0", borderRadius: s(8), paddingHorizontal: s(14), paddingVertical: 10, fontSize: fs(14), color: colors.textDark, backgroundColor: colors.inputBg, marginBottom: 14 }}
+                          placeholder="Juan Dela Cruz"
+                          placeholderTextColor={colors.textMuted}
+                          value={bankSenderName}
+                          onChangeText={setBankSenderName}
+                        />
+
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                          <Text style={{ fontSize: fs(12), fontWeight: "700", color: colors.textDark }}>
+                            Sender Bank Account Number <Text style={{ color: "#E74C3C" }}>*</Text>
+                          </Text>
+                          <Text style={{ fontSize: fs(11), color: colors.textMuted }}>
+                            {bankAccountNumber.replace(/\s/g, "").length} digits (10-16)
+                          </Text>
+                        </View>
+                        <TextInput
+                          style={{ borderWidth: 1, borderColor: colors.inputBorder || "#E8ECF0", borderRadius: s(8), paddingHorizontal: s(14), paddingVertical: 10, fontSize: fs(14), color: colors.textDark, backgroundColor: colors.inputBg }}
+                          placeholder="0012 3456 7890"
+                          placeholderTextColor={colors.textMuted}
+                          keyboardType="numeric"
+                          maxLength={16}
+                          value={bankAccountNumber}
+                          onChangeText={(t) => setBankAccountNumber(t.replace(/[^0-9]/g, ""))}
+                        />
+                      </View>
+                    </>
+                  )}
+
+                  {/* E-Wallet Details & Form (matches web app) */}
+                  {payMethod === "gcash" && (
+                    <>
+                      <View style={{ backgroundColor: colors.cardBg, borderRadius: s(12), borderWidth: 1, borderColor: colors.cardBorder || "#E8ECF0", padding: s(16), marginBottom: 14 }}>
+                        <Text style={{ fontSize: fs(14), fontWeight: "800", color: colors.textDark, marginBottom: 12 }}>How to pay via E-Wallet</Text>
+                        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 14 }}>
+                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
+                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>1</Text>
+                          </View>
+                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 18 }}>Please transfer to our E-Wallet account and upload your receipt below.</Text>
+                        </View>
+
+                        {/* E-Wallet Details Box */}
+                        <View style={{ backgroundColor: "rgba(147, 51, 234, 0.05)", borderRadius: s(10), borderWidth: 1, borderColor: "rgba(147, 51, 234, 0.25)", padding: s(14) }}>
+                          <Text style={{ fontSize: fs(11), fontWeight: "800", color: "#7C3AED", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 4 }}>GCASH DETAILS</Text>
+                          <Text style={{ fontSize: fs(12.5), color: colors.textMuted }}>
+                            Name: <Text style={{ fontWeight: "700", color: colors.textDark }}>IsangDiwa Church</Text>
+                          </Text>
+                          <Text style={{ fontSize: fs(18), fontWeight: "800", color: "#7C3AED", letterSpacing: 1.2, marginTop: 2, marginBottom: 10 }}>0912 345 6789</Text>
+
+                          <View style={{ height: 1, backgroundColor: "rgba(147, 51, 234, 0.15)", marginBottom: 10 }} />
+
+                          <Text style={{ fontSize: fs(11), fontWeight: "800", color: "#7C3AED", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 4 }}>MAYA DETAILS</Text>
+                          <Text style={{ fontSize: fs(12.5), color: colors.textMuted }}>
+                            Name: <Text style={{ fontWeight: "700", color: colors.textDark }}>IsangDiwa Church</Text>
+                          </Text>
+                          <Text style={{ fontSize: fs(18), fontWeight: "800", color: "#7C3AED", letterSpacing: 1.2, marginTop: 2 }}>0998 765 4321</Text>
+                        </View>
+                      </View>
+
+                      {/* E-Wallet Option Form Card */}
+                      <View style={{ backgroundColor: colors.cardBg, borderRadius: s(12), borderWidth: 1, borderColor: colors.cardBorder || "#E8ECF0", padding: s(16), marginBottom: 14 }}>
+                        <Text style={{ fontSize: fs(12), fontWeight: "700", color: colors.textDark, marginBottom: 6 }}>
+                          E-Wallet Option <Text style={{ color: "#E74C3C" }}>*</Text>
+                        </Text>
+                        <View style={{ marginBottom: 14 }}>
+                          <TouchableOpacity
+                            style={{
+                              flexDirection: "row",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              borderWidth: 1,
+                              borderColor: ewalletOptionDropdownOpen ? C.blue : (colors.inputBorder || "#E8ECF0"),
+                              borderRadius: s(8),
+                              borderBottomLeftRadius: ewalletOptionDropdownOpen ? 0 : s(8),
+                              borderBottomRightRadius: ewalletOptionDropdownOpen ? 0 : s(8),
+                              paddingHorizontal: s(14),
+                              paddingVertical: 12,
+                              backgroundColor: colors.inputBg,
+                            }}
+                            activeOpacity={0.8}
+                            onPress={() => setEwalletOptionDropdownOpen(!ewalletOptionDropdownOpen)}
+                          >
+                            <Text style={{ fontSize: fs(14), color: ewalletOption ? colors.textDark : colors.textMuted, fontWeight: ewalletOption ? "600" : "400" }}>
+                              {ewalletOption || "Select E-Wallet"}
+                            </Text>
+                            <Text style={{ color: colors.textMuted, fontSize: 14 }}>{ewalletOptionDropdownOpen ? "▲" : "▼"}</Text>
+                          </TouchableOpacity>
+                          {ewalletOptionDropdownOpen && (
+                            <View style={{
+                              borderWidth: 1,
+                              borderTopWidth: 0,
+                              borderColor: C.blue,
+                              borderBottomLeftRadius: s(8),
+                              borderBottomRightRadius: s(8),
+                              backgroundColor: colors.cardBg,
+                              overflow: "hidden",
+                            }}>
+                              {["GCash", "Maya"].map((ew, idx, arr) => (
+                                <TouchableOpacity
+                                  key={ew}
+                                  style={{
+                                    paddingHorizontal: s(14),
+                                    paddingVertical: 12,
+                                    borderBottomWidth: idx < arr.length - 1 ? 1 : 0,
+                                    borderBottomColor: colors.cardBorder || "#F0F2F5",
+                                    backgroundColor: ewalletOption === ew ? "rgba(46,107,240,0.08)" : "transparent",
+                                  }}
+                                  onPress={() => { setEwalletOption(ew); setEwalletOptionDropdownOpen(false); }}
+                                >
+                                  <Text style={{ fontSize: fs(13.5), color: ewalletOption === ew ? C.blue : colors.textDark, fontWeight: ewalletOption === ew ? "700" : "500" }}>{ew}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          )}
+                        </View>
+
+                        <Text style={{ fontSize: fs(12), fontWeight: "700", color: colors.textDark, marginBottom: 6 }}>
+                          Sender Account Name <Text style={{ color: "#E74C3C" }}>*</Text>
+                        </Text>
+                        <TextInput
+                          style={{ borderWidth: 1, borderColor: colors.inputBorder || "#E8ECF0", borderRadius: s(8), paddingHorizontal: s(14), paddingVertical: 10, fontSize: fs(14), color: colors.textDark, backgroundColor: colors.inputBg, marginBottom: 14 }}
+                          placeholder="Juan Dela Cruz"
+                          placeholderTextColor={colors.textMuted}
+                          value={ewalletSenderName}
+                          onChangeText={setEwalletSenderName}
+                        />
+
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                          <Text style={{ fontSize: fs(12), fontWeight: "700", color: colors.textDark }}>
+                            Sender E-Wallet Number <Text style={{ color: "#E74C3C" }}>*</Text>
+                          </Text>
+                          <Text style={{ fontSize: fs(11), color: colors.textMuted }}>
+                            {ewalletNumber.length}/11 digits
+                          </Text>
+                        </View>
+                        <TextInput
+                          style={{ borderWidth: 1, borderColor: colors.inputBorder || "#E8ECF0", borderRadius: s(8), paddingHorizontal: s(14), paddingVertical: 10, fontSize: fs(14), color: colors.textDark, backgroundColor: colors.inputBg }}
+                          placeholder="09123456789"
+                          placeholderTextColor={colors.textMuted}
+                          keyboardType="numeric"
+                          maxLength={11}
+                          value={ewalletNumber}
+                          onChangeText={(t) => setEwalletNumber(t.replace(/[^0-9]/g, ""))}
+                        />
+                      </View>
+                    </>
+                  )}
+
+                  {/* Cash instructions */}
+                  {payMethod === "cash" && (
+                    <View style={{ backgroundColor: colors.cardBg, borderRadius: s(12), borderWidth: 1, borderColor: colors.cardBorder || "#E8ECF0", padding: s(16), marginBottom: 14 }}>
+                      <Text style={{ fontSize: fs(14), fontWeight: "800", color: colors.textDark, marginBottom: 12 }}>How to pay via Cash</Text>
+                      <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: s(8), gap: 10 }}>
+                        <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
+                          <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>1</Text>
+                        </View>
+                        <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Visit the office or authorized cashier during business hours.</Text>
+                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+                        <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
+                          <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>2</Text>
+                        </View>
+                        <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Present your Loan ID: {payNowLoan.id} to the cashier.</Text>
+                      </View>
+                    </View>
+                  )}
 
                   {/* Proof of Payment -  only for GCash and Bank in manual mode */}
                   {paymentApprovalMethod === "manual" && (payMethod === "gcash" || payMethod === "bank") && (
@@ -3442,7 +3910,23 @@ export default function LoansScreen({ navigation, route }) {
                         onPress={() => showImageOptions(setPayProof, "Proof of Payment")}
                       >
                         {payProof ? (
-                          <Image source={{ uri: payProof.uri }} style={styles.previewImg} />
+                          <View style={{ width: "100%", height: "100%" }}>
+                            <Image source={{ uri: payProof.uri }} style={styles.previewImg} />
+                            {payProofVerification?.verifying ? (
+                              <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(245,166,35,0.92)", flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 6 }}>
+                                <ActivityIndicator color="#FFFFFF" size="small" style={{ marginRight: 6 }} />
+                                <Text style={{ color: "#fff", fontSize: fs(11), fontWeight: "700" }}>Verifying receipt...</Text>
+                              </View>
+                            ) : payProofVerification?.valid ? (
+                              <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(52,199,89,0.92)", alignItems: "center", paddingVertical: 6 }}>
+                                <Text style={{ color: "#fff", fontSize: fs(11), fontWeight: "700" }}>✓ Verified {payProofVerification.provider || "Receipt"}</Text>
+                              </View>
+                            ) : payProofVerification && !payProofVerification.valid ? (
+                              <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(231,76,60,0.92)", alignItems: "center", paddingVertical: 6, paddingHorizontal: 8 }}>
+                                <Text style={{ color: "#fff", fontSize: fs(10), fontWeight: "700", textAlign: "center" }}>✕ {payProofVerification.reason || "Invalid Receipt"}</Text>
+                              </View>
+                            ) : null}
+                          </View>
                         ) : (
                           <>
                             <Image source={ICONS.camera} style={[styles.uploadIconImg, { marginBottom: 4 }]} resizeMode="contain" />
@@ -3452,70 +3936,6 @@ export default function LoansScreen({ navigation, route }) {
                       </TouchableOpacity>
                     </View>
                   )}
-
-                  {/* How to pay instructions */}
-                  <View style={{ borderTopWidth: 1, borderTopColor: colors.cardBorder || "#E8ECF0", paddingTop: 14, marginBottom: 10 }}>
-                    <Text style={{ fontSize: fs(13), fontWeight: "800", color: colors.textDark, marginBottom: 10 }}>
-                      How to pay via {payMethod === "cash" ? "Cash" : payMethod === "bank" ? "Bank Transfer" : "GCash"}
-                    </Text>
-
-                    {payMethod === "cash" && (
-                      <>
-                        <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: s(8), gap: 10 }}>
-                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>1</Text>
-                          </View>
-                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Visit the office or authorized cashier during business hours.</Text>
-                        </View>
-                        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>2</Text>
-                          </View>
-                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Present your Loan ID: {payNowLoan.id} to the cashier.</Text>
-                        </View>
-                      </>
-                    )}
-
-                    {payMethod === "bank" && (
-                      <>
-                        <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: s(8), gap: 10 }}>
-                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>1</Text>
-                          </View>
-                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Transfer ₱{(payNowLoan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} to the church bank account.</Text>
-                        </View>
-                        <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: s(8), gap: 10 }}>
-                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>2</Text>
-                          </View>
-                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Use Loan ID ({payNowLoan.id}) as the reference number.</Text>
-                        </View>
-                        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>3</Text>
-                          </View>
-                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Upload your receipt above - admin will verify.</Text>
-                        </View>
-                      </>
-                    )}
-
-                    {payMethod === "gcash" && (
-                      <>
-                        <View style={{ flexDirection: "row", alignItems: "flex-start", marginBottom: s(8), gap: 10 }}>
-                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>1</Text>
-                          </View>
-                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Send ₱{(payNowLoan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} via GCash to 09608326569</Text>
-                        </View>
-                        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-                          <View style={{ width: s(22), height: s(22), borderRadius: 11, backgroundColor: colors.inputBg || "#F0F2F5", alignItems: "center", justifyContent: "center" }}>
-                            <Text style={{ fontSize: fs(11), fontWeight: "800", color: colors.textMuted }}>2</Text>
-                          </View>
-                          <Text style={{ flex: 1, fontSize: fs(12), color: colors.textMuted, lineHeight: 17 }}>Upload your GCash receipt above for verification.</Text>
-                        </View>
-                      </>
-                    )}
-                  </View>
 
                   <View style={{ height: 6 }} />
                 </>
@@ -3579,7 +3999,7 @@ export default function LoansScreen({ navigation, route }) {
                   <View style={{ backgroundColor: colors.inputBg || "#F5F7FA", borderRadius: s(12), padding: s(14), marginBottom: 18 }}>
                     <Text style={{ fontSize: fs(14), fontWeight: "700", color: colors.textDark }}>{scheduleLoan.id}</Text>
                     <Text style={{ fontSize: fs(12), color: colors.textMuted, marginTop: 2 }}>
-                      {scheduleLoan.type} Loan  •  ₱{(scheduleLoan.amountNum || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}  •  {scheduleLoan.termMonths} months
+                      {scheduleLoan.type} Loan  •  {fmtCurrency(scheduleLoan.amountNum || 0)}  •  {scheduleLoan.termMonths} months
                     </Text>
                   </View>
 
@@ -3603,7 +4023,7 @@ export default function LoansScreen({ navigation, route }) {
                     if (scheduleLoan.applied) {
                       const base = new Date(scheduleLoan.applied);
                       base.setMonth(base.getMonth() + monthNum);
-                      dueDate = base.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                      dueDate = fmtDate(base);
                     }
 
                     let statusLabel = "Upcoming";
@@ -3628,7 +4048,9 @@ export default function LoansScreen({ navigation, route }) {
                         <Text style={{ flex: 0.8, fontSize: fs(13), fontWeight: "700", color: colors.textDark }}>{monthNum}</Text>
                         <Text style={{ flex: 1.5, fontSize: fs(12), color: colors.textMuted }}>{dueDate}</Text>
                         <Text style={{ flex: 1.2, fontSize: fs(13), fontWeight: "700", color: colors.textDark, textAlign: "right" }}>
-                          ₱{(scheduleLoan.monthlyPayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          {typeof scheduleLoan.monthlyPayment === "string" && scheduleLoan.monthlyPayment.startsWith("₱")
+                            ? scheduleLoan.monthlyPayment
+                            : fmtCurrency(scheduleLoan.monthlyPaymentNum ?? (parseFloat(String(scheduleLoan.monthlyPayment || "").replace(/[^0-9.]/g, "")) || 0))}
                         </Text>
                         <View style={{ flex: 1, alignItems: "flex-end" }}>
                           <View style={{ backgroundColor: statusBg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
@@ -3643,7 +4065,9 @@ export default function LoansScreen({ navigation, route }) {
                   <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: s(14), paddingHorizontal: 4, marginTop: 4 }}>
                     <Text style={{ flex: 2.3, fontSize: fs(13), fontWeight: "800", color: colors.textDark }}>Total Repayment</Text>
                     <Text style={{ flex: 1.2, fontSize: fs(14), fontWeight: "800", color: C.blue, textAlign: "right" }}>
-                      ₱{(scheduleLoan.totalRepayment || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      {typeof scheduleLoan.totalRepayment === "string" && scheduleLoan.totalRepayment.startsWith("₱")
+                        ? scheduleLoan.totalRepayment
+                        : fmtCurrency(parseFloat(String(scheduleLoan.totalRepayment || "").replace(/[^0-9.]/g, "")) || 0)}
                     </Text>
                     <View style={{ flex: 1 }} />
                   </View>
