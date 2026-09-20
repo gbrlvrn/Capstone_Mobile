@@ -713,7 +713,7 @@ export function getProfilePhotoUri(photo) {
 }
 
 export async function uploadProfilePhoto(photoUri) {
-  const url = `${API_CONFIG.CUSTOM_BACKEND.BASE_URL}/auth/upload-photo`;
+  const url = `${API_CONFIG.CUSTOM_BACKEND.BASE_URL}/upload-photo-file`;
   const token = await getToken();
 
   const formData = new FormData();
@@ -728,7 +728,7 @@ export async function uploadProfilePhoto(photoUri) {
   });
 
   const res = await fetch(url, {
-    method: "POST",
+    method: "PUT",
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
   });
@@ -911,23 +911,32 @@ export function getDonations(page = 1, limit = 50, category = "") {
  */
 export async function verifyReceiptImage(base64, mimeType = "image/jpeg") {
   try {
-    const rawBase64 = base64.startsWith("data:")
-      ? base64.replace(/^data:image\/\w+;base64,/, "")
-      : base64;
+    const formattedImage = base64.startsWith("data:")
+      ? base64
+      : `data:${mimeType};base64,${base64}`;
 
-    const res = await request("POST", "/donations/verify-receipt", {
-      base64: rawBase64,
-      mimeType,
+    const res = await request("POST", "/donations/validate-receipt", {
+      image: formattedImage,
     }, true);
 
-    if (res && typeof res.valid !== "undefined") {
+    if (res && (typeof res.isReceipt !== "undefined" || typeof res.valid !== "undefined")) {
+      const isValid = Boolean(res.isReceipt ?? res.valid);
+      let confidenceLevel = "low";
+      if (typeof res.confidence === "number") {
+        confidenceLevel = res.confidence >= 0.7 ? "high" : res.confidence >= 0.4 ? "medium" : "low";
+      } else if (typeof res.confidence === "string") {
+        confidenceLevel = res.confidence;
+      } else if (isValid) {
+        confidenceLevel = "high";
+      }
+
       return {
-        valid: Boolean(res.valid),
-        provider: res.provider || null,
-        confidence: res.confidence || (res.valid ? "high" : "low"),
-        reason: res.reason || (res.valid
-          ? "Valid e-wallet receipt detected."
-          : "The image does not appear to be a valid e-wallet payment receipt."),
+        valid: isValid,
+        provider: res.provider || (isValid ? "Payment Receipt" : null),
+        confidence: confidenceLevel,
+        reason: res.reason || (isValid
+          ? "Valid payment receipt detected."
+          : "The image does not appear to be a valid payment receipt."),
       };
     }
   } catch (e) {
@@ -1117,12 +1126,10 @@ export async function getAnnouncements() {
 
 export async function getEvents() {
   try {
-    // Correct endpoint: /api/events — returns a plain array
-    const result = await get("/events", false);
-    if (Array.isArray(result)) return result;
-    if (result?.data && Array.isArray(result.data)) return result.data;
-    if (result?.events && Array.isArray(result.events)) return result.events;
-    return [];
+    // In web backend, services/events are stored in announcements with type: 'service'
+    const all = await getAnnouncements();
+    const services = (all || []).filter(a => a && a.type === "service");
+    return services.length > 0 ? services : (all || []);
   } catch (err) {
     console.error("Error fetching events:", err.message);
     return [];
