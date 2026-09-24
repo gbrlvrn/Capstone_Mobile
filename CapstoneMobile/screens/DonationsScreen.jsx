@@ -210,7 +210,7 @@ export default function DonationsScreen({ navigation, route }) {
     startOfWeek.setDate(now.getDate() - 6);
 
     donationHistory.forEach(d => {
-      if (!d.rawDate || (d.status || '').toLowerCase() === 'rejected') return;
+      if (!d.rawDate || (d.status || '').toLowerCase() !== 'confirmed') return;
       const dDate = new Date(d.rawDate);
       if (isNaN(dDate.getTime())) return;
       const amt = d.rawAmount || 0;
@@ -230,7 +230,7 @@ export default function DonationsScreen({ navigation, route }) {
     const totals = {};
     let totalAmt = 0;
     donationHistory.forEach(d => {
-      if ((d.status || '').toLowerCase() === 'rejected') return;
+      if ((d.status || '').toLowerCase() !== 'confirmed') return;
       const amt = d.rawAmount || 0;
       const cat = d.fund || 'General';
       if (amt > 0) {
@@ -255,7 +255,7 @@ export default function DonationsScreen({ navigation, route }) {
   // totalDonated and yearDonated derived from donationHistory - no separate loop needed
   const totalDonated = useMemo(() => {
     return donationHistory
-      .filter(d => (d.status || '').toLowerCase() !== 'rejected')
+      .filter(d => (d.status || '').toLowerCase() === 'confirmed')
       .reduce((sum, d) => sum + (d.rawAmount || 0), 0);
   }, [donationHistory]);
 
@@ -263,7 +263,7 @@ export default function DonationsScreen({ navigation, route }) {
     const currentYear = new Date().getFullYear();
     return donationHistory
       .filter(d => {
-        if ((d.status || '').toLowerCase() === 'rejected') return false;
+        if ((d.status || '').toLowerCase() !== 'confirmed') return false;
         const dt = d.rawDate ? new Date(d.rawDate) : null;
         return dt && !isNaN(dt.getTime()) && dt.getFullYear() === currentYear;
       })
@@ -848,7 +848,7 @@ export default function DonationsScreen({ navigation, route }) {
           <Animated.View style={[styles.summaryCard, styles.summaryCardHalf, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder, opacity: summaryAnims[2].opacity, transform: [{ translateY: summaryAnims[2].translateY }] }]}>
             <View style={styles.summaryLeft}>
               <Text style={[styles.summaryLabel, { color: colors.textMuted }]}>Total Donations</Text>
-              <Text style={[styles.summaryValueSmall, { color: colors.textDark }]}>{donationHistory.filter(d => (d.status || '').toLowerCase() !== 'rejected').length}</Text>
+              <Text style={[styles.summaryValueSmall, { color: colors.textDark }]}>{donationHistory.filter(d => (d.status || '').toLowerCase() === 'confirmed').length}</Text>
             </View>
           </Animated.View>
 

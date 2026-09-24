@@ -302,6 +302,7 @@ export default function HomeScreen({ navigation, route }) {
     let sum = 0;
     let matchCount = 0;
     rawDonations.forEach((item) => {
+      if ((item.status || '').toLowerCase() !== 'confirmed') return;
       const itemDateStr = item.date || item.createdAt || item.timestamp || item.created_at;
       if (!itemDateStr) return;
       const d = new Date(itemDateStr);
@@ -785,6 +786,7 @@ export default function HomeScreen({ navigation, route }) {
             setRawDonations(donations);
             let total = 0;
             donations.forEach(d => {
+              if ((d.status || '').toLowerCase() !== 'confirmed') return;
               total += parseFloat(String(d.amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
             });
             setTotalDonated(total);
@@ -797,6 +799,7 @@ export default function HomeScreen({ navigation, route }) {
               setRawDonations(donations);
               let total = 0;
               donations.forEach(d => {
+                if ((d.status || '').toLowerCase() !== 'confirmed') return;
                 total += parseFloat(String(d.amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
               });
               setTotalDonated(total);

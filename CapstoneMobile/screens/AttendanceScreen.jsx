@@ -96,6 +96,34 @@ const SIDEBAR_ITEMS = [
   { key: "Settings", icon: ICONS.settings },
 ];
 
+// Branch name → Province mapping for grouping attendance by province
+const BRANCH_TO_PROVINCE = (() => {
+  const COMMUNITIES = {
+    "Kalinga": ["Tabuk", "Zapote", "Bliss", "Libanon", "Batong Buhay", "Balatoc", "Lat-nog"],
+    "Abra": ["Lamao", "Lingey", "Cabaruyan", "Ducligan", "Gangal", "Bila-Bila", "Naguillian", "Ud-udiao", "Villa Conchita", "Ay-yeng Manabo", "Dao-angan", "Kilong-olao", "Bao-yan", "Amti", "Danac", "Bengued", "Sappaac", "Saccaang"],
+    "Benguet": ["Baguio"],
+    "Pangasinan": ["Dagupan", "Mangatarem", "Laoak Langka", "Orbiztondo", "Malasique Bolaoit", "Taloyan", "Binmaley", "San Carlos", "Manaoag", "Pozorrobio", "Alcala"],
+    "Isabela": ["Santiago City"],
+    "Bulacan": ["Meycauayan City", "Camalig", "San Jose Del Monte", "Bulacan Main"],
+    "Tarlac": ["Pacpaco San Manuel", "Victoria"],
+    "Nueva Ecija": ["Bambanaba Cuyapo"],
+    "NCR": ["Valenzuela City", "Tandang Sora Quezon City", "COA Quezon City", "Payatas Quezon City", "Malaria Caloocan"],
+    "Rizal": ["Montalban"],
+    "Cebu": ["Mandaue", "Li-loan", "Calero", "Compostela"],
+    "Agusan Del Norte": ["Butuan City", "RTR", "Jabango Bangonay", "Jabonga Bangonay", "Jabonga, Bangonay", "Kasiklan", "San Mateo", "Fatima Kim.13", "Bayugan", "Ibuan", "Balubo"],
+    "Surigao Del Norte": ["Alegria", "Bonifacio", "Matin-ao", "Ipil"],
+    "Surigao Del Sur": ["Kinabigtasan Tago", "Kinabigtasan, Tago"],
+  };
+  const map = {};
+  for (const [province, names] of Object.entries(COMMUNITIES)) {
+    for (const name of names) {
+      map[name.toLowerCase().replace(/,/g, "").replace(/\s+/g, " ").trim()] = province;
+    }
+  }
+  return map;
+})();
+
+const HISTORY_PAGE_SIZE = 5;
 
 
 // Attendance history and stats are fetched from the backend
@@ -126,13 +154,24 @@ export default function AttendanceScreen({ navigation, route }) {
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth());
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+  const [filterMode, setFilterMode] = useState("month"); // "month" or "year"
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const NOW = useMemo(() => new Date(), []);
+  const CURRENT_MONTH = NOW.getMonth();
+  const CURRENT_YEAR = NOW.getFullYear();
 
   // ── Live attendance data from backend ──
   const [attendanceHistory, setAttendanceHistory] = useState([]);
   const [totalAttendance, setTotalAttendance] = useState(0);
   const [attendanceStats, setAttendanceStats] = useState({ totalCheckIns: 0, currentStreak: 0, thisMonthCount: 0 });
+
+  // ── Province-grouped recent attendance ──
+  const [expandedProvinces, setExpandedProvinces] = useState({});
+
+  // ── Paginated history modal ──
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyModalPage, setHistoryModalPage] = useState(1);
 
   // Staggered entrance animations for 2 stat cards
   const statAnims = useRef([0, 1].map(() => ({
@@ -426,59 +465,97 @@ export default function AttendanceScreen({ navigation, route }) {
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
                   <Text style={[styles.statLabel, { color: colors.textMuted, marginBottom: 0, marginRight: 8 }]}>Total Attendance</Text>
                   <TouchableOpacity 
-                    style={{ backgroundColor: colors.blueLight, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}
+                    style={{ backgroundColor: colors.blueLight, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}
                     onPress={() => setShowFilterDropdown(!showFilterDropdown)}
                   >
                     <Text style={{ fontSize: 10, fontWeight: "600", color: colors.blue }}>
-                      {monthNames[filterMonth]} {filterYear} ▾
+                      {filterMode === "year" ? `${filterYear}` : `${monthNames[filterMonth]} ${filterYear}`} ▾
                     </Text>
                   </TouchableOpacity>
                 </View>
 
                 {showFilterDropdown && (
-                  <View style={{ marginTop: 8, backgroundColor: colors.cardBg, borderRadius: 8, borderWidth: 1, borderColor: colors.cardBorder, padding: 10 }}>
-                    {/* Year Selector */}
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                      <TouchableOpacity onPress={() => setFilterYear(y => y - 1)} style={{ paddingHorizontal: 12, paddingVertical: 4 }}>
-                        <Text style={{ color: colors.textMuted, fontSize: 16, fontWeight: "bold" }}>{"<"}</Text>
+                  <View style={{ marginTop: 8, backgroundColor: colors.cardBg, borderRadius: 10, borderWidth: 1, borderColor: colors.cardBorder, padding: 12 }}>
+                    {/* Monthly / Yearly Toggle */}
+                    <View style={{ flexDirection: "row", marginBottom: 12, backgroundColor: colors.inputBg || '#F0F2F5', borderRadius: 8, padding: 3 }}>
+                      <TouchableOpacity
+                        style={{ flex: 1, paddingVertical: 6, borderRadius: 6, alignItems: "center", backgroundColor: filterMode === "month" ? colors.blue : "transparent" }}
+                        onPress={() => setFilterMode("month")}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: "700", color: filterMode === "month" ? "#FFF" : colors.textMuted }}>Monthly</Text>
                       </TouchableOpacity>
-                      <Text style={{ color: colors.textDark, fontSize: 14, fontWeight: "bold" }}>{filterYear}</Text>
-                      <TouchableOpacity onPress={() => setFilterYear(y => y + 1)} style={{ paddingHorizontal: 12, paddingVertical: 4 }}>
-                        <Text style={{ color: colors.textMuted, fontSize: 16, fontWeight: "bold" }}>{">"}</Text>
+                      <TouchableOpacity
+                        style={{ flex: 1, paddingVertical: 6, borderRadius: 6, alignItems: "center", backgroundColor: filterMode === "year" ? colors.blue : "transparent" }}
+                        onPress={() => setFilterMode("year")}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: "700", color: filterMode === "year" ? "#FFF" : colors.textMuted }}>Yearly</Text>
                       </TouchableOpacity>
                     </View>
 
-                    {/* Month Grid */}
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" }}>
-                      {monthNames.map((m, idx) => {
-                        const isSelected = idx === filterMonth;
-                        return (
-                          <TouchableOpacity
-                            key={m}
-                            style={{ 
-                              width: "23%", 
-                              paddingVertical: 6, 
-                              marginBottom: 6,
-                              alignItems: "center",
-                              borderRadius: 6,
-                              backgroundColor: isSelected ? colors.blue : "transparent" 
-                            }}
-                            onPress={() => {
-                              setFilterMonth(idx);
-                              setShowFilterDropdown(false);
-                            }}
-                          >
-                            <Text style={{ fontSize: 12, fontWeight: "600", color: isSelected ? "#FFF" : colors.textDark }}>
-                              {m}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
+                    {/* Year Selector */}
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: filterMode === "month" ? 12 : 0 }}>
+                      <TouchableOpacity onPress={() => setFilterYear(y => y - 1)} style={{ paddingHorizontal: 12, paddingVertical: 4 }}>
+                        <Text style={{ color: colors.textMuted, fontSize: 16, fontWeight: "bold" }}>{"<"}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (filterMode === "year") {
+                            setShowFilterDropdown(false);
+                          }
+                        }}
+                      >
+                        <Text style={{ color: colors.textDark, fontSize: 14, fontWeight: "bold" }}>{filterYear}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => { if (filterYear < CURRENT_YEAR) setFilterYear(y => y + 1); }}
+                        disabled={filterYear >= CURRENT_YEAR}
+                        style={{ paddingHorizontal: 12, paddingVertical: 4, opacity: filterYear >= CURRENT_YEAR ? 0.3 : 1 }}
+                      >
+                        <Text style={{ color: colors.textMuted, fontSize: 16, fontWeight: "bold" }}>{">"}  </Text>
+                      </TouchableOpacity>
                     </View>
+
+                    {/* Month Grid — only show in monthly mode */}
+                    {filterMode === "month" && (
+                      <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" }}>
+                        {monthNames.map((m, idx) => {
+                          const isSelected = idx === filterMonth;
+                          const isFuture = filterYear === CURRENT_YEAR && idx > CURRENT_MONTH;
+                          return (
+                            <TouchableOpacity
+                              key={m}
+                              disabled={isFuture}
+                              style={{ 
+                                width: "23%", 
+                                paddingVertical: 6, 
+                                marginBottom: 6,
+                                alignItems: "center",
+                                borderRadius: 6,
+                                backgroundColor: isSelected ? colors.blue : "transparent",
+                                opacity: isFuture ? 0.3 : 1,
+                              }}
+                              onPress={() => {
+                                setFilterMonth(idx);
+                                setShowFilterDropdown(false);
+                              }}
+                            >
+                              <Text style={{ fontSize: 12, fontWeight: "600", color: isSelected ? "#FFF" : isFuture ? colors.textMuted : colors.textDark }}>
+                                {m}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    )}
                   </View>
                 )}
               </View>
-              <Text style={[styles.statValue, { color: colors.textDark }]}>{attendanceStats.thisMonthCount || 0}</Text>
+              <Text style={[styles.statValue, { color: colors.textDark }]}>{attendanceHistory.filter(r => {
+                const d = new Date(r.createdAt || r.date);
+                if (isNaN(d.getTime())) return false;
+                if (filterMode === "year") return d.getFullYear() === filterYear;
+                return d.getMonth() === filterMonth && d.getFullYear() === filterYear;
+              }).length}</Text>
             </View>
             <View
               style={[styles.statIconBox, { backgroundColor: C.blueLight }]}
@@ -552,64 +629,98 @@ export default function AttendanceScreen({ navigation, route }) {
 
 
 
-        {/* Attendance History */}
+        {/* Recent Attendance — grouped by province (matches web) */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textDark }]}>Attendance History</Text>
-
-          <View style={[styles.historyTable, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-            {/* Table Header */}
-            <View style={styles.tableHeader}>
-              <Text style={[styles.tableHeaderText, styles.tableCol1]}>
-                Service
-              </Text>
-              <Text style={[styles.tableHeaderText, styles.tableCol2]}>
-                Date
-              </Text>
-              <Text style={[styles.tableHeaderText, styles.tableCol3]}>
-                Time
-              </Text>
-            </View>
-
-            {/* Table Rows */}
-            {(() => {
-              const filteredHistory = attendanceHistory.filter((record) => {
-                if (!record.createdAt) return false;
-                const d = new Date(record.createdAt);
-                return d.getMonth() === filterMonth && d.getFullYear() === filterYear;
-              });
-
-              if (filteredHistory.length === 0) {
-                return (
-                  <View style={{ padding: 20, alignItems: "center" }}>
-                    <Text style={{ color: colors.textMuted, fontSize: 13 }}>No attendance records yet for this month.</Text>
-                  </View>
-                );
-              }
-
-              return filteredHistory.map((record, idx, arr) => (
-                <TouchableOpacity
-                  key={record._id || idx}
-                  style={[
-                    styles.tableRow,
-                    idx === arr.length - 1 && styles.tableRowLast,
-                  ]}
-                  activeOpacity={0.6}
-                  onPress={() => setSelectedRecord(record)}
-                >
-                  <Text style={[styles.tableCell, styles.tableCol1]}>
-                    {record.service || record.type || "Check-in"}
-                  </Text>
-                  <Text style={[styles.tableCell, styles.tableCol2]}>
-                    {record.date || (record.createdAt ? fmtDateSlash(record.createdAt) : "-")}
-                  </Text>
-                  <Text style={[styles.tableCell, styles.tableCol3]}>
-                    {record.time || (record.createdAt ? fmtTime(record.createdAt) : "-")}
-                  </Text>
-                  <Ionicons name="chevron-forward" size={14} color={colors.textMuted} style={{ marginLeft: 4 }} />
-                </TouchableOpacity>
-              ));
-            })()}
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <Text style={[styles.sectionTitle, { color: colors.textDark, marginBottom: 0 }]}>Recent Attendance</Text>
+            <TouchableOpacity onPress={() => { setHistoryModalPage(1); setShowHistoryModal(true); }} activeOpacity={0.6}>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: colors.blue || "#2E6BF0" }}>View History</Text>
+            </TouchableOpacity>
           </View>
+
+          {(() => {
+            if (attendanceHistory.length === 0) {
+              return (
+                <View style={[styles.historyTable, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder, padding: 24, alignItems: "center" }]}>
+                  <Text style={{ color: colors.textMuted, fontSize: 13 }}>No attendance records yet.</Text>
+                </View>
+              );
+            }
+
+            // Group records by province
+            const grouped = {};
+            attendanceHistory.forEach(record => {
+              const branch = (record.branch || record.community || "").trim();
+              const province = BRANCH_TO_PROVINCE[branch.toLowerCase().replace(/,/g, "").replace(/\s+/g, " ").trim()] || "Other";
+              if (!grouped[province]) grouped[province] = {};
+              if (!grouped[province][branch || "Unknown"]) grouped[province][branch || "Unknown"] = [];
+              grouped[province][branch || "Unknown"].push(record);
+            });
+
+            const provinceEntries = Object.entries(grouped).sort((a, b) => {
+              if (a[0] === "Other") return -1;
+              if (b[0] === "Other") return 1;
+              return a[0].localeCompare(b[0]);
+            });
+
+            return provinceEntries.map(([province, branches]) => {
+              const totalVisits = Object.values(branches).reduce((sum, arr) => sum + arr.length, 0);
+              const isExpanded = expandedProvinces[province];
+              return (
+                <View key={province} style={[styles.provinceCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+                  <TouchableOpacity
+                    style={styles.provinceHeader}
+                    activeOpacity={0.7}
+                    onPress={() => setExpandedProvinces(prev => ({ ...prev, [province]: !prev[province] }))}
+                  >
+                    <Text style={[styles.provinceName, { color: colors.textDark }]}>{province}</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Text style={{ fontSize: 13, color: colors.textMuted, fontWeight: "600" }}>
+                        {totalVisits} visit{totalVisits !== 1 ? "s" : ""}
+                      </Text>
+                      <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={16} color={colors.textMuted} />
+                    </View>
+                  </TouchableOpacity>
+
+                  {isExpanded && Object.entries(branches).map(([branchName, records]) => (
+                    <View key={branchName} style={styles.branchSection}>
+                      <Text style={[styles.branchName, { color: colors.textDark }]}>{branchName}</Text>
+                      {/* Branch table header */}
+                      <View style={styles.branchTableHeader}>
+                        <Text style={[styles.branchTableHeaderText, { flex: 2 }]}>Service</Text>
+                        <Text style={[styles.branchTableHeaderText, { flex: 1.5 }]}>Date</Text>
+                        <Text style={[styles.branchTableHeaderText, { flex: 1, textAlign: "right" }]}>Method</Text>
+                      </View>
+                      {records.map((record, rIdx) => (
+                        <TouchableOpacity
+                          key={record._id || rIdx}
+                          style={[styles.branchTableRow, rIdx === records.length - 1 && { borderBottomWidth: 0 }]}
+                          activeOpacity={0.6}
+                          onPress={() => setSelectedRecord(record)}
+                        >
+                          <Text style={[styles.branchTableCell, { flex: 2, color: colors.textDark }]}>
+                            {record.service || record.type || "Check-in"}
+                          </Text>
+                          <Text style={[styles.branchTableCell, { flex: 1.5, color: colors.textDark }]}>
+                            {record.date || (record.createdAt ? fmtDateSlash(record.createdAt) : "-")}
+                          </Text>
+                          <View style={{ flex: 1, alignItems: "flex-end" }}>
+                            {record.method ? (
+                              <View style={[styles.methodBadge, { backgroundColor: record.method.toUpperCase().includes("QR") ? "rgba(46,107,240,0.1)" : "rgba(175,82,222,0.1)" }]}>
+                                <Text style={[styles.methodBadgeText, { color: record.method.toUpperCase().includes("QR") ? (colors.blue || "#2E6BF0") : "#AF52DE" }]}>
+                                  {record.method.toUpperCase().includes("QR") ? "QR SCAN" : record.method.toUpperCase()}
+                                </Text>
+                              </View>
+                            ) : null}
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ))}
+                </View>
+              );
+            });
+          })()}
         </View>
 
         <View style={styles.bottomPad} />
@@ -1022,6 +1133,112 @@ export default function AttendanceScreen({ navigation, route }) {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* Attendance History Modal — paginated list (matches web) */}
+      <Modal
+        visible={showHistoryModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowHistoryModal(false)}
+      >
+        <View style={styles.historyModalOverlay}>
+          <View style={[styles.historyModalBox, { backgroundColor: colors.cardBg }]}>
+            {/* Header */}
+            <View style={styles.historyModalHeader}>
+              <Text style={[styles.historyModalTitle, { color: colors.textDark }]}>ATTENDANCE HISTORY</Text>
+              <TouchableOpacity onPress={() => setShowHistoryModal(false)} style={styles.historyModalCloseBtn}>
+                <Ionicons name="close" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Records List */}
+            <ScrollView style={styles.historyModalScroll} showsVerticalScrollIndicator={false}>
+              {(() => {
+                const sorted = [...attendanceHistory].sort((a, b) => {
+                  const da = new Date(a.createdAt || a.date || 0);
+                  const db = new Date(b.createdAt || b.date || 0);
+                  return db - da;
+                });
+                const totalPages = Math.max(1, Math.ceil(sorted.length / HISTORY_PAGE_SIZE));
+                const page = Math.min(historyModalPage, totalPages);
+                const paged = sorted.slice((page - 1) * HISTORY_PAGE_SIZE, page * HISTORY_PAGE_SIZE);
+
+                if (sorted.length === 0) {
+                  return (
+                    <View style={{ padding: 32, alignItems: "center" }}>
+                      <Text style={{ color: colors.textMuted, fontSize: 14 }}>No attendance records yet.</Text>
+                    </View>
+                  );
+                }
+
+                return (
+                  <>
+                    {paged.map((record, idx) => {
+                      const branch = record.branch || record.community || "";
+                      const dateStr = record.createdAt
+                        ? `${fmtDateSlash(record.createdAt)} ${fmtTime(record.createdAt)}`
+                        : record.date
+                          ? `${record.date}${record.time ? ` ${record.time}` : ""}`
+                          : "-";
+                      const method = (record.method || "").toUpperCase();
+                      const isQR = method.includes("QR");
+
+                      return (
+                        <TouchableOpacity
+                          key={record._id || idx}
+                          style={[styles.historyModalCard, { borderColor: colors.cardBorder }]}
+                          activeOpacity={0.7}
+                          onPress={() => { setShowHistoryModal(false); setSelectedRecord(record); }}
+                        >
+                          <View style={[styles.historyModalIconCircle, { backgroundColor: "rgba(46,107,240,0.1)" }]}>
+                            <Ionicons name="checkmark-circle" size={24} color={colors.blue || "#2E6BF0"} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.historyModalService, { color: colors.textDark }]}>
+                              {record.service || record.type || "Check-in"}
+                            </Text>
+                            <Text style={[styles.historyModalSub, { color: colors.textMuted }]}>
+                              {branch ? `${branch} · ` : ""}{dateStr}
+                            </Text>
+                          </View>
+                          {method ? (
+                            <View style={[styles.methodBadge, { backgroundColor: isQR ? "rgba(46,107,240,0.1)" : "rgba(175,82,222,0.1)" }]}>
+                              <Text style={[styles.methodBadgeText, { color: isQR ? (colors.blue || "#2E6BF0") : "#AF52DE" }]}>
+                                {isQR ? "QR SCAN" : method}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })}
+
+                    {/* Pagination */}
+                    <View style={styles.historyModalPagination}>
+                      <TouchableOpacity
+                        onPress={() => setHistoryModalPage(p => Math.max(1, p - 1))}
+                        disabled={page <= 1}
+                        style={{ opacity: page <= 1 ? 0.4 : 1, paddingVertical: 8, paddingHorizontal: 12 }}
+                      >
+                        <Text style={{ fontSize: 14, fontWeight: "600", color: colors.textMuted }}>‹ Prev</Text>
+                      </TouchableOpacity>
+                      <Text style={{ fontSize: 13, color: colors.textMuted, fontWeight: "600" }}>
+                        Page {page} of {totalPages}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => setHistoryModalPage(p => Math.min(totalPages, p + 1))}
+                        disabled={page >= totalPages}
+                        style={{ opacity: page >= totalPages ? 0.4 : 1, paddingVertical: 8, paddingHorizontal: 12 }}
+                      >
+                        <Text style={{ fontSize: 14, fontWeight: "700", color: colors.textDark }}>Next ›</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                );
+              })()}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -1268,6 +1485,161 @@ const getStyles = (C) => StyleSheet.create({
   tableCol2: { flex: 1.5 },
   tableCol3: { flex: 1, textAlign: "right" },
 
+  // ── Province-grouped Recent Attendance ──
+  provinceCard: {
+    backgroundColor: C.cardBg,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.cardBorder,
+    marginBottom: 12,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    elevation: 1,
+  },
+  provinceHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+  },
+  provinceName: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: C.textDark,
+  },
+  branchSection: {
+    paddingHorizontal: 18,
+    paddingBottom: 12,
+    borderTopWidth: 1,
+    borderTopColor: C.cardBorder,
+    marginTop: 0,
+  },
+  branchName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: C.textDark,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
+  branchTableHeader: {
+    flexDirection: "row",
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: C.cardBorder,
+    marginBottom: 2,
+  },
+  branchTableHeaderText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: C.textMuted,
+    textTransform: "uppercase",
+  },
+  branchTableRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: C.cardBorder,
+  },
+  branchTableCell: {
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  methodBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  methodBadgeText: {
+    fontSize: 10.5,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+
+  // ── Attendance History Modal ──
+  historyModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  historyModalBox: {
+    width: "100%",
+    maxWidth: 420,
+    maxHeight: "80%",
+    borderRadius: 22,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 10,
+    overflow: "hidden",
+  },
+  historyModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 22,
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: C.cardBorder,
+  },
+  historyModalTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  historyModalCloseBtn: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 16,
+  },
+  historyModalScroll: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+  },
+  historyModalCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderRadius: 14,
+  },
+  historyModalIconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  historyModalService: {
+    fontSize: 14.5,
+    fontWeight: "700",
+    marginBottom: 3,
+  },
+  historyModalSub: {
+    fontSize: 12.5,
+    fontWeight: "500",
+  },
+  historyModalPagination: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    marginTop: 4,
+  },
   // ── Attendance Detail Modal ──
   detailModalOverlay: {
     flex: 1,
