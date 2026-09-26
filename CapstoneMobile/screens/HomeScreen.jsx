@@ -20,7 +20,7 @@ import FloatingNavBar from "../components/FloatingNavBar";
 import { SkeletonMemberCard, SkeletonCard, SkeletonQuickAction } from "../components/SkeletonLoader";
 import { useToast } from "../components/ToastContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getVerificationStatus, getProfile, getAnnouncements, getDonations, getSavingsData, getAttendanceHistory, getLoans, getProfilePhotoUri, getNotificationsFeed, getPublicDonations } from "../services/AuthService";
+import { getVerificationStatus, getProfile, getAnnouncements, getDonations, getSavingsData, getAttendanceHistory, getLoans, getProfilePhotoUri, getNotificationsFeed, getAcknowledgedDonations } from "../services/AuthService";
 import { useFocusEffect } from "@react-navigation/native";
 import { useTheme } from "../components/ThemeContext";
 import OfflineBanner from "../components/OfflineBanner";
@@ -496,6 +496,7 @@ export default function HomeScreen({ navigation, route }) {
             firstName: updatedFirstName,
             lastName: updatedLastName,
             fullName: updatedFullName,
+            phone: profileUser?.phone || profileUser?.phoneNumber || verifData?.phone || parsed.phone || "",
             profilePhoto: photo || parsed.profilePhoto || "",
           }));
         } catch {
@@ -851,20 +852,20 @@ export default function HomeScreen({ navigation, route }) {
     }, [userEmail])
   );
 
-  // Fetch public donations for donor wall
+  // Fetch acknowledged donations for donor wall
   useFocusEffect(
     useCallback(() => {
-      const loadPublicDonations = async () => {
+      const loadAcknowledgedDonations = async () => {
         try {
-          const result = await getPublicDonations();
-          if (result?.donations && Array.isArray(result.donations)) {
-            setPublicDonations(result.donations);
+          const result = await getAcknowledgedDonations();
+          if (result?.success && Array.isArray(result.donors)) {
+            setPublicDonations(result.donors);
           }
         } catch {
           // Silently ignore — donor wall is optional
         }
       };
-      loadPublicDonations();
+      loadAcknowledgedDonations();
     }, [])
   );
 
@@ -1473,7 +1474,7 @@ export default function HomeScreen({ navigation, route }) {
                 style={{ width: "48%", opacity: qaAnims[idx].opacity, transform: [{ translateY: qaAnims[idx].translateY }, { scale: qaPressAnims[idx] }] }}
               >
               <TouchableOpacity
-                style={[styles.quickActionCard, { width: "100%", backgroundColor: colors.cardBg }]}
+                style={[styles.quickActionCard, { width: "100%", backgroundColor: action.bgColor }]}
                 activeOpacity={1}
                 onPress={() => {
                   handleQAPress(qaPressAnims[idx], () => {
@@ -1488,7 +1489,7 @@ export default function HomeScreen({ navigation, route }) {
                 <View
                   style={[
                     styles.quickActionIconBg,
-                    { backgroundColor: action.bgColor },
+                    { backgroundColor: action.iconColor + "22" },
                   ]}
                 >
                   <Image
@@ -1534,8 +1535,8 @@ export default function HomeScreen({ navigation, route }) {
               onMomentumScrollEnd={(e) => { donorScrollOffset.current = e.nativeEvent.contentOffset.x; }}
               renderItem={({ item }) => {
                 const timeAgo = (() => {
-                  if (!item.confirmedAt) return "";
-                  const diff = Date.now() - new Date(item.confirmedAt).getTime();
+                  if (!item.createdAt) return "";
+                  const diff = Date.now() - new Date(item.createdAt).getTime();
                   const mins = Math.floor(diff / 60000);
                   if (mins < 1) return "Just now";
                   if (mins < 60) return `${mins}m ago`;
@@ -1543,7 +1544,7 @@ export default function HomeScreen({ navigation, route }) {
                   if (hrs < 24) return `${hrs}h ago`;
                   const days = Math.floor(hrs / 24);
                   if (days < 7) return `${days}d ago`;
-                  return fmtDateMonthDay(item.confirmedAt);
+                  return fmtDateMonthDay(item.createdAt);
                 })();
                 return (
                   <View style={{

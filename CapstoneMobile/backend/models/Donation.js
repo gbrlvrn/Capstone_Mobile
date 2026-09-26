@@ -28,7 +28,7 @@ const donationSchema = new mongoose.Schema(
     rejectedAt: { type: Date, default: null },
     rejectedBy: { type: String, default: "" },
     rejectReason: { type: String, default: "" },
-    showDonorName: { type: Boolean, default: false },
+    acknowledged: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

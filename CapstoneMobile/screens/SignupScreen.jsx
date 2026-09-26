@@ -203,6 +203,7 @@ export default function SignupScreen({ navigation }) {
   const [submitting, setSubmitting] = useState(false);
   const [emailExistsError, setEmailExistsError] = useState("");
   const [emailChecking, setEmailChecking] = useState(false);
+  const lastCheckedEmailRef = useRef("");
 
   // Refs for scrolling to errors
   const scrollViewRef = useRef(null);
@@ -217,6 +218,30 @@ export default function SignupScreen({ navigation }) {
     password: null,
     confirmPassword: null,
   });
+
+  const scrollToField = (fieldName) => {
+    const errorFieldRef = fieldRefs.current[fieldName];
+    if (errorFieldRef && scrollViewRef.current) {
+      try {
+        const scrollNode = findNodeHandle(scrollViewRef.current);
+        if (scrollNode) {
+          errorFieldRef.measureLayout(
+            scrollNode,
+            (_x, y) => {
+              scrollViewRef.current?.scrollTo({ y: Math.max(0, y - 100), animated: true });
+            },
+            () => {
+              scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+            }
+          );
+        } else {
+          scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+        }
+      } catch {
+        scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+      }
+    }
+  };
 
   // Entrance animation
   const cardTranslateY = useRef(new Animated.Value(40)).current;
@@ -238,6 +263,40 @@ export default function SignupScreen({ navigation }) {
     ]).start();
   }, []);
 
+  const checkEmailAvailability = async (emailToCheck) => {
+    const trimmed = (emailToCheck || "").trim().toLowerCase();
+    if (!trimmed || !isValidEmail(trimmed)) {
+      setEmailExistsError("");
+      setEmailChecking(false);
+      return false;
+    }
+
+    if (lastCheckedEmailRef.current === trimmed && emailExistsError) {
+      return false;
+    }
+
+    try {
+      setEmailChecking(true);
+      const response = await checkEmailExists(trimmed);
+      lastCheckedEmailRef.current = trimmed;
+      if (response && response.exists === true) {
+        setEmailExistsError("The email is already registered");
+        setTouched((prev) => ({ ...prev, email: true }));
+        return false;
+      } else {
+        setEmailExistsError("");
+        return true;
+      }
+    } catch {
+      // Don't block client-side typing if the network or endpoint is temporarily unavailable;
+      // final duplicate protection will still be enforced upon submission.
+      setEmailExistsError("");
+      return null;
+    } finally {
+      setEmailChecking(false);
+    }
+  };
+
   // Debounced real-time email duplicate check
   useEffect(() => {
     const trimmed = form.email.trim();
@@ -246,25 +305,11 @@ export default function SignupScreen({ navigation }) {
       setEmailChecking(false);
       return;
     }
-    setEmailChecking(true);
-    const timeout = setTimeout(async () => {
-      try {
-        const response = await checkEmailExists(trimmed);
-        if (response && response.exists === true) {
-          setEmailExistsError("This email is already registered");
-        } else {
-          setEmailExistsError("");
-        }
-      } catch {
-        // Silently ignore network errors — don't block signup for a check failure
-        setEmailExistsError("");
-      } finally {
-        setEmailChecking(false);
-      }
+    const timeout = setTimeout(() => {
+      checkEmailAvailability(trimmed);
     }, 500);
     return () => {
       clearTimeout(timeout);
-      setEmailChecking(false);
     };
   }, [form.email]);
 
@@ -562,35 +607,23 @@ export default function SignupScreen({ navigation }) {
     );
     setTouched(allTouched);
 
-    // Also block submission if an email duplicate was detected
+    // Also block submission if an email duplicate was already detected
     if (emailExistsError) {
-      showAlert("Validation Error", emailExistsError);
+      scrollToField("email");
+      showAlert(
+        "Account Already Exists",
+        "An account with this email address already exists. Would you like to log in instead?",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Log In", onPress: () => navigation.navigate("Login") },
+        ]
+      );
       return;
     }
+
     const firstError = Object.keys(errors).find((k) => errors[k]);
     if (firstError) {
-      // Scroll to the first field with an error so inline messages are visible
-      const errorFieldRef = fieldRefs.current[firstError];
-      if (errorFieldRef && scrollViewRef.current) {
-        try {
-          const scrollNode = findNodeHandle(scrollViewRef.current);
-          if (scrollNode) {
-            errorFieldRef.measureLayout(
-              scrollNode,
-              (_x, y) => {
-                scrollViewRef.current.scrollTo({ y: Math.max(0, y - 100), animated: true });
-              },
-              () => {
-                scrollViewRef.current.scrollTo({ y: 0, animated: true });
-              }
-            );
-          } else {
-            scrollViewRef.current.scrollTo({ y: 0, animated: true });
-          }
-        } catch {
-          scrollViewRef.current.scrollTo({ y: 0, animated: true });
-        }
-      }
+      scrollToField(firstError);
       showAlert("Validation Error", errors[firstError]);
       return;
     }
@@ -601,6 +634,31 @@ export default function SignupScreen({ navigation }) {
         "You must agree to the Terms and Conditions and Privacy Policy."
       );
       return;
+    }
+
+    // Verify email availability right before submit to catch race conditions
+    const cleanEmail = form.email.trim().toLowerCase();
+    try {
+      setEmailChecking(true);
+      const existsRes = await checkEmailExists(cleanEmail);
+      if (existsRes && existsRes.exists === true) {
+        setEmailExistsError("The email is already registered");
+        setTouched((prev) => ({ ...prev, email: true }));
+        scrollToField("email");
+        showAlert(
+          "Account Already Exists",
+          "An account with this email address already exists. Would you like to log in instead?",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Log In", onPress: () => navigation.navigate("Login") },
+          ]
+        );
+        return;
+      }
+    } catch {
+      // If the exists check fails/times out, proceed to backend registration which enforces uniqueness
+    } finally {
+      setEmailChecking(false);
     }
 
     try {
@@ -634,6 +692,7 @@ export default function SignupScreen({ navigation }) {
           firstName: form.firstName.trim(),
           lastName: form.lastName.trim(),
           fullName: `${form.firstName.trim()} ${form.lastName.trim()}`,
+          phone: form.phone.replace(/\s+/g, ""),
           role: "member",
           position: "",
         });
@@ -646,13 +705,34 @@ export default function SignupScreen({ navigation }) {
         source: "signup",
       });
     } catch (e) {
-      showAlert("Signup Failed", e.message || "Unable to create account.");
+      const msg = e.message || "";
+      const isDuplicate =
+        msg.toLowerCase().includes("already registered") ||
+        msg.toLowerCase().includes("already exists") ||
+        msg.toLowerCase().includes("duplicate");
+
+      if (isDuplicate) {
+        setEmailExistsError("The email is already registered");
+        setTouched((prev) => ({ ...prev, email: true }));
+        scrollToField("email");
+        showAlert(
+          "Account Already Exists",
+          "This email is already registered. Would you like to log in instead?",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Log In", onPress: () => navigation.navigate("Login") },
+          ]
+        );
+      } else {
+        showAlert("Signup Failed", msg || "Unable to create account.");
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
   const borderFor = (key) => {
+    if (key === "email" && emailExistsError) return C.inputBorderErr;
     if (!touched[key]) return C.inputBorder;
     return errors[key] ? C.inputBorderErr : C.successBorder;
   };
@@ -745,18 +825,45 @@ export default function SignupScreen({ navigation }) {
               placeholder="youremail@gmail.com"
               placeholderTextColor={C.textDimmed}
               value={form.email}
-              onChangeText={(v) => update("email", v)}
-              onBlur={() => touch("email")}
+              onChangeText={(v) => {
+                update("email", v);
+                if (emailExistsError) setEmailExistsError("");
+              }}
+              onBlur={() => {
+                touch("email");
+                if (isValidEmail(form.email) && !emailExistsError && !emailChecking) {
+                  checkEmailAvailability(form.email);
+                }
+              }}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
             />
-            {emailChecking && (
+            {emailChecking ? (
               <ActivityIndicator size="small" color={C.textMuted} style={{ marginRight: s(8) }} />
-            )}
+            ) : form.email.trim() && isValidEmail(form.email) && !emailChecking ? (
+              emailExistsError ? (
+                <Text style={{ color: C.errorText || "#E74C3C", fontSize: fs(14), fontWeight: "bold", marginRight: s(8) }}>✕</Text>
+              ) : touched.email ? (
+                <Text style={{ color: C.successBorder || "#10B981", fontSize: fs(14), fontWeight: "bold", marginRight: s(8) }}>✓</Text>
+              ) : null
+            ) : null}
           </View>
-          {touched.email && errors.email ? (
-            <Text style={styles.errorMsg}>{errors.email}</Text>
+          {(touched.email || emailExistsError) && errors.email ? (
+            <View style={{ marginTop: 4 }}>
+              <Text style={styles.errorMsg}>{errors.email}</Text>
+              {emailExistsError ? (
+                <TouchableOpacity
+                  onPress={() => navigation.navigate("Login")}
+                  activeOpacity={0.7}
+                  style={{ marginTop: 4, paddingVertical: 2 }}
+                >
+                  <Text style={{ fontSize: fs(12), color: C.linkBlue || "#0D1F45", fontWeight: "600" }}>
+                    Already have an account? Log in →
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
           ) : emailChecking ? (
             <Text style={{ fontSize: fs(11), color: C.textMuted, marginTop: 4, marginLeft: 2 }}>Checking availability...</Text>
           ) : null}

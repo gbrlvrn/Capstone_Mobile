@@ -561,13 +561,30 @@ export async function loginUser(email, password) {
   return data;
 }
 
-export function checkEmailExists(email) {
-  const clean = encodeURIComponent(email.trim().toLowerCase());
-  return get(`/auth/exists?email=${clean}`);
+export async function checkEmailExists(email) {
+  const clean = (email || "").trim().toLowerCase();
+  try {
+    // 1. Web backend implementation: POST /check-email { email } -> { available: boolean }
+    const data = await request("POST", "/check-email", { email: clean });
+    if (typeof data?.available === "boolean") {
+      return { exists: !data.available };
+    }
+    if (typeof data?.exists === "boolean") {
+      return data;
+    }
+  } catch (err) {
+    // 2. Fallback to GET /auth/exists if /check-email fails
+    try {
+      const encoded = encodeURIComponent(clean);
+      return await get(`/auth/exists?email=${encoded}`);
+    } catch {}
+    throw err;
+  }
+  return { exists: false };
 }
 
-export function getPublicDonations() {
-  return get("/donations/public");
+export function getAcknowledgedDonations() {
+  return get("/donations/acknowledged", true);
 }
 
 export function verifyOTP(email, otp) {

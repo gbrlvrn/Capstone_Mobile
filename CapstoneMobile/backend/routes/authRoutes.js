@@ -3,7 +3,7 @@ import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
 import authMiddleware from "../middleware/authMiddleware.js";
-import { signup, login, checkEmailExists, getProfile, deleteAccount, uploadProfilePhoto, registerPushToken, forgotPassword, resetPassword, verifyResetOtp, changePassword } from "../controllers/authController.js";
+import { signup, login, checkEmailExists, checkEmailAvailability, getProfile, deleteAccount, uploadProfilePhoto, registerPushToken, forgotPassword, resetPassword, verifyResetOtp, changePassword } from "../controllers/authController.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,7 +25,9 @@ router.post("/auth/signup", signup);
 router.post("/register", signup);
 router.post("/auth/login", login);
 router.post("/login", login);
+router.post("/check-email", checkEmailAvailability);
 router.get("/auth/exists", checkEmailExists);
+router.get("/exists", checkEmailExists);
 router.post("/auth/forgot-password", forgotPassword);
 router.post("/reset-password-request", forgotPassword);
 router.post("/auth/verify-reset-otp", verifyResetOtp);

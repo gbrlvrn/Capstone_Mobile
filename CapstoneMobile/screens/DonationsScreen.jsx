@@ -29,6 +29,7 @@ import ReceiptModal from "../components/ReceiptModal";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as ExpoLinking from "expo-linking";
+import * as Clipboard from "expo-clipboard";
 import Svg, { G, Circle } from "react-native-svg";
 import { createDonation, getPublicSettings, getDonations, getBranches } from "../services/AuthService";
 
@@ -39,6 +40,7 @@ const fs = (v) => Math.round(v * Math.min(_WR, 1.25));
 const SIDEBAR_WIDTH = s(260);
 
 const LOGO = require("../assets/puac_logo.png");
+const GCASH_QR = require("../assets/gcash_qr.jpg");
 
 const ICONS = {
   heart: require("../assets/icons/heart.png"),
@@ -122,7 +124,7 @@ function cleanEmail(value) {
 }
 
 export default function DonationsScreen({ navigation, route }) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const C = colors;
   const styles = useMemo(() => getStyles(C), [C]);
   const [activeTab, setActiveTab] = useState("Donations");
@@ -165,6 +167,8 @@ export default function DonationsScreen({ navigation, route }) {
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [donorAcknowledged, setDonorAcknowledged] = useState(false);
+  const [copiedField, setCopiedField] = useState("");
+  const [qrModalOpen, setQrModalOpen] = useState(false);
 
   const [paymentApprovalMethod, setPaymentApprovalMethod] = useState("manual");
   const [subMethod, setSubMethod] = useState("GCash");
@@ -173,6 +177,9 @@ export default function DonationsScreen({ navigation, route }) {
   const [loadingBranches, setLoadingBranches] = useState(true);
   const [accountName, setAccountName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
+  const [isAnotherAccount, setIsAnotherAccount] = useState(false);
+  const [userFullName, setUserFullName] = useState("");
+  const [userPhone, setUserPhone] = useState("");
   const [userBranch, setUserBranch] = useState(""); // user's default branch from profile
 
   // Fetch branches on mount
@@ -307,6 +314,17 @@ export default function DonationsScreen({ navigation, route }) {
           await AsyncStorage.setItem("faithly_user", JSON.stringify(merged));
           if (parsed?.role && mounted) setUserRole(parsed.role);
           if (parsed?.position && mounted) setUserPosition(parsed.position);
+          // Load user profile name + phone for Sender Info
+          if (mounted) {
+            const name = parsed?.fullName || parsed?.name || "";
+            if (name) setUserFullName(name);
+            const phone = parsed?.phone || parsed?.phoneNumber || parsed?.contact || "";
+            if (phone) setUserPhone(phone);
+            if (parsed?.branch) {
+              setUserBranch(parsed.branch);
+              setSelectedBranch(parsed.branch);
+            }
+          }
           return;
         }
 
@@ -323,6 +341,11 @@ export default function DonationsScreen({ navigation, route }) {
             setUserBranch(cachedData.branch);
             setSelectedBranch(cachedData.branch);
           }
+          // Load user profile name + phone for Sender Info
+          const name = cachedData?.fullName || cachedData?.name || "";
+          if (name) setUserFullName(name);
+          const phone = cachedData?.phone || cachedData?.phoneNumber || cachedData?.contact || "";
+          if (phone) setUserPhone(phone);
         }
       } catch (e) {
         // ignore
@@ -573,22 +596,39 @@ export default function DonationsScreen({ navigation, route }) {
     const isManual = paymentApprovalMethod === "manual";
     const isCash = selectedPayment === "cash";
     if (isManual && !isCash) {
-      if (!accountName || !accountName.trim()) errors.accountName = "Please enter your account name.";
-      if (!accountNumber || !accountNumber.trim() || (selectedPayment === "gcash" && accountNumber === "+63")) {
-        errors.accountNumber = selectedPayment === "gcash" ? "Please enter your phone number." : "Please enter your account number.";
-      } else if (selectedPayment === "gcash") {
-        if (!/^\+63\d{10}$/.test(accountNumber.replace(/\s/g, ""))) {
-          errors.accountNumber = "Enter exactly 10 digits after +63.";
+      // E-Wallet: skip validation when using own profile (auto-filled)
+      if (selectedPayment === "gcash" && !isAnotherAccount) {
+        // Auto-filled from profile, no validation needed for name/number
+      } else if (selectedPayment === "gcash" && isAnotherAccount) {
+        if (!accountName || !accountName.trim()) errors.accountName = "Please enter the sender's account name.";
+        if (!accountNumber || !accountNumber.trim()) {
+          errors.accountNumber = "Please enter the sender's mobile number.";
+        } else if (!/^09\d{9}$/.test(accountNumber.replace(/\s/g, ""))) {
+          errors.accountNumber = "Enter 11 digits starting with 09.";
         }
-      } else if (selectedPayment === "bank") {
-        if (accountNumber.length < 8) {
+      } else if (selectedPayment === "bank" && !isAnotherAccount) {
+        // My Account — name auto-filled, only validate account number
+        if (!accountNumber || !accountNumber.trim()) {
+          errors.accountNumber = "Please enter your bank account number.";
+        } else if (accountNumber.length < 8) {
           errors.accountNumber = "Bank account number must be at least 8 digits.";
+        } else if (accountNumber.length > 20) {
+          errors.accountNumber = "Bank account number cannot exceed 20 digits.";
+        }
+      } else if (selectedPayment === "bank" && isAnotherAccount) {
+        if (!accountName || !accountName.trim()) errors.accountName = "Please enter the sender's bank account name.";
+        if (!accountNumber || !accountNumber.trim()) {
+          errors.accountNumber = "Please enter the sender's bank account number.";
+        } else if (accountNumber.length < 8) {
+          errors.accountNumber = "Bank account number must be at least 8 digits.";
+        } else if (accountNumber.length > 20) {
+          errors.accountNumber = "Bank account number cannot exceed 20 digits.";
         }
       }
       if (!proofImage || !proofImage.base64) errors.proof = "Please upload proof of payment.";
     }
     setFieldErrors(errors);
-  }, [donationAmount, selectedCategory, selectedBranch, accountName, accountNumber, proofImage, paymentApprovalMethod, selectedPayment]);
+  }, [donationAmount, selectedCategory, selectedBranch, accountName, accountNumber, proofImage, paymentApprovalMethod, selectedPayment, isAnotherAccount]);
 
   const handleQuickAmount = (amount) => {
     setSelectedAmount(amount);
@@ -623,22 +663,44 @@ export default function DonationsScreen({ navigation, route }) {
     const isCash = selectedPayment === "cash";
 
     if (isManual && !isCash) {
-      if (!accountName || !accountName.trim()) {
-        setFormError("Please enter your account name.");
-        return;
-      }
-      if (!accountNumber || !accountNumber.trim() || (selectedPayment === "gcash" && accountNumber === "+63")) {
-        setFormError(selectedPayment === "gcash" ? "Please enter your phone number." : "Please enter your account number.");
-        return;
-      }
-      if (selectedPayment === "gcash" && !/^\+63\d{10}$/.test(accountNumber.replace(/\s/g, ""))) {
-        setFormError("Phone number must have exactly 10 digits after +63.");
-        return;
-      }
-      if (selectedPayment === "bank" && accountNumber.length < 8) {
-        setFormError("Bank account number must be at least 8 digits.");
-
-        return;
+      if (selectedPayment === "gcash" && !isAnotherAccount) {
+        // My Account — auto-filled, no validation needed
+      } else if (selectedPayment === "gcash" && isAnotherAccount) {
+        if (!accountName || !accountName.trim()) {
+          setFormError("Please enter the sender's account name.");
+          return;
+        }
+        if (!accountNumber || !accountNumber.trim()) {
+          setFormError("Please enter the sender's mobile number.");
+          return;
+        }
+        if (!/^09\d{9}$/.test(accountNumber.replace(/\s/g, ""))) {
+          setFormError("Enter 11 digits starting with 09.");
+          return;
+        }
+      } else if (selectedPayment === "bank" && !isAnotherAccount) {
+        // My Account — name auto-filled, only validate bank account number
+        if (!accountNumber || !accountNumber.trim()) {
+          setFormError("Please enter your bank account number.");
+          return;
+        }
+        if (accountNumber.length < 8 || accountNumber.length > 20) {
+          setFormError("Bank account number must be 8–20 digits.");
+          return;
+        }
+      } else if (selectedPayment === "bank" && isAnotherAccount) {
+        if (!accountName || !accountName.trim()) {
+          setFormError("Please enter the sender's bank account name.");
+          return;
+        }
+        if (!accountNumber || !accountNumber.trim()) {
+          setFormError("Please enter the sender's bank account number.");
+          return;
+        }
+        if (accountNumber.length < 8 || accountNumber.length > 20) {
+          setFormError("Bank account number must be 8–20 digits.");
+          return;
+        }
       }
       if (!proofImage || !proofImage.base64) {
         setFormError("Please upload proof of payment before submitting.");
@@ -660,6 +722,14 @@ export default function DonationsScreen({ navigation, route }) {
       : selectedPayment === "bank" ? "Bank Transfer"
       : "Cash";
 
+    // Resolve sender name/number based on My Account vs Another Account
+    const resolvedAccountName = (!isAnotherAccount)
+      ? userFullName
+      : accountName;
+    const resolvedAccountNumber = (selectedPayment === "gcash" && !isAnotherAccount)
+      ? (userPhone || "")
+      : accountNumber;
+
     let backendPayload = {
       amount: amt,
       category: selectedCategory,
@@ -668,15 +738,15 @@ export default function DonationsScreen({ navigation, route }) {
       paymentMethod: resolvedMethod,  // send both for maximum compatibility
       isRecurring: isRecurring,
       type: isRecurring ? "Recurring" : "One-time",
-      showDonorName: donorAcknowledged,
+      acknowledged: donorAcknowledged,
     };
 
     console.log("[Donation] community=", communityValue || "(empty—backend will use user.branch)", "| method=", resolvedMethod);
 
     if (isManual && !isCash) {
       backendPayload.subMethod = subMethod;
-      backendPayload.accountName = accountName;
-      backendPayload.accountNumber = accountNumber;
+      backendPayload.accountName = resolvedAccountName;
+      backendPayload.accountNumber = resolvedAccountNumber;
       backendPayload.proofOfPayment = proofImage && proofImage.base64 ? `data:image/jpeg;base64,${proofImage.base64}` : null;
       backendPayload.proofFileName = "screenshot.jpg";
     }
@@ -1230,85 +1300,428 @@ export default function DonationsScreen({ navigation, route }) {
             </TouchableOpacity>
           </View>
 
+          {/* ── Donation Instructions Info Panel ── */}
+          {paymentApprovalMethod === "manual" && selectedPayment !== "cash" && (
+            <View style={[styles.donationInfoOuter, { backgroundColor: isDark ? 'rgba(30,60,120,0.10)' : 'rgba(59,130,246,0.06)', borderColor: isDark ? 'rgba(59,130,246,0.18)' : 'rgba(59,130,246,0.15)' }]}>
+              {/* Instruction text */}
+              <Text style={[styles.donationInfoInstruction, { color: colors.textMuted }]}>
+                Please transfer your donation to our{' '}
+                <Text style={{ fontWeight: '800', color: colors.textDark }}>
+                  {selectedPayment === "gcash" ? "E-Wallet" : "Bank"}
+                </Text>
+                {' '}account and upload the receipt below.
+              </Text>
+
+              {/* Inner card */}
+              <View style={[styles.donationInfoPanel, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+                {/* Header */}
+                <View style={styles.donationInfoHeader}>
+                  <Image source={LOGO} style={styles.donationInfoLogo} resizeMode="contain" />
+                  <View style={{ flex: 1, marginRight: s(6) }}>
+                    <Text style={[styles.donationInfoTitle, { color: colors.textDark }]} numberOfLines={2}>IsangDiwa Official Receiving Account</Text>
+                    <Text style={[styles.donationInfoSubtitle, { color: colors.textMuted }]}>Philippine United Apostolic Church</Text>
+                  </View>
+                  <View style={[styles.officialBadge, { borderColor: colors.cardBorder, backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)' }]}>
+                    <Text style={[styles.officialBadgeText, { color: colors.textMuted }]}>Official Account</Text>
+                  </View>
+                </View>
+
+                {/* E-Wallet Content */}
+                {selectedPayment === "gcash" && (
+                  <View>
+                    {/* GCash / Maya sub-tabs */}
+                    <View style={styles.ewalletTabs}>
+                      <TouchableOpacity
+                        style={[
+                          styles.ewalletTab,
+                          { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' },
+                          subMethod === "GCash" && styles.ewalletTabActiveGcash,
+                        ]}
+                        onPress={() => setSubMethod("GCash")}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.ewalletDot, { backgroundColor: subMethod === "GCash" ? "#FFFFFF" : colors.textMuted }]} />
+                        <Text style={[styles.ewalletTabText, { color: colors.textMuted }, subMethod === "GCash" && styles.ewalletTabTextActiveGcash]}>GCash</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.ewalletTab,
+                          { backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' },
+                          subMethod === "Maya" && styles.ewalletTabActiveMaya,
+                        ]}
+                        onPress={() => setSubMethod("Maya")}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.ewalletDot, { backgroundColor: subMethod === "Maya" ? "#34C759" : colors.textMuted }]} />
+                        <Text style={[styles.ewalletTabText, { color: colors.textMuted }, subMethod === "Maya" && styles.ewalletTabTextActiveMaya]}>Maya</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Account Details Card */}
+                    <View style={[styles.accountCard, { borderColor: isDark ? 'rgba(255,255,255,0.08)' : colors.cardBorder }]}>
+                      {/* QR + Details side-by-side for GCash */}
+                      {subMethod === "GCash" ? (
+                        <View>
+                          <View style={styles.qrRow}>
+                            <TouchableOpacity onPress={() => setQrModalOpen(true)} activeOpacity={0.85}>
+                              <Image source={GCASH_QR} style={styles.qrCode} resizeMode="contain" />
+                              <View style={styles.qrTapHint}>
+                                <Text style={styles.qrTapHintText}>Tap to view</Text>
+                              </View>
+                            </TouchableOpacity>
+                            <View style={styles.qrDetails}>
+                              <View style={styles.accountRowStacked}>
+                                <Text style={[styles.accountLabel, { color: colors.textMuted }]}>Account Name:</Text>
+                                <Text style={[styles.accountValue, { color: colors.textDark }]}>IsangDiwa Church</Text>
+                              </View>
+                              <View style={[styles.accountDivider, { borderBottomColor: colors.divider || colors.cardBorder }]} />
+                              <View style={styles.accountRowStacked}>
+                                <Text style={[styles.accountLabel, { color: colors.textMuted }]}>GCash Number:</Text>
+                                <Text style={[styles.accountValueNumber, { color: colors.textDark, marginTop: 2 }]}>0912 345 6789</Text>
+                                <TouchableOpacity
+                                  style={[styles.copyBtnBlock, { borderColor: "#007BFF" }]}
+                                  onPress={async () => {
+                                    await Clipboard.setStringAsync("09123456789");
+                                    setCopiedField("gcash");
+                                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                                    setTimeout(() => setCopiedField(""), 2000);
+                                  }}
+                                  activeOpacity={0.7}
+                                >
+                                  <Text style={[styles.copyBtnText, { color: "#007BFF" }]}>
+                                    {copiedField === "gcash" ? "✓ Copied" : "📋 Copy"}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+                          </View>
+                          <Text style={[styles.accountHint, { color: colors.textMuted }]}>
+                            Scan the QR code directly or copy the number to transfer via GCash.
+                          </Text>
+                        </View>
+                      ) : (
+                        /* Maya — no QR, simple stacked layout */
+                        <View>
+                          <View style={styles.accountRow}>
+                            <Text style={[styles.accountLabel, { color: colors.textMuted }]}>Account Name:</Text>
+                            <Text style={[styles.accountValue, { color: colors.textDark }]}>IsangDiwa Church</Text>
+                          </View>
+                          <View style={[styles.accountDivider, { borderBottomColor: colors.divider || colors.cardBorder }]} />
+                          <View style={styles.accountRowStacked}>
+                            <Text style={[styles.accountLabel, { color: colors.textMuted }]}>Maya Number:</Text>
+                            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 2 }}>
+                              <Text style={[styles.accountValueNumber, { color: colors.textDark }]}>0998 765 4321</Text>
+                              <TouchableOpacity
+                                style={[styles.copyBtn, { borderColor: "#34C759" }]}
+                                onPress={async () => {
+                                  await Clipboard.setStringAsync("09987654321");
+                                  setCopiedField("maya");
+                                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                                  setTimeout(() => setCopiedField(""), 2000);
+                                }}
+                                activeOpacity={0.7}
+                              >
+                                <Text style={[styles.copyBtnText, { color: "#34C759" }]}>
+                                  {copiedField === "maya" ? "✓ Copied" : "📋 Copy"}
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                          <Text style={[styles.accountHint, { color: colors.textMuted }]}>
+                            Copy the number above to transfer via Maya.
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                )}
+
+                {/* Bank Transfer Content */}
+                {selectedPayment === "bank" && (
+                  <View style={[styles.accountCard, { borderColor: isDark ? 'rgba(255,255,255,0.08)' : colors.cardBorder }]}>
+                    <View style={styles.accountRowStacked}>
+                      <Text style={[styles.accountLabel, { color: colors.textMuted }]}>Bank:</Text>
+                      <Text style={[styles.accountValue, { color: colors.textDark }]}>BDO Unibank</Text>
+                    </View>
+                    <View style={[styles.accountDivider, { borderBottomColor: colors.divider || colors.cardBorder }]} />
+                    <View style={styles.accountRowStacked}>
+                      <Text style={[styles.accountLabel, { color: colors.textMuted }]}>Account Name:</Text>
+                      <Text style={[styles.accountValue, { color: colors.textDark }]}>Philippine United Apostolic Church</Text>
+                    </View>
+                    <View style={[styles.accountDivider, { borderBottomColor: colors.divider || colors.cardBorder }]} />
+                    <View style={styles.accountRowStacked}>
+                      <Text style={[styles.accountLabel, { color: colors.textMuted }]}>Account Number:</Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 2 }}>
+                        <Text style={[styles.accountValueNumber, { color: colors.textDark }]}>0012 3456 7890</Text>
+                        <TouchableOpacity
+                          style={[styles.copyBtn, { borderColor: "#5856D6" }]}
+                          onPress={async () => {
+                            await Clipboard.setStringAsync("001234567890");
+                            setCopiedField("bank");
+                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                            setTimeout(() => setCopiedField(""), 2000);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.copyBtnText, { color: "#5856D6" }]}>
+                            {copiedField === "bank" ? "✓ Copied" : "📋 Copy"}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    <Text style={[styles.accountHint, { color: colors.textMuted }]}>
+                      Accepts online bank transfers from BDO, BPI, Metrobank, Unionbank, etc. via InstaPay or PESONet.
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
           {/* Sub-method & Account details for Manual Approval */}
           {paymentApprovalMethod === "manual" && selectedPayment !== "cash" && (
             <View style={{ marginTop: 10 }}>
-              <Text style={[styles.inputLabel, { color: colors.textDark }]}>Sub-Method</Text>
+              {/* ── Sub-Method / Bank Option ── */}
+              <Text style={[styles.inputLabel, { color: colors.textDark }]}>
+                {selectedPayment === "bank" ? "Bank Option" : "Sub-Method"}
+                <Text style={{ color: '#E74C3C' }}> *</Text>
+              </Text>
               <TouchableOpacity
                 style={[styles.dropdownButton, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}
                 onPress={() => setSubMethodDropdownOpen(!subMethodDropdownOpen)}
                 activeOpacity={0.7}
               >
-                <Text
-                  style={[
-                    styles.dropdownButtonText,
-                    { color: colors.textDark },
-                  ]}
-                >
-                  {subMethod || "Select sub-method"}
+                <Text style={[styles.dropdownButtonText, { color: subMethod ? colors.textDark : colors.textMuted }]}>
+                  {subMethod || (selectedPayment === "bank" ? "Select Bank" : "Select sub-method")}
                 </Text>
                 <Text style={styles.dropdownArrow}>▼</Text>
               </TouchableOpacity>
 
               {subMethodDropdownOpen && (
                 <View style={[styles.dropdownMenu, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-                  {(selectedPayment === "gcash" ? ["GCash", "Maya"] : ["BDO", "BPI"]).map((sm) => (
-                    <TouchableOpacity
-                      key={sm}
-                      style={[styles.dropdownItem, { borderBottomColor: colors.divider }]}
-                      onPress={() => {
-                        setSubMethod(sm);
-                        setSubMethodDropdownOpen(false);
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.dropdownItemText,
-                          subMethod === sm && styles.dropdownItemTextActive,
-                        ]}
+                  {selectedPayment === "gcash" ? (
+                    ["GCash", "Maya"].map((sm) => (
+                      <TouchableOpacity
+                        key={sm}
+                        style={[styles.dropdownItem, { borderBottomColor: colors.divider }]}
+                        onPress={() => { setSubMethod(sm); setSubMethodDropdownOpen(false); }}
                       >
-                        {sm}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                        <Text style={[styles.dropdownItemText, subMethod === sm && styles.dropdownItemTextActive]}>{sm}</Text>
+                      </TouchableOpacity>
+                    ))
+                  ) : (
+                    <>
+                      <View style={{ paddingHorizontal: s(12), paddingVertical: s(6), backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9' }}>
+                        <Text style={{ fontSize: fs(10), fontWeight: '800', color: colors.textDark }}>Card Payments</Text>
+                      </View>
+                      {["Master Card", "Visa"].map((sm) => (
+                        <TouchableOpacity key={sm} style={[styles.dropdownItem, { borderBottomColor: colors.divider, paddingLeft: s(20) }]} onPress={() => { setSubMethod(sm); setSubMethodDropdownOpen(false); }}>
+                          <Text style={[styles.dropdownItemText, subMethod === sm && styles.dropdownItemTextActive]}>{sm}</Text>
+                        </TouchableOpacity>
+                      ))}
+                      <View style={{ paddingHorizontal: s(12), paddingVertical: s(6), backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#F1F5F9' }}>
+                        <Text style={{ fontSize: fs(10), fontWeight: '800', color: colors.textDark }}>Online Bank</Text>
+                      </View>
+                      {["BPI", "BDO", "PNB", "Metrobank", "Unionbank", "Instapay", "RCBC"].map((sm) => (
+                        <TouchableOpacity key={sm} style={[styles.dropdownItem, { borderBottomColor: colors.divider, paddingLeft: s(20) }]} onPress={() => { setSubMethod(sm); setSubMethodDropdownOpen(false); }}>
+                          <Text style={[styles.dropdownItemText, subMethod === sm && styles.dropdownItemTextActive]}>{sm}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </>
+                  )}
                 </View>
               )}
 
-              <Text style={[styles.inputLabel, { color: colors.textDark }]}>Account Name</Text>
-              <TextInput
-                style={[styles.amountInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.textDark, paddingLeft: 14, borderRadius: s(8), height: s(48), marginBottom: 12 }]}
-                placeholder="Juan Dela Cruz"
-                placeholderTextColor={colors.textMuted}
-                value={accountName}
-                onChangeText={(t) => setAccountName(t.replace(/[^a-zA-Z\s]/g, ""))}
-              />
-              {fieldErrors.accountName && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: -8, marginBottom: 8 }}>{fieldErrors.accountName}</Text>}
+              {/* ── Sender Information (E-Wallet) ── */}
+              {selectedPayment === "gcash" && (
+                <View style={{ marginTop: s(4) }}>
+                  <Text style={[styles.inputLabel, { color: colors.textDark }]}>
+                    Sender Information <Text style={{ color: '#E74C3C' }}>*</Text>
+                  </Text>
+                  <View style={styles.senderRadioRow}>
+                    <TouchableOpacity
+                      style={[styles.senderRadioCard, { borderColor: colors.cardBorder, backgroundColor: colors.cardBg }, !isAnotherAccount && { borderColor: '#007BFF', backgroundColor: isDark ? 'rgba(0,123,255,0.12)' : 'rgba(0,123,255,0.06)' }]}
+                      onPress={() => { setIsAnotherAccount(false); setAccountName(userFullName); setAccountNumber(userPhone || ""); }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.senderRadioDot, { marginTop: s(2) }, !isAnotherAccount && styles.senderRadioDotActive]}>
+                        {!isAnotherAccount && <View style={styles.senderRadioDotInner} />}
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: s(5), flexWrap: 'wrap' }}>
+                          <Text style={[styles.senderRadioTitle, { color: colors.textDark }]} numberOfLines={1}>{userFullName || 'My Account'}</Text>
+                          <View style={styles.senderYouBadge}><Text style={styles.senderYouBadgeText}>You</Text></View>
+                        </View>
+                        <Text style={[styles.senderRadioSub, { color: colors.textMuted }]} numberOfLines={1}>{userPhone || 'No phone on file'}</Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.senderRadioCard, { borderColor: colors.cardBorder, backgroundColor: colors.cardBg }, isAnotherAccount && { borderColor: '#007BFF', backgroundColor: isDark ? 'rgba(0,123,255,0.12)' : 'rgba(0,123,255,0.06)' }]}
+                      onPress={() => { setIsAnotherAccount(true); setAccountName(""); setAccountNumber(""); }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.senderRadioDot, { marginTop: s(2) }, isAnotherAccount && styles.senderRadioDotActive]}>
+                        {isAnotherAccount && <View style={styles.senderRadioDotInner} />}
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={[styles.senderRadioTitle, { color: colors.textDark }]}>Another account?</Text>
+                        <Text style={[styles.senderRadioSub, { color: colors.textMuted }]} numberOfLines={2}>Donate using someone else's account</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
 
-              <Text style={[styles.inputLabel, { color: colors.textDark }]}>
-                {selectedPayment === "gcash" ? "Phone Number" : "Account Number"}
-              </Text>
-              <TextInput
-                style={[styles.amountInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.textDark, paddingLeft: 14, borderRadius: s(8), height: s(48), marginBottom: 12 }]}
-                placeholder={selectedPayment === "gcash" ? "+63 9XX XXX XXXX" : "e.g. 1234567890"}
-                placeholderTextColor={colors.textMuted}
-                keyboardType="numeric"
-                value={accountNumber}
-                maxLength={selectedPayment === "gcash" ? 13 : 16}
-                onChangeText={(t) => {
-                  if (selectedPayment === "gcash") {
-                    let cleaned = t.replace(/[^0-9+]/g, "");
-                    if (!cleaned.startsWith("+63")) {
-                      cleaned = "+63" + cleaned.replace(/\+/g, "").replace(/^63/, "");
-                    }
-                    if (cleaned.length > 13) cleaned = cleaned.slice(0, 13);
-                    setAccountNumber(cleaned);
-                  } else {
-                    const digits = t.replace(/[^0-9]/g, "").slice(0, 16);
-                    setAccountNumber(digits);
-                  }
-                }}
-              />
-              {fieldErrors.accountNumber && <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: -8, marginBottom: 8 }}>{fieldErrors.accountNumber}</Text>}
+                  {!isAnotherAccount ? (
+                    <View style={[styles.senderAutoCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : colors.inputBg, borderColor: colors.cardBorder }]}>
+                      <View style={[styles.senderAutoRow, { borderBottomColor: colors.divider || colors.cardBorder }]}>
+                        <Text style={[styles.senderAutoLabel, { color: colors.textMuted }]}>Sender Name:</Text>
+                        <Text style={[styles.senderAutoValue, { color: colors.textDark }]}>{userFullName || 'Faithly Member'}</Text>
+                      </View>
+                      <View style={[styles.senderAutoRow, { borderBottomWidth: 0 }]}>
+                        <Text style={[styles.senderAutoLabel, { color: colors.textMuted }]}>Sender Mobile Number:</Text>
+                        <Text style={[styles.senderAutoValueMono, { color: colors.textDark }]}>{userPhone || 'Not set'}</Text>
+                      </View>
+                      <View style={styles.senderAutoFooter}>
+                        <Text style={styles.senderAutoFilledText}>✓ Auto-filled from your profile</Text>
+                        <TouchableOpacity onPress={() => { setIsAnotherAccount(true); setAccountName(""); setAccountNumber(""); }}>
+                          <Text style={styles.senderUseAnotherLink}>Use another account?</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={[styles.senderAnotherCard, { borderColor: isDark ? 'rgba(0,123,255,0.25)' : 'rgba(0,123,255,0.2)', backgroundColor: isDark ? 'rgba(0,123,255,0.06)' : 'rgba(0,123,255,0.03)' }]}>
+                      <View style={styles.senderAnotherHeader}>
+                        <Text style={[styles.senderAnotherTitle, { color: colors.textDark }]}>Enter Details of Another Account</Text>
+                      </View>
+                      <Text style={[styles.inputLabel, { color: colors.textDark, marginTop: s(8) }]}>Sender Account Name <Text style={{ color: '#E74C3C' }}>*</Text></Text>
+                      <TextInput
+                        style={[styles.amountInput, { backgroundColor: isDark ? colors.inputBg : '#FFFFFF', borderColor: colors.inputBorder, color: colors.textDark, paddingLeft: 14, borderRadius: s(8), height: s(48), marginBottom: 4 }]}
+                        placeholder="Enter sender's name"
+                        placeholderTextColor={colors.textMuted}
+                        value={accountName}
+                        onChangeText={(t) => setAccountName(t.replace(/[^a-zA-Z\s]/g, ""))}
+                      />
+                      {fieldErrors.accountName && <Text style={{ color: "#E74C3C", fontSize: fs(11), fontWeight: "600", marginBottom: 8 }}>{fieldErrors.accountName}</Text>}
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={[styles.inputLabel, { color: colors.textDark }]}>Sender Mobile / E-Wallet Number <Text style={{ color: '#E74C3C' }}>*</Text></Text>
+                        <Text style={[styles.senderDigitCount, { color: accountNumber.replace(/[^0-9]/g, "").length === 11 ? '#34C759' : colors.textMuted }]}>
+                          {accountNumber.replace(/[^0-9]/g, "").length}/11 digits
+                        </Text>
+                      </View>
+                      <TextInput
+                        style={[styles.amountInput, { backgroundColor: isDark ? colors.inputBg : '#FFFFFF', borderColor: colors.inputBorder, color: colors.textDark, paddingLeft: 14, borderRadius: s(8), height: s(48), marginBottom: 4 }]}
+                        placeholder="Enter phone number"
+                        placeholderTextColor={colors.textMuted}
+                        keyboardType="numeric"
+                        value={accountNumber}
+                        maxLength={11}
+                        onChangeText={(t) => { setAccountNumber(t.replace(/[^0-9]/g, "").slice(0, 11)); }}
+                      />
+                      <Text style={[styles.senderInputHint, { color: colors.textMuted }]}>Enter 11-digit mobile number starting with 09.</Text>
+                      {fieldErrors.accountNumber && <Text style={{ color: "#E74C3C", fontSize: fs(11), fontWeight: "600", marginTop: 2, marginBottom: 8 }}>{fieldErrors.accountNumber}</Text>}
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {/* ── Sender Information (Bank Transfer) ── */}
+              {selectedPayment === "bank" && (
+                <View style={{ marginTop: s(4) }}>
+                  <Text style={[styles.inputLabel, { color: colors.textDark }]}>
+                    Sender Information <Text style={{ color: '#E74C3C' }}>*</Text>
+                  </Text>
+                  <View style={styles.senderRadioRow}>
+                    <TouchableOpacity
+                      style={[styles.senderRadioCard, { borderColor: colors.cardBorder, backgroundColor: colors.cardBg }, !isAnotherAccount && { borderColor: '#007BFF', backgroundColor: isDark ? 'rgba(0,123,255,0.12)' : 'rgba(0,123,255,0.06)' }]}
+                      onPress={() => { setIsAnotherAccount(false); setAccountName(userFullName); setAccountNumber(""); }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.senderRadioDot, { marginTop: s(2) }, !isAnotherAccount && styles.senderRadioDotActive]}>
+                        {!isAnotherAccount && <View style={styles.senderRadioDotInner} />}
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: s(5), flexWrap: 'wrap' }}>
+                          <Text style={[styles.senderRadioTitle, { color: colors.textDark }]} numberOfLines={1}>{userFullName || 'My Account'}</Text>
+                          <View style={styles.senderYouBadge}><Text style={styles.senderYouBadgeText}>You</Text></View>
+                        </View>
+                        <Text style={[styles.senderRadioSub, { color: colors.textMuted }]} numberOfLines={1}>Account Holder</Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.senderRadioCard, { borderColor: colors.cardBorder, backgroundColor: colors.cardBg }, isAnotherAccount && { borderColor: '#007BFF', backgroundColor: isDark ? 'rgba(0,123,255,0.12)' : 'rgba(0,123,255,0.06)' }]}
+                      onPress={() => { setIsAnotherAccount(true); setAccountName(""); setAccountNumber(""); }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.senderRadioDot, { marginTop: s(2) }, isAnotherAccount && styles.senderRadioDotActive]}>
+                        {isAnotherAccount && <View style={styles.senderRadioDotInner} />}
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={[styles.senderRadioTitle, { color: colors.textDark }]}>Another account?</Text>
+                        <Text style={[styles.senderRadioSub, { color: colors.textMuted }]} numberOfLines={2}>Donate using someone else's account</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+
+                  {!isAnotherAccount ? (
+                    <View>
+                      <View style={[styles.senderAutoCard, { backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : colors.inputBg, borderColor: colors.cardBorder, marginBottom: s(10) }]}>
+                        <View style={[styles.senderAutoRow, { borderBottomWidth: 0 }]}>
+                          <Text style={[styles.senderAutoLabel, { color: colors.textMuted }]}>Account Holder Name:</Text>
+                          <Text style={[styles.senderAutoValue, { color: colors.textDark }]}>{userFullName || 'Faithly Member'} (You)</Text>
+                        </View>
+                      </View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={[styles.inputLabel, { color: colors.textDark }]}>Your Bank Account Number <Text style={{ color: '#E74C3C' }}>*</Text></Text>
+                        <Text style={[styles.senderDigitCount, { color: accountNumber.length >= 8 && accountNumber.length <= 20 ? '#34C759' : colors.textMuted }]}>
+                          {accountNumber.length} digits (8–20)
+                        </Text>
+                      </View>
+                      <TextInput
+                        style={[styles.amountInput, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, color: colors.textDark, paddingLeft: 14, borderRadius: s(8), height: s(48), marginBottom: 4 }]}
+                        placeholder="0012 3456 7890 (8–20 digits)"
+                        placeholderTextColor={colors.textMuted}
+                        keyboardType="numeric"
+                        value={accountNumber}
+                        maxLength={20}
+                        onChangeText={(t) => { setAccountNumber(t.replace(/[^0-9]/g, "").slice(0, 20)); }}
+                      />
+                      <Text style={[styles.senderInputHint, { color: colors.textMuted }]}>Enter 8 to 20 digits.</Text>
+                      {fieldErrors.accountNumber && <Text style={{ color: "#E74C3C", fontSize: fs(11), fontWeight: "600", marginTop: 2, marginBottom: 8 }}>{fieldErrors.accountNumber}</Text>}
+                    </View>
+                  ) : (
+                    <View style={[styles.senderAnotherCard, { borderColor: isDark ? 'rgba(0,123,255,0.25)' : 'rgba(0,123,255,0.2)', backgroundColor: isDark ? 'rgba(0,123,255,0.06)' : 'rgba(0,123,255,0.03)' }]}>
+                      <View style={styles.senderAnotherHeader}>
+                        <Text style={[styles.senderAnotherTitle, { color: colors.textDark }]}>Enter Details of Another Account</Text>
+                      </View>
+                      <Text style={[styles.inputLabel, { color: colors.textDark, marginTop: s(8) }]}>Sender Bank Account Name <Text style={{ color: '#E74C3C' }}>*</Text></Text>
+                      <TextInput
+                        style={[styles.amountInput, { backgroundColor: isDark ? colors.inputBg : '#FFFFFF', borderColor: colors.inputBorder, color: colors.textDark, paddingLeft: 14, borderRadius: s(8), height: s(48), marginBottom: 4 }]}
+                        placeholder="Enter sender's name"
+                        placeholderTextColor={colors.textMuted}
+                        value={accountName}
+                        onChangeText={(t) => setAccountName(t.replace(/[^a-zA-Z\s]/g, ""))}
+                      />
+                      {fieldErrors.accountName && <Text style={{ color: "#E74C3C", fontSize: fs(11), fontWeight: "600", marginBottom: 8 }}>{fieldErrors.accountName}</Text>}
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={[styles.inputLabel, { color: colors.textDark }]}>Sender Bank Account Number <Text style={{ color: '#E74C3C' }}>*</Text></Text>
+                        <Text style={[styles.senderDigitCount, { color: accountNumber.length >= 8 && accountNumber.length <= 20 ? '#34C759' : colors.textMuted }]}>
+                          {accountNumber.length} digits (8–20)
+                        </Text>
+                      </View>
+                      <TextInput
+                        style={[styles.amountInput, { backgroundColor: isDark ? colors.inputBg : '#FFFFFF', borderColor: colors.inputBorder, color: colors.textDark, paddingLeft: 14, borderRadius: s(8), height: s(48), marginBottom: 4 }]}
+                        placeholder="0012 3456 7890 (8–20 digits)"
+                        placeholderTextColor={colors.textMuted}
+                        keyboardType="numeric"
+                        value={accountNumber}
+                        maxLength={20}
+                        onChangeText={(t) => { setAccountNumber(t.replace(/[^0-9]/g, "").slice(0, 20)); }}
+                      />
+                      <Text style={[styles.senderInputHint, { color: colors.textMuted }]}>Enter 8 to 20 digits.</Text>
+                      {fieldErrors.accountNumber && <Text style={{ color: "#E74C3C", fontSize: fs(11), fontWeight: "600", marginTop: 2, marginBottom: 8 }}>{fieldErrors.accountNumber}</Text>}
+                    </View>
+                  )}
+                </View>
+              )}
             </View>
           )}
 
@@ -1637,6 +2050,47 @@ export default function DonationsScreen({ navigation, route }) {
 
         <View style={styles.bottomPad} />
       </ScrollView>
+
+      {/* QR Code Full-Screen Modal */}
+      <Modal
+        visible={qrModalOpen}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setQrModalOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.qrModalOverlay}
+          activeOpacity={1}
+          onPress={() => setQrModalOpen(false)}
+        >
+          <View style={[styles.qrModalCard, { backgroundColor: colors.cardBg }]} onStartShouldSetResponder={() => true}>
+            {/* GCash-branded header */}
+            <View style={styles.qrModalHeader}>
+              <Text style={styles.qrModalHeaderText}>GCash QR Code</Text>
+            </View>
+
+            {/* QR Image */}
+            <View style={styles.qrModalImageContainer}>
+              <Image source={GCASH_QR} style={styles.qrModalImage} resizeMode="contain" />
+            </View>
+
+            {/* Account info */}
+            <Text style={[styles.qrModalAccountName, { color: colors.textDark }]}>IsangDiwa Church</Text>
+            <Text style={[styles.qrModalAccountNumber, { color: colors.textMuted }]}>0912 345 6789</Text>
+
+            {/* Close button */}
+            <View style={styles.qrModalActions}>
+              <TouchableOpacity
+                style={[styles.qrModalCloseBtn, { backgroundColor: isDark ? '#21262D' : '#F1F5F9' }]}
+                onPress={() => setQrModalOpen(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.qrModalCloseBtnText, { color: colors.textDark }]}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Success Modal */}
       <Modal
@@ -2391,6 +2845,389 @@ const getStyles = (C) => StyleSheet.create({
     fontStyle: "italic",
     marginTop: 8,
     textAlign: "center"
+  },
+
+  // ── Donation Info Panel ──
+  donationInfoOuter: {
+    marginTop: s(14),
+    marginBottom: s(10),
+    borderRadius: s(16),
+    borderWidth: 1,
+    padding: s(14),
+    borderLeftWidth: 3,
+    borderLeftColor: 'rgba(59,130,246,0.4)',
+  },
+  donationInfoInstruction: {
+    fontSize: fs(12),
+    fontWeight: '500',
+    lineHeight: fs(18),
+    marginBottom: s(12),
+  },
+  donationInfoPanel: {
+    borderRadius: s(12),
+    borderWidth: 1,
+    padding: s(14),
+    overflow: 'hidden',
+  },
+  donationInfoHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: s(8),
+    marginBottom: s(14),
+    paddingBottom: s(12),
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.cardBorder,
+  },
+  donationInfoLogo: {
+    width: s(34),
+    height: s(34),
+    borderRadius: s(17),
+  },
+  donationInfoTitle: {
+    fontSize: fs(12),
+    fontWeight: "800",
+    lineHeight: fs(16),
+  },
+  donationInfoSubtitle: {
+    fontSize: fs(10),
+    fontWeight: "500",
+    marginTop: 2,
+  },
+  officialBadge: {
+    borderWidth: 1,
+    borderRadius: s(6),
+    paddingHorizontal: s(6),
+    paddingVertical: s(2),
+    alignSelf: 'flex-start',
+  },
+  officialBadgeText: {
+    fontSize: fs(8),
+    fontWeight: "700",
+    letterSpacing: 0.2,
+  },
+  ewalletTabs: {
+    flexDirection: "row",
+    gap: s(8),
+    marginBottom: s(12),
+  },
+  ewalletTab: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: s(6),
+    paddingVertical: s(10),
+    borderRadius: s(10),
+  },
+  ewalletTabActiveGcash: {
+    backgroundColor: "#007BFF",
+  },
+  ewalletTabActiveMaya: {
+    backgroundColor: "rgba(52,199,89,0.15)",
+  },
+  ewalletDot: {
+    width: s(7),
+    height: s(7),
+    borderRadius: s(4),
+  },
+  ewalletTabText: {
+    fontSize: fs(13),
+    fontWeight: "700",
+  },
+  ewalletTabTextActiveGcash: {
+    color: "#FFFFFF",
+  },
+  ewalletTabTextActiveMaya: {
+    color: "#34C759",
+  },
+  accountCard: {
+    borderWidth: 1,
+    borderRadius: s(10),
+    padding: s(12),
+  },
+  qrRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: s(12),
+    marginBottom: s(4),
+  },
+  qrCode: {
+    width: s(100),
+    height: s(100),
+    borderRadius: s(8),
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.08)',
+  },
+  qrDetails: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  accountRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: s(7),
+  },
+  accountRowStacked: {
+    paddingVertical: s(6),
+  },
+  accountDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    marginVertical: s(1),
+  },
+  accountLabel: {
+    fontSize: fs(11),
+    fontWeight: "600",
+  },
+  accountValue: {
+    fontSize: fs(12),
+    fontWeight: "800",
+    marginTop: 1,
+  },
+  accountValueNumber: {
+    fontSize: fs(14),
+    fontWeight: "800",
+    letterSpacing: 1,
+    fontVariant: ["tabular-nums"],
+  },
+  copyBtn: {
+    borderWidth: 1,
+    borderRadius: s(6),
+    paddingHorizontal: s(8),
+    paddingVertical: s(3),
+  },
+  copyBtnBlock: {
+    borderWidth: 1,
+    borderRadius: s(6),
+    paddingHorizontal: s(10),
+    paddingVertical: s(5),
+    alignSelf: "flex-start",
+    marginTop: s(6),
+  },
+  copyBtnText: {
+    fontSize: fs(10),
+    fontWeight: "700",
+  },
+  accountHint: {
+    fontSize: fs(10),
+    fontStyle: "italic",
+    marginTop: s(8),
+    lineHeight: fs(14),
+  },
+
+  // QR Tap Hint
+  qrTapHint: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderBottomLeftRadius: s(8),
+    borderBottomRightRadius: s(8),
+    paddingVertical: s(3),
+    alignItems: "center",
+  },
+  qrTapHintText: {
+    color: "#FFFFFF",
+    fontSize: fs(8),
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+
+  // QR Full-Screen Modal
+  qrModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: s(16),
+  },
+  qrModalCard: {
+    width: "100%",
+    borderRadius: s(20),
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  qrModalHeader: {
+    backgroundColor: "#007BFF",
+    paddingVertical: s(16),
+    alignItems: "center",
+  },
+  qrModalHeaderText: {
+    color: "#FFFFFF",
+    fontSize: fs(18),
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  qrModalImageContainer: {
+    alignItems: "center",
+    paddingVertical: s(24),
+    paddingHorizontal: s(20),
+  },
+  qrModalImage: {
+    width: SCREEN_WIDTH - s(120),
+    height: SCREEN_WIDTH - s(120),
+    borderRadius: s(12),
+  },
+  qrModalAccountName: {
+    textAlign: "center",
+    fontSize: fs(18),
+    fontWeight: "800",
+    marginBottom: s(4),
+  },
+  qrModalAccountNumber: {
+    textAlign: "center",
+    fontSize: fs(14),
+    fontWeight: "600",
+    letterSpacing: 1,
+    marginBottom: s(20),
+  },
+  qrModalActions: {
+    paddingHorizontal: s(20),
+    paddingBottom: s(20),
+    gap: s(10),
+  },
+  qrModalCloseBtn: {
+    borderRadius: s(12),
+    paddingVertical: s(14),
+    alignItems: "center",
+  },
+  qrModalCloseBtnText: {
+    fontSize: fs(15),
+    fontWeight: "700",
+  },
+
+  // ── Sender Information ──
+  senderRadioRow: {
+    flexDirection: "row",
+    gap: s(8),
+    marginBottom: s(10),
+  },
+  senderRadioCard: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: s(8),
+    padding: s(12),
+    borderRadius: s(12),
+    borderWidth: 1.5,
+  },
+  senderRadioDot: {
+    width: s(18),
+    height: s(18),
+    borderRadius: s(9),
+    borderWidth: 2,
+    borderColor: "#D1D5DB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  senderRadioDotActive: {
+    borderColor: "#007BFF",
+    backgroundColor: "#007BFF",
+  },
+  senderRadioDotInner: {
+    width: s(6),
+    height: s(6),
+    borderRadius: s(3),
+    backgroundColor: "#FFFFFF",
+  },
+  senderRadioTitle: {
+    fontSize: fs(11),
+    fontWeight: "800",
+  },
+  senderRadioSub: {
+    fontSize: fs(9),
+    fontWeight: "500",
+    marginTop: 1,
+  },
+  senderYouBadge: {
+    backgroundColor: "rgba(0,123,255,0.12)",
+    borderRadius: s(4),
+    paddingHorizontal: s(6),
+    paddingVertical: 1,
+  },
+  senderYouBadgeText: {
+    fontSize: fs(8),
+    fontWeight: "800",
+    color: "#007BFF",
+  },
+  senderAutoCard: {
+    borderWidth: 1,
+    borderRadius: s(12),
+    padding: s(14),
+  },
+  senderAutoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: s(8),
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  senderAutoLabel: {
+    fontSize: fs(11),
+    fontWeight: "600",
+  },
+  senderAutoValue: {
+    fontSize: fs(12),
+    fontWeight: "800",
+  },
+  senderAutoValueMono: {
+    fontSize: fs(12),
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
+    letterSpacing: 0.5,
+  },
+  senderAutoFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: s(10),
+  },
+  senderAutoFilledText: {
+    fontSize: fs(10),
+    fontWeight: "600",
+    color: "#34C759",
+  },
+  senderUseAnotherLink: {
+    fontSize: fs(10),
+    fontWeight: "700",
+    color: "#007BFF",
+  },
+  senderAnotherCard: {
+    borderWidth: 1,
+    borderRadius: s(12),
+    padding: s(14),
+  },
+  senderAnotherHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingBottom: s(10),
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "rgba(0,123,255,0.15)",
+  },
+  senderAnotherTitle: {
+    fontSize: fs(11),
+    fontWeight: "800",
+  },
+  senderCancelLink: {
+    fontSize: fs(9),
+    fontWeight: "700",
+    color: "#007BFF",
+  },
+  senderDigitCount: {
+    fontSize: fs(10),
+    fontWeight: "700",
+  },
+  senderInputHint: {
+    fontSize: fs(9),
+    fontWeight: "500",
+    marginTop: 2,
+    marginBottom: s(6),
   },
 
   // Recurring

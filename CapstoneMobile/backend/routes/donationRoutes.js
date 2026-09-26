@@ -1,6 +1,6 @@
 import express from "express";
 import authMiddleware from "../middleware/authMiddleware.js";
-import { createDonation, getDonations, createDonationValidation, getPublicDonations } from "../controllers/donationController.js";
+import { createDonation, getDonations, createDonationValidation, getAcknowledgedDonations } from "../controllers/donationController.js";
 import { verifyReceipt } from "../controllers/receiptVerificationController.js";
 
 const router = express.Router();
@@ -8,8 +8,8 @@ const router = express.Router();
 // Receipt verification (must be before general /donations POST)
 router.post("/donations/verify-receipt", authMiddleware, verifyReceipt);
 
-// Public donations endpoint (no auth required) — must be before authenticated routes
-router.get("/donations/public", getPublicDonations);
+// Acknowledged donations endpoint (requires auth) — matches web's /donations/acknowledged
+router.get("/donations/acknowledged", authMiddleware, getAcknowledgedDonations);
 
 // All donation routes require authentication
 router.post("/donations", authMiddleware, createDonationValidation, createDonation);

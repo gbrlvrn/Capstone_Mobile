@@ -35,6 +35,24 @@ export async function checkEmailExists(req, res) {
 }
 
 /**
+ * ✅ POST /api/check-email
+ * Copies web implementation: { email } -> { available: boolean }
+ */
+export async function checkEmailAvailability(req, res) {
+  try {
+    const email = req.body.email?.trim().toLowerCase();
+    if (!email || !email.includes("@") || email.length > 100) {
+      return res.json({ available: false });
+    }
+
+    const existing = await User.findOne({ email }).select("_id");
+    return res.json({ available: !existing });
+  } catch {
+    return res.json({ available: true });
+  }
+}
+
+/**
  * ✅ GET /api/auth/profile?email=...
  * Returns user info (SAFE fields only)
  */

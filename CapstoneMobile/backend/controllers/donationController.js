@@ -69,7 +69,7 @@ export async function createDonation(req, res) {
       accountName: req.body.accountName || "",
       accountNumber: req.body.accountNumber || "",
       member: memberName,
-      showDonorName: !!req.body.showDonorName,
+      acknowledged: !!req.body.acknowledged,
       note: note || "",
       date: date || new Date(),
       createdAt: new Date(),
@@ -139,32 +139,23 @@ export async function getDonations(req, res) {
 }
 
 /**
- * GET /api/donations/public — Get public donations (donor wall)
- * Returns the 20 most recent confirmed donations.
- * Donors who opted in (showDonorName: true) show their full name;
- * others are displayed as "Anonymous Donor".
+ * GET /api/donations/acknowledged — Get acknowledged donations (donor wall)
+ * Returns the 20 most recent confirmed donations where the donor opted in.
+ * Matches the web's /donations/acknowledged endpoint.
  */
-export async function getPublicDonations(req, res) {
+export async function getAcknowledgedDonations(req, res) {
   try {
-    // Use aggregation with _id sort (default index) to avoid memory limit on Atlas free tier
-    const donations = await Donation.aggregate([
-      { $match: { status: "confirmed" } },
-      { $sort: { _id: -1 } },
-      { $limit: 20 },
-      { $project: { member: 1, amount: 1, category: 1, community: 1, confirmedAt: 1, donationId: 1, showDonorName: 1 } }
-    ]);
+    const acknowledgedDonations = await Donation.find(
+      { acknowledged: true, status: "confirmed" }
+    )
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .select("member amount category community createdAt")
+      .lean();
 
-    // Mask names for donors who didn't opt in
-    const publicDonations = donations.map(d => {
-      if (!d.showDonorName) {
-        d.member = "Anonymous Donor";
-      }
-      return d;
-    });
-
-    return res.json({ donations: publicDonations });
+    return res.json({ success: true, donors: acknowledgedDonations });
   } catch (err) {
-    console.error("GET PUBLIC DONATIONS ERROR:", err);
-    return res.status(500).json({ message: "Failed to fetch public donations." });
+    console.error("GET ACKNOWLEDGED DONATIONS ERROR:", err);
+    return res.status(500).json({ success: false, message: "Failed to fetch acknowledged donations." });
   }
 }
