@@ -942,13 +942,16 @@ export default function AttendanceScreen({ navigation, route }) {
                     </View>
                   )}
                 </View>
-              ) : showQRCode && permission?.granted ? (
-                <CameraView
-                  style={StyleSheet.absoluteFillObject}
-                  barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-                  onBarcodeScanned={handleBarcodeScanned}
-                >
-                  <View style={styles.scannerOverlayContent}>
+              ) : permission?.granted ? (
+                <View style={{ flex: 1 }}>
+                  <CameraView
+                    style={{ flex: 1 }}
+                    facing="back"
+                    barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                    onBarcodeScanned={scanning ? undefined : handleBarcodeScanned}
+                    onMountError={(error) => console.warn("Camera mount error:", error)}
+                  />
+                  <View style={[styles.scannerOverlayContent, { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }]} pointerEvents="none">
                     <View style={styles.scannerFrame} />
                     {scanning && (
                       <View style={styles.scanningIndicator}>
@@ -957,7 +960,7 @@ export default function AttendanceScreen({ navigation, route }) {
                       </View>
                     )}
                   </View>
-                </CameraView>
+                </View>
               ) : (
                 <View style={styles.noPermissionView}>
                   <Text style={styles.noPermissionText}>Requesting camera permission...</Text>
@@ -1977,7 +1980,6 @@ const getStyles = (C) => StyleSheet.create({
     backgroundColor: C.cardBg,
     width: "100%",
     borderRadius: 20,
-    overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.2,

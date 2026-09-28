@@ -904,6 +904,46 @@ export async function verifyIdImage(base64, mimeType = "image/jpeg") {
   };
 }
 
+/**
+ * Verify a supporting document image (COE, ITR, Payslip) via Gemini Vision AI.
+ * @param {string} base64 - raw base64 or data-URI of the image
+ * @param {string} documentType - "coe" | "itr" | "payslip"
+ * @param {string} mimeType - image MIME type (default "image/jpeg")
+ * @returns {{ valid: boolean, documentType: string, confidence: string, reason: string }}
+ */
+export async function verifyDocumentImage(base64, documentType, mimeType = "image/jpeg") {
+  try {
+    const formattedData = base64.startsWith("data:")
+      ? base64
+      : `data:${mimeType};base64,${base64}`;
+
+    const res = await webPost("/loans/verify-document", {
+      imageData: formattedData,
+      documentType,
+    }, true);
+
+    if (res && typeof res.valid !== "undefined") {
+      return {
+        valid: Boolean(res.valid),
+        documentType: res.documentType || documentType,
+        confidence: res.confidence || (res.valid ? "high" : "low"),
+        reason: res.reason || (res.valid
+          ? "Document verified successfully."
+          : "The image does not appear to be a valid document."),
+      };
+    }
+  } catch (e) {
+    console.log(`[Doc Verify] ${documentType} verification request failed:`, e.message || e);
+  }
+  const docNames = { coe: "Certificate of Employment", itr: "Income Tax Return", payslip: "Payslip" };
+  return {
+    valid: false,
+    documentType,
+    confidence: "low",
+    reason: `Unable to verify ${docNames[documentType] || "document"}. Please check your internet connection and try again.`,
+  };
+}
+
 // ── Donation Endpoints ──────────────────────────────────────────────
 
 export function createDonation(donationData) {
@@ -920,13 +960,16 @@ export function getDonations(page = 1, limit = 50, category = "") {
 }
 
 /**
- * Verify a proof-of-payment image is a real e-wallet receipt (GCash, Maya, Maribank).
- * Uses Gemini Vision on the backend, same pattern as verifyIdImage().
+ * Verify a proof-of-payment image is a real e-wallet or bank transfer receipt.
+ * Uses Gemini Vision on the web backend via /donations/validate-receipt.
+ * Passes paymentMethod so the backend can enforce strict per-method validation
+ * once the web server is updated to support it.
  * @param {string} base64 - raw base64 or data-URI of the image
  * @param {string} mimeType - image MIME type (default "image/jpeg")
+ * @param {string} paymentMethod - "gcash", "bank", etc. for per-method validation
  * @returns {{ valid: boolean, provider: string|null, confidence: string, reason: string }}
  */
-export async function verifyReceiptImage(base64, mimeType = "image/jpeg") {
+export async function verifyReceiptImage(base64, mimeType = "image/jpeg", paymentMethod = "") {
   try {
     const formattedImage = base64.startsWith("data:")
       ? base64
@@ -934,6 +977,7 @@ export async function verifyReceiptImage(base64, mimeType = "image/jpeg") {
 
     const res = await request("POST", "/donations/validate-receipt", {
       image: formattedImage,
+      paymentMethod,
     }, true);
 
     if (res && (typeof res.isReceipt !== "undefined" || typeof res.valid !== "undefined")) {

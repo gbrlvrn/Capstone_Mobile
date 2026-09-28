@@ -31,7 +31,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as ExpoLinking from "expo-linking";
 import * as Clipboard from "expo-clipboard";
 import Svg, { G, Circle } from "react-native-svg";
-import { createDonation, getPublicSettings, getDonations, getBranches } from "../services/AuthService";
+import { createDonation, getPublicSettings, getDonations, getBranches, verifyReceiptImage } from "../services/AuthService";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const _WR = Math.min(SCREEN_WIDTH / 375, 1.3);
@@ -156,6 +156,7 @@ export default function DonationsScreen({ navigation, route }) {
   const [filterType, setFilterType] = useState("All");
   const [filterCategory, setFilterCategory] = useState("All");
   const [proofImage, setProofImage] = useState(null);
+  const [receiptVerification, setReceiptVerification] = useState(null); // { valid, provider, reason, verifying }
   
   const [donationHistory, setDonationHistory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -625,10 +626,16 @@ export default function DonationsScreen({ navigation, route }) {
           errors.accountNumber = "Bank account number cannot exceed 20 digits.";
         }
       }
-      if (!proofImage || !proofImage.base64) errors.proof = "Please upload proof of payment.";
+      if (!proofImage || !proofImage.base64) {
+        errors.proof = "Please upload proof of payment.";
+      } else if (receiptVerification && receiptVerification.verifying) {
+        errors.proof = "Please wait for receipt verification to complete.";
+      } else if (!receiptVerification || !receiptVerification.valid) {
+        errors.proof = receiptVerification?.reason || "Please upload a valid e-wallet or bank transfer receipt.";
+      }
     }
     setFieldErrors(errors);
-  }, [donationAmount, selectedCategory, selectedBranch, accountName, accountNumber, proofImage, paymentApprovalMethod, selectedPayment, isAnotherAccount]);
+  }, [donationAmount, selectedCategory, selectedBranch, accountName, accountNumber, proofImage, receiptVerification, paymentApprovalMethod, selectedPayment, isAnotherAccount]);
 
   const handleQuickAmount = (amount) => {
     setSelectedAmount(amount);
@@ -704,6 +711,14 @@ export default function DonationsScreen({ navigation, route }) {
       }
       if (!proofImage || !proofImage.base64) {
         setFormError("Please upload proof of payment before submitting.");
+        return;
+      }
+      if (receiptVerification && receiptVerification.verifying) {
+        setFormError("Please wait for receipt verification to complete.");
+        return;
+      }
+      if (!receiptVerification || !receiptVerification.valid) {
+        setFormError(receiptVerification?.reason || "Please upload a valid e-wallet or bank transfer receipt.");
         return;
       }
     }
@@ -814,6 +829,7 @@ export default function DonationsScreen({ navigation, route }) {
       setAccountNumber("");
       setIsRecurring(false);
       setProofImage(null);
+      setReceiptVerification(null);
       setDonorAcknowledged(false);
       setSubmitting(false);
 
@@ -1741,14 +1757,34 @@ export default function DonationsScreen({ navigation, route }) {
                   <Image source={{ uri: proofImage.uri }} style={styles.proofPreview} resizeMode="cover" />
                   <TouchableOpacity
                     style={styles.proofRemoveBtn}
-                    onPress={() => setProofImage(null)}
+                    onPress={() => { setProofImage(null); setReceiptVerification(null); }}
                     activeOpacity={0.7}
                   >
                     <Text style={styles.proofRemoveText}>✕</Text>
                   </TouchableOpacity>
-                  <View style={styles.proofAttachedBadge}>
-                    <Text style={styles.proofAttachedText}>✓ Attached</Text>
-                  </View>
+                  {receiptVerification?.verifying ? (
+                    <View style={[styles.proofAttachedBadge, { backgroundColor: "rgba(245,166,35,0.92)" }]}>
+                      <ActivityIndicator size="small" color="#fff" style={{ marginRight: 6 }} />
+                      <Text style={styles.proofAttachedText}>Verifying receipt...</Text>
+                    </View>
+                  ) : receiptVerification?.valid ? (
+                    <View style={[styles.proofAttachedBadge, { backgroundColor: "rgba(52,199,89,0.92)" }]}>
+                      <Text style={styles.proofAttachedText}>✓ Verified {receiptVerification.provider || "Receipt"}</Text>
+                    </View>
+                  ) : receiptVerification && !receiptVerification.valid ? (
+                    <View style={[styles.proofAttachedBadge, { backgroundColor: "rgba(231,76,60,0.92)" }]}>
+                      <Text style={styles.proofAttachedText}>✕ Invalid Receipt</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.proofAttachedBadge}>
+                      <Text style={styles.proofAttachedText}>✓ Attached</Text>
+                    </View>
+                  )}
+                  {receiptVerification && !receiptVerification.verifying && !receiptVerification.valid && (
+                    <View style={{ position: "absolute", bottom: 32, left: 8, right: 8 }}>
+                      <Text style={{ color: "#fff", fontSize: 11, textAlign: "center", fontWeight: "600" }}>{receiptVerification.reason}</Text>
+                    </View>
+                  )}
                 </View>
               ) : (
                 <View style={[styles.proofUploadBox, { borderColor: colors.cardBorder }]}>
@@ -1774,6 +1810,14 @@ export default function DonationsScreen({ navigation, route }) {
                           const asset = result.assets[0];
                           setProofImage({ uri: asset.uri, base64: asset.base64 });
                           setFormError("");
+                          // Auto-verify receipt via Gemini Vision
+                          setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
+                          verifyReceiptImage(asset.base64, "image/jpeg", selectedPayment).then(verdict => {
+                            setReceiptVerification({ ...verdict, verifying: false });
+                            if (!verdict.valid) setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");
+                          }).catch(() => {
+                            setReceiptVerification({ valid: false, verifying: false, provider: null, reason: "Receipt verification failed. Please try again." });
+                          });
                         }
                       }}
                     >
@@ -1801,6 +1845,14 @@ export default function DonationsScreen({ navigation, route }) {
                           const asset = result.assets[0];
                           setProofImage({ uri: asset.uri, base64: asset.base64 });
                           setFormError("");
+                          // Auto-verify receipt via Gemini Vision
+                          setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
+                          verifyReceiptImage(asset.base64, "image/jpeg", selectedPayment).then(verdict => {
+                            setReceiptVerification({ ...verdict, verifying: false });
+                            if (!verdict.valid) setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");
+                          }).catch(() => {
+                            setReceiptVerification({ valid: false, verifying: false, provider: null, reason: "Receipt verification failed. Please try again." });
+                          });
                         }
                       }}
                     >
@@ -1859,6 +1911,8 @@ export default function DonationsScreen({ navigation, route }) {
                 if (selectedPayment === "gcash" && !/^\+63\d{10}$/.test(accountNumber.replace(/\s/g, ""))) { setFormError("Phone number must have exactly 10 digits after +63."); return; }
                 if (selectedPayment === "bank" && accountNumber.length < 8) { setFormError("Bank account number must be at least 8 digits."); return; }
                 if (!proofImage || !proofImage.base64) { setFormError("Please upload proof of payment before submitting."); return; }
+                if (receiptVerification && receiptVerification.verifying) { setFormError("Please wait for receipt verification to complete."); return; }
+                if (!receiptVerification || !receiptVerification.valid) { setFormError(receiptVerification?.reason || "Please upload a valid e-wallet or bank transfer receipt."); return; }
               }
               setConfirmModalOpen(true);
             }}
@@ -3368,6 +3422,8 @@ const getStyles = (C) => StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: s(8),
+    flexDirection: "row",
+    alignItems: "center",
   },
   proofAttachedText: {
     fontSize: fs(11),

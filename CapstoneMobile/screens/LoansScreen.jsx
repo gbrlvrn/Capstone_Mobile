@@ -24,7 +24,7 @@ import DraggableChatButton from "../components/DraggableChatButton";
 import FloatingNavBar from "../components/FloatingNavBar";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { getPublicSettings, getVerificationStatus, createLoan, getLoans, submitLoanPayment, getMyLoanPayments, cancelLoan, getLoanSchedule, verifyIdImage, verifyReceiptImage, getSavingsData } from "../services/AuthService";
+import { getPublicSettings, getVerificationStatus, createLoan, getLoans, submitLoanPayment, getMyLoanPayments, cancelLoan, getLoanSchedule, verifyIdImage, verifyReceiptImage, verifyDocumentImage, getSavingsData } from "../services/AuthService";
 import { addNotification } from "./NotificationsScreen";
 import LoanProgressCircle from "../components/LoanProgressCircle";
 import EmptyState from "../components/EmptyState";
@@ -341,6 +341,17 @@ export default function LoansScreen({ navigation, route }) {
   const [coeDoc, setCoeDoc] = useState(null);
   const [itrDoc, setItrDoc] = useState(null);
   const [payslipDoc, setPayslipDoc] = useState(null);
+  // AI Document Verification States (COE, ITR, Payslip)
+  const [docVerification, setDocVerification] = useState({
+    coe: { verifying: false, verified: false, rejected: false, reason: "" },
+    itr: { verifying: false, verified: false, rejected: false, reason: "" },
+    payslip: { verifying: false, verified: false, rejected: false, reason: "" },
+  });
+  const resetDocVerification = () => setDocVerification({
+    coe: { verifying: false, verified: false, rejected: false, reason: "" },
+    itr: { verifying: false, verified: false, rejected: false, reason: "" },
+    payslip: { verifying: false, verified: false, rejected: false, reason: "" },
+  });
   const [activeLoanDoc, setActiveLoanDoc] = useState(null);
   const [hasExistingLoan, setHasExistingLoan] = useState(null);
   const [disbursementMethod, setDisbursementMethod] = useState("");
@@ -486,6 +497,7 @@ export default function LoansScreen({ navigation, route }) {
               setCoeDoc(null);
               setItrDoc(null);
               setPayslipDoc(null);
+              resetDocVerification();
               setActiveLoanDoc(null);
               setHasExistingLoan(null);
               setDisbursementMethod("");
@@ -622,10 +634,40 @@ export default function LoansScreen({ navigation, route }) {
         // Auto-verify receipt when uploading proof of payment
         if (setter === setPayProof) {
           setPayProofVerification({ verifying: true, valid: false, provider: null, reason: "" });
-          verifyReceiptImage(asset.base64, type).then(verdict => {
+          verifyReceiptImage(asset.base64, type, payMethod).then(verdict => {
             setPayProofVerification({ ...verdict, verifying: false });
           }).catch(() => {
             setPayProofVerification({ valid: false, verifying: false, provider: null, reason: "Receipt verification failed. Please try again." });
+          });
+        }
+        // Auto-verify additional documents (COE, ITR, Payslip)
+        const docSetterMap = { [setCoeDoc]: "coe", [setItrDoc]: "itr", [setPayslipDoc]: "payslip" };
+        const docType = docSetterMap[setter];
+        if (docType) {
+          setDocVerification(prev => ({
+            ...prev,
+            [docType]: { verifying: true, verified: false, rejected: false, reason: "Verifying document..." },
+          }));
+          verifyDocumentImage(asset.base64, docType, type).then(verdict => {
+            if (verdict.valid) {
+              setDocVerification(prev => ({
+                ...prev,
+                [docType]: { verifying: false, verified: true, rejected: false, reason: verdict.reason },
+              }));
+            } else {
+              // Clear the invalid document so user cannot proceed
+              setter(null);
+              setDocVerification(prev => ({
+                ...prev,
+                [docType]: { verifying: false, verified: false, rejected: true, reason: verdict.reason },
+              }));
+            }
+          }).catch(() => {
+            setter(null);
+            setDocVerification(prev => ({
+              ...prev,
+              [docType]: { verifying: false, verified: false, rejected: true, reason: "Document verification failed. Please try again." },
+            }));
           });
         }
       }
@@ -1354,6 +1396,13 @@ export default function LoansScreen({ navigation, route }) {
     if (!agreedToTerms) return showError("Please agree to the Loan Terms & Conditions.");
     if (principal < 1000) return showError("Minimum Loan Amount: ₱1,000.");
     if (!idVerified) return showError("Your government ID has not been verified. Please retake your ID photo.");
+    // Validate additional documents — reject if any uploaded doc failed verification or is still verifying
+    if (docVerification.coe.verifying || docVerification.itr.verifying || docVerification.payslip.verifying) {
+      return showError("Please wait — one or more documents are still being verified.");
+    }
+    if (coeDoc && !docVerification.coe.verified) return showError("Your Certificate of Employment (COE) could not be verified. Please upload a valid COE document.");
+    if (itrDoc && !docVerification.itr.verified) return showError("Your Income Tax Return (ITR) could not be verified. Please upload a valid ITR document.");
+    if (payslipDoc && !docVerification.payslip.verified) return showError("Your Payslip could not be verified. Please upload a valid Payslip document.");
 
     let multiplier = loanType === "Emergency" ? 1.5 : (loanType === "Personal" ? 2 : 1);
     const maxLoanable = totalSavings * multiplier;
@@ -1435,6 +1484,7 @@ export default function LoansScreen({ navigation, route }) {
       setCoeDoc(null);
       setItrDoc(null);
       setPayslipDoc(null);
+      resetDocVerification();
       setActiveLoanDoc(null);
       setHasExistingLoan(null);
       setDisbursementMethod("");
@@ -2769,11 +2819,17 @@ export default function LoansScreen({ navigation, route }) {
                   <View style={styles.docCol}>
                     <Text style={[styles.docLabel, { color: colors.textDark }]}>Certificate of Employment (COE)</Text>
                     <TouchableOpacity
-                      style={[styles.captureBox, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }, coeDoc && styles.captureBoxDone]}
+                      style={[styles.captureBox, { backgroundColor: colors.inputBg, borderColor: docVerification.coe.rejected ? C.red : docVerification.coe.verified ? C.green : colors.inputBorder }, coeDoc && styles.captureBoxDone]}
                       activeOpacity={0.7}
-                      onPress={() => pickImage(setCoeDoc, false)}
+                      onPress={() => !docVerification.coe.verifying && pickImage(setCoeDoc, false)}
+                      disabled={docVerification.coe.verifying}
                     >
-                      {coeDoc ? (
+                      {docVerification.coe.verifying ? (
+                        <>
+                          <ActivityIndicator size="small" color={C.blue} />
+                          <Text style={[styles.captureText, { color: colors.textMuted, marginTop: 4 }]}>Verifying COE...</Text>
+                        </>
+                      ) : coeDoc ? (
                         <Image source={{ uri: coeDoc.uri }} style={styles.docPreviewImg} resizeMode="cover" />
                       ) : (
                         <>
@@ -2783,17 +2839,31 @@ export default function LoansScreen({ navigation, route }) {
                         </>
                       )}
                     </TouchableOpacity>
+                    {docVerification.coe.verified && (
+                      <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+                        <Text style={{ color: C.green, fontSize: fs(11), fontWeight: "600" }}>✓ Verified</Text>
+                      </View>
+                    )}
+                    {docVerification.coe.rejected && (
+                      <Text style={{ color: C.red, fontSize: fs(11), marginTop: 4 }}>{docVerification.coe.reason}</Text>
+                    )}
                   </View>
 
                   {/* Income Tax Return (ITR) */}
                   <View style={styles.docCol}>
                     <Text style={[styles.docLabel, { color: colors.textDark }]}>Income Tax Return (ITR)</Text>
                     <TouchableOpacity
-                      style={[styles.captureBox, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }, itrDoc && styles.captureBoxDone]}
+                      style={[styles.captureBox, { backgroundColor: colors.inputBg, borderColor: docVerification.itr.rejected ? C.red : docVerification.itr.verified ? C.green : colors.inputBorder }, itrDoc && styles.captureBoxDone]}
                       activeOpacity={0.7}
-                      onPress={() => pickImage(setItrDoc, false)}
+                      onPress={() => !docVerification.itr.verifying && pickImage(setItrDoc, false)}
+                      disabled={docVerification.itr.verifying}
                     >
-                      {itrDoc ? (
+                      {docVerification.itr.verifying ? (
+                        <>
+                          <ActivityIndicator size="small" color={C.blue} />
+                          <Text style={[styles.captureText, { color: colors.textMuted, marginTop: 4 }]}>Verifying ITR...</Text>
+                        </>
+                      ) : itrDoc ? (
                         <Image source={{ uri: itrDoc.uri }} style={styles.docPreviewImg} resizeMode="cover" />
                       ) : (
                         <>
@@ -2803,17 +2873,31 @@ export default function LoansScreen({ navigation, route }) {
                         </>
                       )}
                     </TouchableOpacity>
+                    {docVerification.itr.verified && (
+                      <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+                        <Text style={{ color: C.green, fontSize: fs(11), fontWeight: "600" }}>✓ Verified</Text>
+                      </View>
+                    )}
+                    {docVerification.itr.rejected && (
+                      <Text style={{ color: C.red, fontSize: fs(11), marginTop: 4 }}>{docVerification.itr.reason}</Text>
+                    )}
                   </View>
 
                   {/* Payslip */}
                   <View style={styles.docCol}>
                     <Text style={[styles.docLabel, { color: colors.textDark }]}>Payslip</Text>
                     <TouchableOpacity
-                      style={[styles.captureBox, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }, payslipDoc && styles.captureBoxDone]}
+                      style={[styles.captureBox, { backgroundColor: colors.inputBg, borderColor: docVerification.payslip.rejected ? C.red : docVerification.payslip.verified ? C.green : colors.inputBorder }, payslipDoc && styles.captureBoxDone]}
                       activeOpacity={0.7}
-                      onPress={() => pickImage(setPayslipDoc, false)}
+                      onPress={() => !docVerification.payslip.verifying && pickImage(setPayslipDoc, false)}
+                      disabled={docVerification.payslip.verifying}
                     >
-                      {payslipDoc ? (
+                      {docVerification.payslip.verifying ? (
+                        <>
+                          <ActivityIndicator size="small" color={C.blue} />
+                          <Text style={[styles.captureText, { color: colors.textMuted, marginTop: 4 }]}>Verifying Payslip...</Text>
+                        </>
+                      ) : payslipDoc ? (
                         <Image source={{ uri: payslipDoc.uri }} style={styles.docPreviewImg} resizeMode="cover" />
                       ) : (
                         <>
@@ -2823,6 +2907,14 @@ export default function LoansScreen({ navigation, route }) {
                         </>
                       )}
                     </TouchableOpacity>
+                    {docVerification.payslip.verified && (
+                      <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+                        <Text style={{ color: C.green, fontSize: fs(11), fontWeight: "600" }}>✓ Verified</Text>
+                      </View>
+                    )}
+                    {docVerification.payslip.rejected && (
+                      <Text style={{ color: C.red, fontSize: fs(11), marginTop: 4 }}>{docVerification.payslip.reason}</Text>
+                    )}
                   </View>
                 </View>
               </View>

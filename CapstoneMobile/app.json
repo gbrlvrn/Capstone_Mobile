@@ -24,7 +24,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow PUAC to access your camera to scan attendance QR codes."
+          "cameraPermission": "Allow PUAC to access your camera to scan attendance QR codes.",
+          "barcodeScannerEnabled": true
         }
       ],
       "expo-font",
@@ -48,7 +49,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.puac.app",
-      "buildNumber": "8",
+      "buildNumber": "11",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "This app needs access to your photos to upload your ID and selfie.",
         "NSCameraUsageDescription": "This app needs access to your camera to take a selfie.",

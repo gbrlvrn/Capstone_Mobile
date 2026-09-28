@@ -2,12 +2,16 @@ import express from "express";
 import authMiddleware from "../middleware/authMiddleware.js";
 import { createLoan, getLoans, getLoanById, acceptLoan, updateLoanStatus, createLoanValidation } from "../controllers/loanController.js";
 import { verifyIdImage } from "../controllers/idVerificationController.js";
+import { verifyDocument } from "../controllers/documentVerificationController.js";
 
 const router = express.Router();
 
 // POST /api/loans/verify-id & /api/loans/verify-id-frame — must be before /:id routes to avoid clash
 router.post("/loans/verify-id", authMiddleware, verifyIdImage);
 router.post("/loans/verify-id-frame", authMiddleware, verifyIdImage);
+
+// POST /api/loans/verify-document — AI verification for COE, ITR, Payslip
+router.post("/loans/verify-document", authMiddleware, verifyDocument);
 
 // All loan routes require authentication
 router.post("/loans", authMiddleware, createLoanValidation, createLoan);
