@@ -587,8 +587,8 @@ export default function LoansScreen({ navigation, route }) {
 
       const options = {
         mediaTypes: ['images'],
-        quality: 0.5,
-        allowsEditing: setter === setValidId,
+        quality: 0.6,
+        allowsEditing: false, // Avoids Android UCrop crashes and base64 drops
         base64: true,
       };
 
@@ -751,11 +751,21 @@ export default function LoansScreen({ navigation, route }) {
         skipProcessing: false,
       });
       if (photo) {
+        let base64 = photo.base64;
+        if (!base64 && photo.uri) {
+          try {
+            base64 = await FileSystem.readAsStringAsync(photo.uri, {
+              encoding: "base64",
+            });
+          } catch (fsErr) {
+            console.log("Could not read camera photo as base64 fallback:", fsErr);
+          }
+        }
         const imageData = {
           uri: photo.uri,
           fileName: `capture_${Date.now()}.jpg`,
           type: "image/jpeg",
-          base64: photo.base64,
+          base64,
         };
 
         if (cameraMode === "selfie") {

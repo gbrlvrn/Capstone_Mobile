@@ -600,7 +600,8 @@ export default function SavingsScreen({ navigation, route }) {
         // Auto-verify receipt via Gemini Vision
         if (base64) {
           setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
-          verifyReceiptImage(base64, "image/jpeg", selectedPayment).then(verdict => {
+          const mime = asset.mimeType || "image/jpeg";
+          verifyReceiptImage(base64, mime, selectedPayment).then(verdict => {
             setReceiptVerification({ ...verdict, verifying: false });
             if (!verdict.valid) {
               setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");

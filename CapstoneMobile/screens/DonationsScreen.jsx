@@ -204,7 +204,8 @@ export default function DonationsScreen({ navigation, route }) {
     if (base64) {
       setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
       try {
-        const verdict = await verifyReceiptImage(base64, "image/jpeg", selectedPayment);
+        const mime = asset.mimeType || "image/jpeg";
+        const verdict = await verifyReceiptImage(base64, mime, selectedPayment);
         setReceiptVerification({ ...verdict, verifying: false });
 
         if (verdict.valid) {
@@ -297,10 +298,13 @@ export default function DonationsScreen({ navigation, route }) {
 
   const handleGalleryPick = async () => {
     try {
-      const perm = await ImagePicker.getMediaLibraryPermissionsAsync();
-      if (!perm.granted && perm.canAskAgain) {
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
-      }
+      try {
+        const perm = await ImagePicker.getMediaLibraryPermissionsAsync();
+        if (!perm.granted && perm.canAskAgain) {
+          await ImagePicker.requestMediaLibraryPermissionsAsync();
+        }
+      } catch (_) {}
+
       const result = await ImagePicker.launchImageLibraryAsync({
         quality: 0.8,
         allowsEditing: false,

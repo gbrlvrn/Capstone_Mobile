@@ -936,15 +936,24 @@ export function updateLoanStatus(loanId, status, note = "") {
 
 export async function verifyIdImage(base64, mimeType = "image/jpeg") {
   try {
+    if (!base64 || typeof base64 !== "string" || base64.trim().length < 50) {
+      return {
+        valid: false,
+        detected: false,
+        idType: null,
+        confidence: "low",
+        reason: "Please select or take a clear photo of your ID card.",
+      };
+    }
+
     const rawBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
     const formattedData = base64.startsWith("data:") 
       ? base64 
-      : `data:${mimeType};base64,${base64}`;
+      : `data:${mimeType};base64,${rawBase64}`;
 
-    // Send both base64 and imageData fields to ensure full compatibility with all backend versions
+    // Send single imageData field to avoid doubling request size over network
     const res = await webPost("/loans/verify-id-frame", {
       imageData: formattedData,
-      base64: rawBase64,
       mimeType,
     }, true);
     
@@ -959,30 +968,14 @@ export async function verifyIdImage(base64, mimeType = "image/jpeg") {
       };
     }
   } catch (e) {
-    console.log("Web verify-id-frame warning, trying fallback payload format...", e.message || e);
-    try {
-      const rawBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
-      const res2 = await webPost("/loans/verify-id-frame", { imageData: base64, base64: rawBase64, mimeType }, true);
-      if (res2 && (typeof res2.detected !== "undefined" || typeof res2.valid !== "undefined" || typeof res2.success !== "undefined")) {
-        const isDetected = Boolean(res2.detected === true || res2.valid === true);
-        return {
-          valid: isDetected,
-          detected: isDetected,
-          confidence: res2.confidence || (isDetected ? "high" : "low"),
-          idType: res2.idType || (isDetected ? "Philippine Government ID" : null),
-          reason: res2.reason || (isDetected ? "Valid government ID verified successfully." : "No valid government ID detected in the image."),
-        };
-      }
-    } catch (e2) {
-      console.log("All verify-id-frame attempts failed:", e2.message || e2);
-    }
+    console.log("[ID Verify] Backend request warning:", e.message || e);
   }
   return {
     valid: false,
     detected: false,
     idType: null,
     confidence: "low",
-    reason: "Unable to reach ID verification service. Please check your internet connection and retake a clear photo of your ID card.",
+    reason: "Unable to verify ID card. Please check your internet connection and retake a clear photo.",
   };
 }
 
@@ -995,13 +988,24 @@ export async function verifyIdImage(base64, mimeType = "image/jpeg") {
  */
 export async function verifyDocumentImage(base64, documentType, mimeType = "image/jpeg") {
   try {
+    if (!base64 || typeof base64 !== "string" || base64.trim().length < 50) {
+      return {
+        valid: false,
+        documentType,
+        confidence: "low",
+        reason: "Please upload a clear image of your document.",
+      };
+    }
+
+    const rawBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
     const formattedData = base64.startsWith("data:")
       ? base64
-      : `data:${mimeType};base64,${base64}`;
+      : `data:${mimeType};base64,${rawBase64}`;
 
     const res = await webPost("/loans/verify-document", {
       imageData: formattedData,
       documentType,
+      mimeType,
     }, true);
 
     if (res && typeof res.valid !== "undefined") {
@@ -1044,8 +1048,6 @@ export function getDonations(page = 1, limit = 50, category = "") {
 /**
  * Verify a proof-of-payment image is a real e-wallet or bank transfer receipt.
  * Uses Gemini Vision on the web backend via /donations/validate-receipt.
- * Passes paymentMethod so the backend can enforce strict per-method validation
- * once the web server is updated to support it.
  * @param {string} base64 - raw base64 or data-URI of the image
  * @param {string} mimeType - image MIME type (default "image/jpeg")
  * @param {string} paymentMethod - "gcash", "bank", etc. for per-method validation
@@ -1077,9 +1079,9 @@ export async function verifyReceiptImage(base64, mimeType = "image/jpeg", paymen
     // 1. Try backend verification endpoint first
     let res = null;
     const endpoints = [
-      "/donations/verify-receipt",
       "/donations/validate-receipt",
-      "/loans/validate-receipt"
+      "/loans/validate-receipt",
+      "/donations/verify-receipt",
     ];
 
     for (const ep of endpoints) {
@@ -1098,10 +1100,10 @@ export async function verifyReceiptImage(base64, mimeType = "image/jpeg", paymen
       }
     }
 
-    // If backend gave a full parse with amount or referenceNumber, return it immediately
+    // If backend gave a verdict, use it
     if (res && (typeof res.valid !== "undefined" || typeof res.isReceipt !== "undefined")) {
       const isValid = Boolean(res.valid ?? res.isReceipt);
-      if (isValid && (res.amount || res.referenceNumber)) {
+      if (isValid) {
         return {
           valid: true,
           provider: res.provider || "Payment Receipt",
@@ -1112,7 +1114,20 @@ export async function verifyReceiptImage(base64, mimeType = "image/jpeg", paymen
           confidence: res.confidence || "high",
           reason: res.reason || "Valid payment receipt detected.",
           fallback: Boolean(res.fallback),
-          autoFilled: true,
+          autoFilled: Boolean(res.amount || res.referenceNumber),
+        };
+      } else {
+        return {
+          valid: false,
+          provider: null,
+          paymentMethod: null,
+          amount: null,
+          referenceNumber: null,
+          senderName: null,
+          confidence: res.confidence || "high",
+          reason: res.reason || "This image does not appear to be a valid payment receipt.",
+          fallback: false,
+          autoFilled: false,
         };
       }
     }
