@@ -987,13 +987,16 @@ export async function verifyIdImage(base64, mimeType = "image/jpeg") {
  * @returns {{ valid: boolean, documentType: string, confidence: string, reason: string }}
  */
 export async function verifyDocumentImage(base64, documentType, mimeType = "image/jpeg") {
+  const docNames = { coe: "Certificate of Employment", itr: "Income Tax Return", payslip: "Payslip" };
+  const docLabel = docNames[documentType] || "document";
+
   try {
     if (!base64 || typeof base64 !== "string" || base64.trim().length < 50) {
       return {
         valid: false,
         documentType,
         confidence: "low",
-        reason: "Please upload a clear image of your document.",
+        reason: `Please upload a clear image of your ${docLabel}.`,
       };
     }
 
@@ -1002,31 +1005,243 @@ export async function verifyDocumentImage(base64, documentType, mimeType = "imag
       ? base64
       : `data:${mimeType};base64,${rawBase64}`;
 
-    const res = await webPost("/loans/verify-document", {
-      imageData: formattedData,
-      documentType,
-      mimeType,
-    }, true);
+    // 1. Try web backend verification endpoint (/loans/verify-document)
+    let res = null;
+    try {
+      res = await webPost("/loans/verify-document", {
+        fileData: formattedData,
+        fileName: `${documentType}_document.jpg`,
+        documentType,
+        mimeType,
+      }, true);
+    } catch (webErr) {
+      console.log(`[Doc Verify] Web backend attempt warning:`, webErr.message || webErr);
+    }
 
-    if (res && typeof res.valid !== "undefined") {
+    if (res && (typeof res.detected !== "undefined" || typeof res.valid !== "undefined" || typeof res.success !== "undefined")) {
+      const isDetected = Boolean(res.detected ?? res.valid);
       return {
-        valid: Boolean(res.valid),
+        valid: isDetected,
+        detected: isDetected,
         documentType: res.documentType || documentType,
-        confidence: res.confidence || (res.valid ? "high" : "low"),
-        reason: res.reason || (res.valid
-          ? "Document verified successfully."
-          : "The image does not appear to be a valid document."),
+        detectedType: res.detectedType || null,
+        confidence: res.confidence || (isDetected ? "high" : "low"),
+        reason: res.reason || (isDetected
+          ? `✓ ${docLabel} verified successfully.`
+          : `The uploaded image does not appear to be an authentic ${docLabel}.`),
+        fallback: Boolean(res.fallback),
       };
     }
+
+    // 2. Direct Gemini Vision fallback (client-side fallback ensuring 100% availability)
+    if (GEMINI_CONFIG?.API_KEY) {
+      try {
+        const systemPrompt = `You are an automated document auditor for a church financial assistance and loan application system.
+Your job is to examine an uploaded file and verify whether it genuinely corresponds to the required document type: "${documentType}" (${docLabel}).
+
+CRITERIA:
+- payslip: Must be an authentic payslip, salary voucher, payroll advice slip, or pay stub showing employer, salary, deductions, or date. Reject non-payroll items, random photos, receipts, IDs.
+- itr: Must be a Philippine Income Tax Return or BIR certificate (e.g. BIR Form 2316, 1701). Look for BIR header, TIN, taxable income, employer/BIR stamp. Reject utility bills, receipts, payslips.
+- coe: Must be a Certificate of Employment with company letterhead/name, employment confirmation, position/title, or HR signatory. Reject resignation letters, baptism/seminar certs, IDs, receipts.
+
+Respond ONLY with valid JSON:
+{
+  "detected": true or false,
+  "confidence": "high" or "medium" or "low",
+  "documentType": "${documentType}",
+  "reason": "1-sentence summary"
+}`;
+
+        const models = [GEMINI_CONFIG.PRIMARY_MODEL, ...(GEMINI_CONFIG.FALLBACK_MODELS || [])];
+        for (const model of models) {
+          try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_CONFIG.API_KEY}`;
+            const geminiRes = await fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{
+                  parts: [
+                    { text: systemPrompt },
+                    { inlineData: { mimeType: mimeType || "image/jpeg", data: rawBase64 } }
+                  ]
+                }],
+                generationConfig: { temperature: 0.1, maxOutputTokens: 256 }
+              })
+            });
+
+            if (geminiRes.ok) {
+              const data = await geminiRes.json();
+              const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (text) {
+                const cleaned = text.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
+                const parsed = JSON.parse(cleaned);
+                const isDet = Boolean(parsed.detected);
+                return {
+                  valid: isDet,
+                  detected: isDet,
+                  documentType: parsed.documentType || documentType,
+                  confidence: parsed.confidence || (isDet ? "high" : "low"),
+                  reason: parsed.reason || (isDet
+                    ? `✓ ${docLabel} verified successfully.`
+                    : `The uploaded image does not appear to be an authentic ${docLabel}.`),
+                  fallback: false,
+                };
+              }
+            }
+          } catch (_) {}
+        }
+      } catch (geminiErr) {
+        console.log(`[Doc Verify] Direct Gemini fallback warning:`, geminiErr.message || geminiErr);
+      }
+    }
   } catch (e) {
-    console.log(`[Doc Verify] ${documentType} verification request failed:`, e.message || e);
+    console.log(`[Doc Verify] ${documentType} verification error:`, e.message || e);
   }
-  const docNames = { coe: "Certificate of Employment", itr: "Income Tax Return", payslip: "Payslip" };
+
   return {
     valid: false,
+    detected: false,
     documentType,
     confidence: "low",
-    reason: `Unable to verify ${docNames[documentType] || "document"}. Please check your internet connection and try again.`,
+    reason: `Unable to verify ${docLabel}. Please check your connection and upload a clear document image.`,
+  };
+}
+
+/**
+ * Verify a live KYC selfie holding an ID card with current date.
+ * Strictly verifies face is present and visible, rejecting random shots.
+ * Calls /loans/verify-selfie on web backend, with Gemini Vision fallback.
+ * @param {string} base64 - raw base64 or data-URI of the selfie photo
+ * @param {string} mimeType - MIME type (default "image/jpeg")
+ * @returns {{ valid: boolean, detected: boolean, checks: { faceVisible: boolean, idVisible: boolean, dateVisible: boolean }, confidence: string, reason: string }}
+ */
+export async function verifySelfieImage(base64, mimeType = "image/jpeg") {
+  try {
+    if (!base64 || typeof base64 !== "string" || base64.trim().length < 50) {
+      return {
+        valid: false,
+        detected: false,
+        checks: { faceVisible: false, idVisible: false, dateVisible: false },
+        confidence: "low",
+        reason: "Please take a clear selfie holding your government ID and date note.",
+      };
+    }
+
+    const rawBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
+    const formattedData = base64.startsWith("data:")
+      ? base64
+      : `data:${mimeType};base64,${rawBase64}`;
+
+    // 1. Web backend KYC verification endpoint (/loans/verify-selfie)
+    let res = null;
+    try {
+      res = await webPost("/loans/verify-selfie", {
+        imageData: formattedData,
+        mimeType,
+      }, true);
+    } catch (apiErr) {
+      console.log("[Selfie Verify] Web backend attempt warning:", apiErr.message || apiErr);
+    }
+
+    if (res && (typeof res.detected !== "undefined" || typeof res.valid !== "undefined" || typeof res.success !== "undefined")) {
+      const isDetected = Boolean(res.detected ?? res.valid);
+      const faceVisible = res.checks?.faceVisible ?? isDetected;
+      // STRICT REQUIREMENT: Face MUST be visible! Random shots (walls, scenery, objects) must be rejected!
+      const isValid = Boolean(isDetected && faceVisible);
+      return {
+        valid: isValid,
+        detected: isValid,
+        checks: res.checks || { faceVisible, idVisible: Boolean(res.checks?.idVisible), dateVisible: Boolean(res.checks?.dateVisible) },
+        confidence: res.confidence || (isValid ? "high" : "low"),
+        reason: res.reason || (isValid
+          ? "✓ Selfie with ID & Date verified successfully."
+          : "No clearly visible human face detected. Please retake a clear selfie holding your ID and date note."),
+        fallback: Boolean(res.fallback),
+      };
+    }
+
+    // 2. Direct Gemini Vision KYC fallback
+    if (GEMINI_CONFIG?.API_KEY) {
+      try {
+        const prompt = `You are a KYC (Know Your Customer) identity security verification system.
+Examine this selfie photo to verify that it meets the "Selfie with ID & Date" security requirements.
+
+DECISION CRITERIA:
+1. Is a real human face clearly visible in the photo? (faceVisible: true/false)
+2. Is an ID card or identification document held up visible in the photo? (idVisible: true/false)
+3. Is a date note visible? (dateVisible: true/false)
+
+STRICT REJECTION (detected: false, faceVisible: false):
+- Random shots of walls, ceilings, floors, screens, scenery, furniture, food, cars, animals, cartoons, memes, or blank/blurry images.
+- Photos showing an ID card ONLY with NO human face.
+
+Respond ONLY with valid JSON:
+{
+  "detected": true or false,
+  "confidence": "high" or "medium" or "low",
+  "checks": {
+    "faceVisible": true or false,
+    "idVisible": true or false,
+    "dateVisible": true or false
+  },
+  "reason": "Clear explanation (max 20 words)"
+}`;
+
+        const models = [GEMINI_CONFIG.PRIMARY_MODEL, ...(GEMINI_CONFIG.FALLBACK_MODELS || [])];
+        for (const model of models) {
+          try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_CONFIG.API_KEY}`;
+            const geminiRes = await fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{
+                  parts: [
+                    { text: prompt },
+                    { inlineData: { mimeType: mimeType || "image/jpeg", data: rawBase64 } }
+                  ]
+                }],
+                generationConfig: { temperature: 0.1, maxOutputTokens: 256 }
+              })
+            });
+
+            if (geminiRes.ok) {
+              const data = await geminiRes.json();
+              const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (text) {
+                const cleaned = text.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
+                const parsed = JSON.parse(cleaned);
+                const faceVis = Boolean(parsed.checks?.faceVisible ?? parsed.detected);
+                const isDet = Boolean(parsed.detected && faceVis);
+                return {
+                  valid: isDet,
+                  detected: isDet,
+                  checks: parsed.checks || { faceVisible: faceVis, idVisible: Boolean(parsed.checks?.idVisible), dateVisible: false },
+                  confidence: parsed.confidence || (isDet ? "high" : "low"),
+                  reason: parsed.reason || (isDet
+                    ? "✓ Selfie with ID & Date verified."
+                    : "No clearly visible face detected. Please retake a clear selfie holding your ID."),
+                  fallback: false,
+                };
+              }
+            }
+          } catch (_) {}
+        }
+      } catch (geminiErr) {
+        console.log("[Selfie Verify] Direct Gemini fallback warning:", geminiErr.message || geminiErr);
+      }
+    }
+  } catch (err) {
+    console.log("[Selfie Verify] Error:", err.message || err);
+  }
+
+  return {
+    valid: false,
+    detected: false,
+    checks: { faceVisible: false, idVisible: false, dateVisible: false },
+    confidence: "low",
+    reason: "No visible face detected. Please retake a clear selfie holding your government ID and date note.",
   };
 }
 
@@ -1034,7 +1249,7 @@ export async function verifyDocumentImage(base64, documentType, mimeType = "imag
 
 export function createDonation(donationData) {
   // Manual mode fields: amount, category, community, paymentMethod,
-  //   isRecurring, proofOfPayment (base64), subMethod, accountName, accountNumber
+  //   isRecurring, proofOfPayment (base64), subMethod, accountName, accountNumber, referenceNumber
   // Gateway mode fields: amount, category, paymentMethod, isRecurring
   return request("POST", "/donations", donationData, true);
 }
@@ -1047,27 +1262,33 @@ export function getDonations(page = 1, limit = 50, category = "") {
 
 /**
  * Verify a proof-of-payment image is a real e-wallet or bank transfer receipt.
- * Uses Gemini Vision on the web backend via /donations/validate-receipt.
+ * Uses Gemini Vision via /donations/validate-receipt on the web backend,
+ * extracting amount, referenceNumber, paymentMethod, subMethod, senderName, and senderNumber.
+ * Strictly rejects invalid receipts (memes, food, pets, scenery, non-receipts).
  * @param {string} base64 - raw base64 or data-URI of the image
  * @param {string} mimeType - image MIME type (default "image/jpeg")
  * @param {string} paymentMethod - "gcash", "bank", etc. for per-method validation
- * @returns {{ valid: boolean, provider: string|null, paymentMethod: string|null, amount: number|null, referenceNumber: string|null, senderName: string|null, confidence: string, reason: string, autoFilled: boolean }}
+ * @returns {{ valid: boolean, isReceipt: boolean, provider: string|null, paymentMethod: string|null, subMethod: string|null, amount: number|null, referenceNumber: string|null, senderName: string|null, senderNumber: string|null, confidence: string, reason: string, autoFilled: boolean, isDuplicate: boolean, duplicateInfo: object|null }}
  */
 export async function verifyReceiptImage(base64, mimeType = "image/jpeg", paymentMethod = "") {
   try {
     if (!base64 || typeof base64 !== "string") {
-      console.log("verifyReceiptImage: No valid base64 string provided");
       return {
-        valid: true,
-        provider: "Receipt",
-        paymentMethod: paymentMethod || "gcash",
+        valid: false,
+        isReceipt: false,
+        provider: null,
+        paymentMethod: null,
+        subMethod: null,
         amount: null,
         referenceNumber: null,
         senderName: null,
+        senderNumber: null,
         confidence: "low",
-        fallback: true,
-        reason: "Receipt accepted for manual review.",
+        fallback: false,
+        reason: "No receipt image provided.",
         autoFilled: false,
+        isDuplicate: false,
+        duplicateInfo: null,
       };
     }
 
@@ -1076,116 +1297,143 @@ export async function verifyReceiptImage(base64, mimeType = "image/jpeg", paymen
       ? base64
       : `data:${mimeType};base64,${rawBase64}`;
 
-    // 1. Try backend verification endpoint first
+    // 1. Try web backend verification endpoint (/donations/validate-receipt)
     let res = null;
-    const endpoints = [
-      "/donations/validate-receipt",
-      "/loans/validate-receipt",
-      "/donations/verify-receipt",
-    ];
+    try {
+      res = await webPost("/donations/validate-receipt", {
+        image: formattedImage,
+      }, true);
+    } catch (webErr) {
+      console.log("[Receipt Verify] Web backend attempt warning:", webErr.message || webErr);
+    }
 
-    for (const ep of endpoints) {
-      try {
-        res = await request("POST", ep, {
-          base64: rawBase64,
-          image: formattedImage,
-          mimeType,
-          paymentMethod,
-        }, true);
-        if (res && (typeof res.valid !== "undefined" || typeof res.isReceipt !== "undefined")) {
-          break;
-        }
-      } catch (_) {
-        // try next endpoint
+    // Try fallback endpoints if webPost failed
+    if (!res || (typeof res.isReceipt === "undefined" && typeof res.valid === "undefined")) {
+      const endpoints = [
+        "/donations/validate-receipt",
+        "/loans/validate-receipt",
+      ];
+      for (const ep of endpoints) {
+        try {
+          res = await request("POST", ep, {
+            image: formattedImage,
+            base64: rawBase64,
+            mimeType,
+            paymentMethod,
+          }, true);
+          if (res && (typeof res.valid !== "undefined" || typeof res.isReceipt !== "undefined")) {
+            break;
+          }
+        } catch (_) {}
       }
     }
 
-    // If backend gave a verdict, use it
+    // If backend gave a verdict, extract all details
     if (res && (typeof res.valid !== "undefined" || typeof res.isReceipt !== "undefined")) {
-      const isValid = Boolean(res.valid ?? res.isReceipt);
+      const isValid = Boolean(res.isReceipt ?? res.valid);
+      const extracted = res.extracted || {};
+      const amountVal = extracted.amount ?? res.amount ?? null;
+      const refVal = extracted.referenceNumber ?? res.referenceNumber ?? null;
+      const senderNameVal = extracted.senderName ?? res.senderName ?? null;
+      const senderNumVal = extracted.senderNumber ?? res.senderNumber ?? null;
+      const subVal = extracted.subMethod ?? res.subMethod ?? res.provider ?? null;
+      const pMethodVal = extracted.paymentMethod ?? res.paymentMethod ?? (paymentMethod === "bank" ? "bank" : "gcash");
+
       if (isValid) {
         return {
           valid: true,
-          provider: res.provider || "Payment Receipt",
-          paymentMethod: res.paymentMethod || (paymentMethod === "bank" ? "bank" : "gcash"),
-          amount: res.amount ? Number(res.amount) : null,
-          referenceNumber: res.referenceNumber ? String(res.referenceNumber) : null,
-          senderName: res.senderName || null,
+          isReceipt: true,
+          provider: subVal || "Payment Receipt",
+          subMethod: subVal,
+          paymentMethod: pMethodVal === "Bank" ? "bank" : pMethodVal === "E-Wallet" ? "gcash" : pMethodVal,
+          amount: amountVal ? Number(amountVal) : null,
+          referenceNumber: refVal ? String(refVal).replace(/[\s-]/g, "") : null,
+          senderName: senderNameVal || null,
+          senderNumber: senderNumVal || null,
           confidence: res.confidence || "high",
           reason: res.reason || "Valid payment receipt detected.",
           fallback: Boolean(res.fallback),
-          autoFilled: Boolean(res.amount || res.referenceNumber),
+          autoFilled: Boolean(amountVal || refVal || senderNameVal || senderNumVal),
+          isDuplicate: Boolean(res.isDuplicate),
+          duplicateInfo: res.duplicateInfo || null,
         };
       } else {
+        // STRICT REJECTION: Invalid receipt
         return {
           valid: false,
+          isReceipt: false,
           provider: null,
+          subMethod: null,
           paymentMethod: null,
           amount: null,
           referenceNumber: null,
           senderName: null,
+          senderNumber: null,
           confidence: res.confidence || "high",
-          reason: res.reason || "This image does not appear to be a valid payment receipt.",
+          reason: res.reason || "This image does not appear to be a valid payment receipt. Please upload a clear transaction screenshot.",
           fallback: false,
           autoFilled: false,
+          isDuplicate: false,
+          duplicateInfo: null,
         };
       }
     }
 
-    // 2. Direct Gemini Vision Analysis (Guaranteed AI Auto-Fill on any device/network)
+    // 2. Direct Gemini Vision Analysis (Guaranteed AI Auto-Fill & Strict Validation)
     if (GEMINI_CONFIG?.API_KEY) {
       try {
-        const prompt = `You are a strict, expert AI receipt parser for a church giving mobile application in the Philippines.
-Analyze this uploaded payment image (GCash, Maya, Maribank, Bank Transfer like BDO, BPI, UnionBank, Metrobank, Landbank, RCBC, etc.).
+        const prompt = `You are a financial receipt auditor and data extraction engine for a Philippine church portal.
+Your job is to examine an uploaded image, verify if it is a legitimate payment receipt, and extract all transaction details.
 
-Task 1: Determine if the image is a completed, legitimate transaction receipt.
-REJECT (valid: false) if:
-- Selfies, random photos, food, scenery, objects, pets, memes, chat conversations, IDs
-- Screens of e-wallet home screens, balance screens, or blank forms
-- Physical paper receipts, ATM slips, or non-Philippine receipts
+VALID RECEIPTS:
+- GCash transaction receipts or confirmations
+- Maya (PayMaya) receipts or confirmations
+- Philippine bank & digital bank transfer screenshots (BDO, BPI, Metrobank, UnionBank, Landbank, Maya Bank, GoTyme, SeaBank, Tonik, CIMB, RCBC, PNB, etc.)
+- Bank deposit slips or online banking confirmations showing amount and reference/transaction number.
 
-Task 2: If valid (valid: true), extract:
-1. "provider": string (e.g. "GCash", "Maya", "BDO", "BPI", "UnionBank", etc.)
-2. "paymentMethod": "gcash" if GCash, Maya, or any e-wallet; "bank" if any bank transfer.
-3. "amount": numeric float/int of the total amount sent/donated (e.g. 500 or 1500.50). MUST be a number without currency signs or commas.
-4. "referenceNumber": string of the transaction reference/Ref number (digits/letters without spaces, e.g. "10029381928").
-5. "senderName": string of sender's name if visible, or null.
-6. "receiverName": string of receiver's name or number if visible, or null.
-7. "reason": short summary (e.g. "Valid GCash Send Money receipt").
+INVALID IMAGES (isReceipt: false):
+- Selfies, portraits, memes, animals, landscapes, screenshots of chats without payment proof, blank images, IDs, food, merchandise, non-receipt documents.
+- Screens of e-wallet home screens, account balances, or blank forms without a completed payment.
 
-Respond ONLY with raw JSON in this exact structure:
-{"valid":true,"provider":"GCash","paymentMethod":"gcash","amount":500,"referenceNumber":"10029381928","senderName":"Juan Dela Cruz","confidence":"high","reason":"Valid GCash receipt"}
-or if not a valid receipt:
-{"valid":false,"provider":null,"paymentMethod":null,"amount":null,"referenceNumber":null,"senderName":null,"confidence":"high","reason":"Please upload a clear screenshot of your payment receipt."}`;
+EXTRACT THE FOLLOWING FIELDS PRECISELY (if not visible or uncertain, set to null):
+- amount: Numeric value only (e.g. 500, 1000.50). Remove commas, currency symbols (₱, PHP).
+- referenceNumber: Clean string of the transaction/reference number (e.g. "902412345678" or "UB12345678"). Remove spaces or hyphens.
+- paymentMethod: Either "E-Wallet" (for GCash, Maya, GrabPay) or "Bank" (for BDO, BPI, GoTyme, SeaBank, Metrobank, UnionBank, etc.) or null.
+- subMethod: Specific provider: "GCash", "Maya", "BDO", "BPI", "UnionBank", "Metrobank", "Landbank", "GoTyme", "SeaBank", etc.
+- senderName: The actual HUMAN PERSON name of the sender/payer if visible (e.g. "Juan Dela Cruz"). Do not extract bank product types like "SAVINGS" or "EASY ACCOUNT".
+- senderNumber: Mobile number (11 digits, e.g. "09171234567") or bank account number (digits only), or null.
+
+RESPOND ONLY WITH VALID JSON:
+{
+  "isReceipt": true or false,
+  "confidence": 0 to 100,
+  "reason": "1-sentence description or failure reason",
+  "extracted": {
+    "amount": null,
+    "referenceNumber": null,
+    "paymentMethod": null,
+    "subMethod": null,
+    "senderName": null,
+    "senderNumber": null
+  }
+}`;
 
         const models = [GEMINI_CONFIG.PRIMARY_MODEL, ...(GEMINI_CONFIG.FALLBACK_MODELS || [])];
         for (const model of models) {
           try {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_CONFIG.API_KEY}`;
-            const reqBody = {
-              contents: [
-                {
-                  parts: [
-                    { text: prompt },
-                    {
-                      inlineData: {
-                        mimeType: mimeType || "image/jpeg",
-                        data: rawBase64,
-                      },
-                    },
-                  ],
-                },
-              ],
-              generationConfig: {
-                temperature: 0.1,
-                maxOutputTokens: 1024,
-              },
-            };
-
             const geminiRes = await fetch(url, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(reqBody),
+              body: JSON.stringify({
+                contents: [{
+                  parts: [
+                    { text: prompt },
+                    { inlineData: { mimeType: mimeType || "image/jpeg", data: rawBase64 } }
+                  ]
+                }],
+                generationConfig: { temperature: 0.1, maxOutputTokens: 512 }
+              })
             });
 
             if (geminiRes.ok) {
@@ -1194,18 +1442,49 @@ or if not a valid receipt:
               if (text) {
                 const cleaned = text.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
                 const parsed = JSON.parse(cleaned);
-                const isValid = Boolean(parsed.valid);
-                return {
-                  valid: isValid,
-                  provider: isValid ? (parsed.provider || "Payment Receipt") : null,
-                  paymentMethod: isValid ? (parsed.paymentMethod || (paymentMethod === "bank" ? "bank" : "gcash")) : null,
-                  amount: isValid && parsed.amount ? Number(parsed.amount) : null,
-                  referenceNumber: isValid && parsed.referenceNumber ? String(parsed.referenceNumber) : null,
-                  senderName: isValid ? (parsed.senderName || null) : null,
-                  confidence: parsed.confidence || (isValid ? "high" : "low"),
-                  reason: parsed.reason || (isValid ? "Valid payment receipt detected." : "The image does not appear to be a valid payment receipt."),
-                  autoFilled: Boolean(isValid && (parsed.amount || parsed.referenceNumber)),
-                };
+                const isValid = Boolean(parsed.isReceipt);
+                const ext = parsed.extracted || {};
+                const amountNum = ext.amount ? Number(ext.amount) : null;
+                const refStr = ext.referenceNumber ? String(ext.referenceNumber).replace(/[\s-]/g, "") : null;
+                const pMethod = ext.paymentMethod === "Bank" ? "bank" : ext.paymentMethod === "E-Wallet" ? "gcash" : (paymentMethod === "bank" ? "bank" : "gcash");
+
+                if (isValid) {
+                  return {
+                    valid: true,
+                    isReceipt: true,
+                    provider: ext.subMethod || "Payment Receipt",
+                    subMethod: ext.subMethod || null,
+                    paymentMethod: pMethod,
+                    amount: amountNum,
+                    referenceNumber: refStr,
+                    senderName: ext.senderName || null,
+                    senderNumber: ext.senderNumber ? String(ext.senderNumber).replace(/\D/g, "") : null,
+                    confidence: parsed.confidence || 90,
+                    reason: parsed.reason || "Valid payment receipt detected.",
+                    fallback: false,
+                    autoFilled: Boolean(amountNum || refStr || ext.senderName || ext.senderNumber),
+                    isDuplicate: false,
+                    duplicateInfo: null,
+                  };
+                } else {
+                  return {
+                    valid: false,
+                    isReceipt: false,
+                    provider: null,
+                    subMethod: null,
+                    paymentMethod: null,
+                    amount: null,
+                    referenceNumber: null,
+                    senderName: null,
+                    senderNumber: null,
+                    confidence: parsed.confidence || 90,
+                    reason: parsed.reason || "This image does not appear to be a valid payment receipt. Please upload a clear transaction screenshot.",
+                    fallback: false,
+                    autoFilled: false,
+                    isDuplicate: false,
+                    duplicateInfo: null,
+                  };
+                }
               }
             }
           } catch (modelErr) {
@@ -1216,38 +1495,27 @@ or if not a valid receipt:
         console.log("[Gemini Vision outer error]:", geminiOuterErr.message || geminiOuterErr);
       }
     }
-
-    // 3. Fallback to basic backend verdict if Gemini was unavailable
-    if (res && (typeof res.valid !== "undefined" || typeof res.isReceipt !== "undefined")) {
-      const isValid = Boolean(res.valid ?? res.isReceipt);
-      return {
-        valid: isValid,
-        provider: res.provider || (isValid ? "Payment Receipt" : null),
-        paymentMethod: paymentMethod || "gcash",
-        amount: null,
-        referenceNumber: null,
-        senderName: null,
-        confidence: "medium",
-        fallback: false,
-        reason: res.reason || (isValid ? "Valid receipt detected." : "Invalid receipt."),
-        autoFilled: false,
-      };
-    }
   } catch (e) {
     console.log("Receipt verification failed:", e.message || e);
   }
 
+  // STRICT REJECTION on failure: Never allow invalid or unverified images through
   return {
-    valid: true,
-    provider: "Receipt",
-    paymentMethod: paymentMethod || "gcash",
+    valid: false,
+    isReceipt: false,
+    provider: null,
+    paymentMethod: null,
+    subMethod: null,
     amount: null,
     referenceNumber: null,
     senderName: null,
+    senderNumber: null,
     confidence: "low",
     fallback: true,
-    reason: "Validation service unavailable. Image accepted for manual review.",
+    reason: "Unable to verify receipt. Please check your internet connection and upload a clear receipt screenshot.",
     autoFilled: false,
+    isDuplicate: false,
+    duplicateInfo: null,
   };
 }
 

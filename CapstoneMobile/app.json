@@ -49,7 +49,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.puac.app",
-      "buildNumber": "17",
+      "buildNumber": "18",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "This app needs access to your photos to upload your ID and selfie.",
         "NSCameraUsageDescription": "This app needs access to your camera to take a selfie.",
@@ -75,7 +75,7 @@
     },
     "android": {
       "package": "com.puac.app",
-      "versionCode": 17,
+      "versionCode": 18,
 
       "usesCleartextTraffic": true,
       "config": {

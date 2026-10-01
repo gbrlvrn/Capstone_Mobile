@@ -603,11 +603,55 @@ export default function SavingsScreen({ navigation, route }) {
           const mime = asset.mimeType || "image/jpeg";
           verifyReceiptImage(base64, mime, selectedPayment).then(verdict => {
             setReceiptVerification({ ...verdict, verifying: false });
-            if (!verdict.valid) {
-              setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");
+            if (verdict.valid && verdict.isReceipt) {
+              // Auto-fill Amount
+              if (verdict.amount && Number(verdict.amount) > 0) {
+                const formatted = Number(verdict.amount).toLocaleString("en-US");
+                setDepositAmount(formatted);
+              }
+              // Auto-fill Payment Method & Sub-method
+              const rawSub = verdict.subMethod || verdict.provider || "";
+              const isEWallet = ["GCash", "Maya", "GrabPay", "ShopeePay", "Coins.ph"].some(
+                (ew) => rawSub.toLowerCase().includes(ew.toLowerCase())
+              ) || verdict.paymentMethod === "gcash" || verdict.paymentMethod === "E-Wallet";
+
+              if (isEWallet) {
+                setSelectedPayment("gcash");
+                setSubMethod(rawSub.toLowerCase().includes("maya") ? "Maya" : "GCash");
+              } else if (verdict.paymentMethod === "bank" || verdict.paymentMethod === "Bank" || rawSub) {
+                setSelectedPayment("bank");
+                const knownBanks = ["BDO", "BPI", "Metrobank", "Unionbank", "PNB", "RCBC", "Instapay"];
+                const matchedBank = knownBanks.find(b => rawSub.toLowerCase().includes(b.toLowerCase()));
+                setSubMethod(matchedBank || "BDO");
+              }
+              // Auto-fill Sender Account Name
+              if (verdict.senderName) {
+                setAccountName(verdict.senderName);
+              }
+              // Auto-fill Sender Account Number
+              if (verdict.senderNumber) {
+                setAccountNumber(String(verdict.senderNumber).replace(/\D/g, ""));
+              }
+            } else {
+              // STRICT REJECTION: Invalid or non-receipt image
+              setProofImage(null);
+              setReceiptVerification({ verifying: false, valid: false, provider: null, reason: verdict.reason });
+              setFormError(verdict.reason || "Invalid receipt. Please upload a legitimate payment receipt.");
+              Alert.alert(
+                "Invalid Receipt",
+                verdict.reason || "The uploaded image does not appear to be a valid payment receipt. Please upload a clear screenshot of your transaction proof.",
+                [{ text: "OK" }]
+              );
             }
           }).catch(() => {
-            setReceiptVerification({ valid: true, verifying: false, provider: "Receipt", fallback: true, reason: "Receipt uploaded (pending manual admin verification)." });
+            setProofImage(null);
+            setReceiptVerification({
+              valid: false,
+              verifying: false,
+              provider: null,
+              reason: "Unable to verify receipt. Please check your internet connection.",
+            });
+            setFormError("Unable to verify receipt. Please check your internet connection and try again.");
           });
         }
       }

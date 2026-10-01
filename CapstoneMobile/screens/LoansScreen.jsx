@@ -25,7 +25,7 @@ import FloatingNavBar from "../components/FloatingNavBar";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { getPublicSettings, getVerificationStatus, createLoan, getLoans, submitLoanPayment, getMyLoanPayments, cancelLoan, getLoanSchedule, verifyIdImage, verifyReceiptImage, verifyDocumentImage, getSavingsData, acceptLoan, updateLoanStatus } from "../services/AuthService";
+import { getPublicSettings, getVerificationStatus, createLoan, getLoans, submitLoanPayment, getMyLoanPayments, cancelLoan, getLoanSchedule, verifyIdImage, verifySelfieImage, verifyReceiptImage, verifyDocumentImage, getSavingsData, acceptLoan, updateLoanStatus } from "../services/AuthService";
 import { addNotification } from "./NotificationsScreen";
 import LoanProgressCircle from "../components/LoanProgressCircle";
 import EmptyState from "../components/EmptyState";
@@ -333,6 +333,11 @@ export default function LoansScreen({ navigation, route }) {
   const [purpose, setPurpose] = useState("");
   const [monthsToPay, setMonthsToPay] = useState("");
   const [selfie, setSelfie] = useState(null);
+  // AI Selfie Verification States
+  const [selfieVerifying, setSelfieVerifying] = useState(false);
+  const [selfieVerified, setSelfieVerified] = useState(false);
+  const [selfieRejected, setSelfieRejected] = useState(false);
+  const [selfieVerifyResult, setSelfieVerifyResult] = useState(null); // { reason, checks }
   const [validId, setValidId] = useState(null);
   // AI ID Verification States
   const [idVerifying, setIdVerifying] = useState(false);
@@ -490,6 +495,10 @@ export default function LoansScreen({ navigation, route }) {
               setPurpose("");
               setMonthsToPay("");
               setSelfie(null);
+              setSelfieVerified(false);
+              setSelfieRejected(false);
+              setSelfieVerifying(false);
+              setSelfieVerifyResult(null);
               setValidId(null);
               setIdVerified(false);
               setIdRejected(false);
@@ -614,6 +623,38 @@ export default function LoansScreen({ navigation, route }) {
         const type = asset.mimeType || "image/jpeg";
         const item = { uri: asset.uri, fileName, type, base64 };
         setter(item);
+        if (setter === setSelfie) {
+          setSelfieVerifying(true);
+          setSelfieVerified(false);
+          setSelfieRejected(false);
+          setSelfieVerifyResult(null);
+          try {
+            const verifyRes = await verifySelfieImage(base64, type);
+            if (verifyRes && verifyRes.valid === true) {
+              setSelfieVerified(true);
+              setSelfieRejected(false);
+              setSelfieVerifyResult({
+                reason: verifyRes.reason || "Selfie with ID verified successfully.",
+                checks: verifyRes.checks,
+              });
+            } else {
+              setSelfieVerified(false);
+              setSelfieRejected(true);
+              setSelfie(null); // Clear item so user cannot proceed with invalid selfie
+              setSelfieVerifyResult({
+                reason: verifyRes?.reason || "No clearly visible human face detected. Please select a clear selfie holding your ID.",
+              });
+            }
+          } catch (e) {
+            console.log("Gallery selfie verify error:", e);
+            setSelfieVerified(false);
+            setSelfieRejected(true);
+            setSelfie(null);
+            setSelfieVerifyResult({ reason: "Selfie verification error. Please select a clear photo." });
+          } finally {
+            setSelfieVerifying(false);
+          }
+        }
         if (setter === setValidId) {
           setIdVerifying(true);
           setIdVerified(false);
@@ -707,7 +748,14 @@ export default function LoansScreen({ navigation, route }) {
     setCameraMode(mode);
     setCameraReady(false);
     setCameraCountdown(0);
-    // Reset ID verification state when retaking
+    // Reset verification states when retaking
+    if (mode === "selfie") {
+      setSelfieVerifying(false);
+      setSelfieVerified(false);
+      setSelfieRejected(false);
+      setSelfieVerifyResult(null);
+      setSelfie(null);
+    }
     if (mode === "id") {
       setIdVerifying(false);
       setIdVerified(false);
@@ -769,9 +817,49 @@ export default function LoansScreen({ navigation, route }) {
         };
 
         if (cameraMode === "selfie") {
-          setSelfie(imageData);
+          // Close camera, reopen apply modal, start AI selfie verification
           setCameraModalOpen(false);
-          setTimeout(() => setApplyModalOpen(true), 350);
+          setTimeout(async () => {
+            setApplyModalOpen(true);
+            await new Promise(r => setTimeout(r, 200));
+            setSelfieVerifying(true);
+            setSelfieVerified(false);
+            setSelfieRejected(false);
+            setSelfieVerifyResult(null);
+            setSelfie(imageData); // temporary preview while verifying
+            try {
+              const result = await verifySelfieImage(imageData.base64, "image/jpeg");
+              if (result && result.valid === true) {
+                setSelfieVerified(true);
+                setSelfieRejected(false);
+                setSelfieVerifyResult({
+                  reason: result.reason || "Selfie with ID verified successfully.",
+                  checks: result.checks,
+                });
+              } else {
+                // Reject invalid photos (random shots, scenery, furniture, food, memes, no human face)
+                setSelfie(null); // Clear invalid image preview so user cannot submit a bad photo
+                setSelfieVerified(false);
+                setSelfieRejected(true);
+                setSelfieVerifyResult({
+                  reason: result?.reason || "No clearly visible human face detected. Please retake a clear selfie holding your government ID and date note.",
+                });
+                Alert.alert(
+                  "Invalid Selfie",
+                  result?.reason || "No visible face detected. The photo must clearly show your face holding your ID card and current date note.",
+                  [{ text: "OK" }]
+                );
+              }
+            } catch (verifyErr) {
+              console.log("Selfie verify error:", verifyErr);
+              setSelfie(null);
+              setSelfieVerified(false);
+              setSelfieRejected(true);
+              setSelfieVerifyResult({ reason: "Selfie verification error. Please retake a clear photo holding your ID." });
+            } finally {
+              setSelfieVerifying(false);
+            }
+          }, 350);
 
         } else if (cameraMode === "id") {
           // Close camera, reopen apply modal, start AI verification
@@ -1425,6 +1513,9 @@ export default function LoansScreen({ navigation, route }) {
     }
     if (!agreedToTerms) return showError("Please agree to the Loan Terms & Conditions.");
     if (principal < 1000) return showError("Minimum Loan Amount: ₱1,000.");
+    if (selfieVerifying) return showError("Please wait — your selfie is still being verified.");
+    if (!selfie || !selfieVerified) return showError("Your selfie with ID has not been verified. Please capture a clear selfie holding your government ID and date note.");
+    if (idVerifying) return showError("Please wait — your government ID is still being verified.");
     if (!idVerified) return showError("Your government ID has not been verified. Please retake your ID photo.");
     // Validate additional documents — reject if any uploaded doc failed verification or is still verifying
     if (docVerification.coe.verifying || docVerification.itr.verifying || docVerification.payslip.verifying) {
@@ -1506,6 +1597,10 @@ export default function LoansScreen({ navigation, route }) {
       setPurpose("");
       setMonthsToPay("");
       setSelfie(null);
+      setSelfieVerified(false);
+      setSelfieRejected(false);
+      setSelfieVerifying(false);
+      setSelfieVerifyResult(null);
       setValidId(null);
       setIdVerified(false);
       setIdRejected(false);
@@ -2778,24 +2873,78 @@ export default function LoansScreen({ navigation, route }) {
                 <Text style={[styles.sectionSubtitle, { color: colors.textMuted }]}>Use your device camera to capture live photos for identity verification. Gallery uploads are not allowed.</Text>
                 
                 <View style={styles.docRow}>
-                  {/* Selfie with ID & Current Date */}
+                  {/* Selfie with ID & Current Date — AI-Verified */}
                   <View style={styles.docCol}>
                     <Text style={[styles.docLabel, { color: colors.textDark }]}>Selfie with ID & Current Date</Text>
-                    <TouchableOpacity
-                      style={[styles.captureBox, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }, selfie && styles.captureBoxDone]}
-                      activeOpacity={0.7}
-                      onPress={() => openVerificationCamera("selfie")}
-                    >
-                      {selfie ? (
-                        <Image source={{ uri: selfie.uri }} style={styles.docPreviewImg} resizeMode="cover" />
-                      ) : (
-                        <>
-                          <Image source={ICONS.camera} style={[styles.captureIcon, { tintColor: C.blue }]} resizeMode="contain" />
-                          <Text style={[styles.captureText, { color: colors.textDark }]}>Click to capture</Text>
-                          <Text style={[styles.captureHint, { color: colors.textMuted }]}>Live camera only</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
+
+                    {/* EMPTY state */}
+                    {!selfieVerifying && !selfieVerified && !selfieRejected && !selfie && (
+                      <TouchableOpacity
+                        style={[styles.captureBox, { backgroundColor: colors.inputBg, borderColor: colors.inputBorder }]}
+                        activeOpacity={0.7}
+                        onPress={() => openVerificationCamera("selfie")}
+                      >
+                        <Image source={ICONS.camera} style={[styles.captureIcon, { tintColor: C.blue }]} resizeMode="contain" />
+                        <Text style={[styles.captureText, { color: colors.textDark }]}>Capture Live Selfie</Text>
+                        <Text style={[styles.captureHint, { color: colors.textMuted }]}>AI-verified · Live only</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {/* VERIFYING state */}
+                    {selfieVerifying && (
+                      <View style={[styles.captureBox, { backgroundColor: "rgba(13,31,69,0.04)", borderColor: C.blue, borderStyle: "solid" }]}>
+                        <ActivityIndicator color={C.blue} size="large" style={{ marginBottom: 10 }} />
+                        <Text style={{ fontSize: fs(13), fontWeight: "700", color: C.blue, textAlign: "center" }}>🔍 Verifying face & ID...</Text>
+                        <Text style={{ fontSize: fs(11), color: colors.textMuted, textAlign: "center", marginTop: 4 }}>Gemini AI is checking your selfie</Text>
+                      </View>
+                    )}
+
+                    {/* VERIFIED ✅ state */}
+                    {selfieVerified && selfie && !selfieVerifying && (
+                      <TouchableOpacity
+                        style={[styles.captureBox, styles.captureBoxDone, { borderColor: C.green, borderWidth: 2 }]}
+                        activeOpacity={0.7}
+                        onPress={() => openVerificationCamera("selfie")}
+                      >
+                        <Image source={{ uri: selfie.uri }} style={[styles.docPreviewImg, { borderRadius: 10 }]} resizeMode="cover" />
+                        <View style={{
+                          position: "absolute", bottom: 8, left: 8, right: 8,
+                          backgroundColor: "rgba(52,199,89,0.92)", borderRadius: s(8),
+                          paddingHorizontal: 8, paddingVertical: 5,
+                          flexDirection: "row", alignItems: "center", gap: 5,
+                        }}>
+                          <Text style={{ fontSize: fs(13), fontWeight: "800", color: "#fff" }}>✅</Text>
+                          <Text style={{ fontSize: fs(11), fontWeight: "700", color: "#fff", flex: 1 }} numberOfLines={1}>
+                            Face & ID Verified
+                          </Text>
+                        </View>
+                        <View style={{
+                          position: "absolute", top: 8, right: 8,
+                          backgroundColor: "rgba(0,0,0,0.55)", borderRadius: 6,
+                          paddingHorizontal: 7, paddingVertical: 3,
+                        }}>
+                          <Text style={{ fontSize: fs(10), color: "#fff", fontWeight: "600" }}>Tap to retake</Text>
+                        </View>
+                      </TouchableOpacity>
+                    )}
+
+                    {/* REJECTED ❌ state */}
+                    {selfieRejected && !selfieVerifying && (
+                      <TouchableOpacity
+                        style={[styles.captureBox, { backgroundColor: "rgba(231,76,60,0.04)", borderColor: C.red, borderWidth: 2, borderStyle: "solid" }]}
+                        activeOpacity={0.7}
+                        onPress={() => openVerificationCamera("selfie")}
+                      >
+                        <Text style={{ fontSize: fs(28), marginBottom: 6 }}>❌</Text>
+                        <Text style={{ fontSize: fs(13), fontWeight: "800", color: C.red, textAlign: "center" }}>Face Not Detected</Text>
+                        <Text style={{ fontSize: fs(11), color: colors.textMuted, textAlign: "center", marginTop: 4, paddingHorizontal: 8 }} numberOfLines={3}>
+                          {selfieVerifyResult?.reason || "No visible face holding ID detected in photo."}
+                        </Text>
+                        <View style={{ marginTop: 10, backgroundColor: C.red, borderRadius: s(8), paddingHorizontal: s(16), paddingVertical: 7 }}>
+                          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>📷 Retake Selfie</Text>
+                        </View>
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   {/* Valid Government ID — AI-Verified */}

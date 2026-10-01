@@ -179,11 +179,13 @@ export default function DonationsScreen({ navigation, route }) {
   const [loadingBranches, setLoadingBranches] = useState(true);
   const [accountName, setAccountName] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
+  const [referenceNumber, setReferenceNumber] = useState("");
+  const [autoFilledFields, setAutoFilledFields] = useState([]);
   const [isAnotherAccount, setIsAnotherAccount] = useState(false);
   const [userFullName, setUserFullName] = useState("");
   const [userPhone, setUserPhone] = useState("");
   const [userBranch, setUserBranch] = useState(""); // user's default branch from profile
-  const [autoFilledInfo, setAutoFilledInfo] = useState(null); // { amount, method, referenceNumber, provider }
+  const [autoFilledInfo, setAutoFilledInfo] = useState(null); // { amount, method, referenceNumber, provider, senderName, senderNumber }
 
   const handleReceiptSelected = async (asset) => {
     if (!asset) return;
@@ -200,6 +202,7 @@ export default function DonationsScreen({ navigation, route }) {
     setProofImage({ uri: asset.uri, base64: base64 || "" });
     setFormError("");
     setAutoFilledInfo(null);
+    setAutoFilledFields([]);
 
     if (base64) {
       setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
@@ -208,8 +211,9 @@ export default function DonationsScreen({ navigation, route }) {
         const verdict = await verifyReceiptImage(base64, mime, selectedPayment);
         setReceiptVerification({ ...verdict, verifying: false });
 
-        if (verdict.valid) {
+        if (verdict.valid && verdict.isReceipt) {
           let filledCount = 0;
+          const newAutoFilled = [];
 
           // 1. Auto-fill Amount
           if (verdict.amount && Number(verdict.amount) > 0) {
@@ -221,57 +225,100 @@ export default function DonationsScreen({ navigation, route }) {
             } else {
               setSelectedAmount(null);
             }
+            newAutoFilled.push("amount");
             filledCount++;
           }
 
-          // 2. Auto-switch Payment Method
-          if (verdict.paymentMethod === "gcash" || verdict.paymentMethod === "bank") {
-            setSelectedPayment(verdict.paymentMethod);
-            if (verdict.paymentMethod === "gcash") {
-              setSubMethod(verdict.provider === "Maya" ? "Maya" : "GCash");
-            } else {
-              setSubMethod(verdict.provider || "BDO");
-            }
-            filledCount++;
-          }
-
-          // 3. Auto-fill Reference / Account Number
+          // 2. Auto-fill Reference Number
           if (verdict.referenceNumber) {
-            setAccountNumber(String(verdict.referenceNumber));
-            setIsAnotherAccount(true);
+            setReferenceNumber(String(verdict.referenceNumber).replace(/[\s-]/g, ""));
+            newAutoFilled.push("referenceNumber");
             filledCount++;
           }
 
-          // 4. Auto-fill Sender Name if available
-          if (verdict.senderName && !accountName) {
+          // 3. Auto-switch Payment Method & Sub-method
+          const rawSub = verdict.subMethod || verdict.provider || "";
+          const isEWallet = ["GCash", "Maya", "GrabPay", "ShopeePay", "Coins.ph"].some(
+            (ew) => rawSub.toLowerCase().includes(ew.toLowerCase())
+          ) || verdict.paymentMethod === "gcash" || verdict.paymentMethod === "E-Wallet";
+
+          if (isEWallet) {
+            setSelectedPayment("gcash");
+            newAutoFilled.push("paymentMethod");
+            if (rawSub.toLowerCase().includes("maya")) {
+              setSubMethod("Maya");
+            } else {
+              setSubMethod("GCash");
+            }
+            newAutoFilled.push("subMethod");
+            filledCount++;
+          } else if (verdict.paymentMethod === "bank" || verdict.paymentMethod === "Bank" || rawSub) {
+            setSelectedPayment("bank");
+            newAutoFilled.push("paymentMethod");
+            const knownBanks = ["BDO", "BPI", "Metrobank", "Unionbank", "PNB", "RCBC", "Instapay"];
+            const matchedBank = knownBanks.find(b => rawSub.toLowerCase().includes(b.toLowerCase()));
+            setSubMethod(matchedBank || "BDO");
+            newAutoFilled.push("subMethod");
+            filledCount++;
+          }
+
+          // 4. Auto-fill Sender Name
+          if (verdict.senderName) {
             setAccountName(verdict.senderName);
             setIsAnotherAccount(true);
+            newAutoFilled.push("accountName");
             filledCount++;
           }
+
+          // 5. Auto-fill Sender Number (Phone or Bank account)
+          if (verdict.senderNumber) {
+            const cleanDigits = String(verdict.senderNumber).replace(/\D/g, "");
+            setAccountNumber(cleanDigits);
+            setIsAnotherAccount(true);
+            newAutoFilled.push("accountNumber");
+            filledCount++;
+          }
+
+          setAutoFilledFields(newAutoFilled);
 
           if (filledCount > 0) {
             setAutoFilledInfo({
               amount: verdict.amount,
-              method: verdict.paymentMethod,
+              method: isEWallet ? "gcash" : "bank",
               referenceNumber: verdict.referenceNumber,
-              provider: verdict.provider || "Receipt",
+              provider: rawSub || (isEWallet ? "GCash" : "Bank"),
+              senderName: verdict.senderName,
+              senderNumber: verdict.senderNumber,
             });
             try {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             } catch (_) {}
           }
         } else {
-          setFormError(verdict.reason || "This doesn't appear to be a valid payment receipt.");
+          // STRICT REJECTION: Invalid or non-receipt image
+          setProofImage(null);
+          setAutoFilledInfo(null);
+          setAutoFilledFields([]);
+          setReceiptVerification({ verifying: false, valid: false, provider: null, reason: verdict.reason });
+          setFormError(verdict.reason || "Invalid proof of payment. Please upload a real receipt or transaction screenshot.");
+          Alert.alert(
+            "Invalid Receipt",
+            verdict.reason || "The uploaded image is not a valid payment receipt. Please upload a clear screenshot of your transaction proof.",
+            [{ text: "OK" }]
+          );
         }
       } catch (err) {
         console.log("Error in receipt verification:", err);
+        setProofImage(null);
+        setAutoFilledInfo(null);
+        setAutoFilledFields([]);
         setReceiptVerification({
-          valid: true,
+          valid: false,
           verifying: false,
-          provider: "Receipt",
-          fallback: true,
-          reason: "Receipt uploaded (pending manual admin verification).",
+          provider: null,
+          reason: "Unable to verify receipt. Please check your internet connection.",
         });
+        setFormError("Unable to verify receipt. Please check your internet connection and try again.");
       }
     }
   };
@@ -763,6 +810,9 @@ export default function DonationsScreen({ navigation, route }) {
           errors.accountNumber = "Bank account number cannot exceed 20 digits.";
         }
       }
+      if (!referenceNumber || !referenceNumber.trim()) {
+        errors.referenceNumber = "Please enter the transaction reference number.";
+      }
       if (!proofImage || !proofImage.base64) {
         errors.proof = "Please upload proof of payment.";
       } else if (receiptVerification && receiptVerification.verifying) {
@@ -772,7 +822,7 @@ export default function DonationsScreen({ navigation, route }) {
       }
     }
     setFieldErrors(errors);
-  }, [donationAmount, selectedCategory, selectedBranch, accountName, accountNumber, proofImage, receiptVerification, paymentApprovalMethod, selectedPayment, isAnotherAccount]);
+  }, [donationAmount, selectedCategory, selectedBranch, accountName, accountNumber, referenceNumber, proofImage, receiptVerification, paymentApprovalMethod, selectedPayment, isAnotherAccount]);
 
   const handleQuickAmount = (amount) => {
     setSelectedAmount(amount);
@@ -846,6 +896,10 @@ export default function DonationsScreen({ navigation, route }) {
           return;
         }
       }
+      if (!referenceNumber || !referenceNumber.trim()) {
+        setFormError("Please enter the transaction reference number from your receipt.");
+        return;
+      }
       if (!proofImage || !proofImage.base64) {
         setFormError("Please upload proof of payment before submitting.");
         return;
@@ -897,6 +951,7 @@ export default function DonationsScreen({ navigation, route }) {
 
     if (isManual && !isCash) {
       backendPayload.subMethod = subMethod;
+      backendPayload.referenceNumber = referenceNumber.trim();
       backendPayload.accountName = resolvedAccountName;
       backendPayload.accountNumber = resolvedAccountNumber;
       backendPayload.proofOfPayment = proofImage && proofImage.base64 ? `data:image/jpeg;base64,${proofImage.base64}` : null;
@@ -964,6 +1019,9 @@ export default function DonationsScreen({ navigation, route }) {
       setSearchBranchQuery("");
       setAccountName("");
       setAccountNumber("");
+      setReferenceNumber("");
+      setAutoFilledInfo(null);
+      setAutoFilledFields([]);
       setIsRecurring(false);
       setProofImage(null);
       setReceiptVerification(null);
@@ -1233,6 +1291,7 @@ export default function DonationsScreen({ navigation, route }) {
                       setProofImage(null);
                       setReceiptVerification(null);
                       setAutoFilledInfo(null);
+                      setAutoFilledFields([]);
                     }}
                     activeOpacity={0.7}
                   >
@@ -1821,6 +1880,57 @@ export default function DonationsScreen({ navigation, route }) {
                   )}
                 </View>
               )}
+
+              {/* ── Reference Number / Transaction ID ── */}
+              <View style={{ marginTop: s(8), marginBottom: s(6) }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.inputLabel, { color: colors.textDark, marginBottom: 0 }]}>
+                      Reference Number / Transaction ID <Text style={{ color: '#E74C3C' }}>*</Text>
+                    </Text>
+                    {autoFilledFields.includes('referenceNumber') && (
+                      <View style={{ backgroundColor: isDark ? 'rgba(59,130,246,0.2)' : '#EFF6FF', borderColor: '#93C5FD', borderWidth: 1, borderRadius: 12, paddingHorizontal: 7, paddingVertical: 2 }}>
+                        <Text style={{ fontSize: fs(10), fontWeight: '700', color: '#2563EB' }}>✨ Auto-filled</Text>
+                      </View>
+                    )}
+                  </View>
+                  {referenceNumber ? (
+                    <Text style={{ fontSize: fs(10), color: colors.textMuted, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
+                      {referenceNumber.length} chars
+                    </Text>
+                  ) : null}
+                </View>
+                <TextInput
+                  style={[
+                    styles.amountInput,
+                    {
+                      backgroundColor: colors.inputBg,
+                      borderColor: fieldErrors.referenceNumber ? '#E74C3C' : autoFilledFields.includes('referenceNumber') ? '#34C759' : colors.inputBorder,
+                      color: colors.textDark,
+                      paddingLeft: 14,
+                      borderRadius: s(8),
+                      height: s(48),
+                      fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                    },
+                  ]}
+                  placeholder="e.g. 902412345678 or UB12345678"
+                  placeholderTextColor={colors.textMuted}
+                  value={referenceNumber}
+                  onChangeText={(t) => {
+                    setReferenceNumber(t.replace(/[\s]/g, ""));
+                    setFormError("");
+                  }}
+                />
+                {fieldErrors.referenceNumber ? (
+                  <Text style={{ color: "#E74C3C", fontSize: fs(11), fontWeight: "600", marginTop: 2, marginBottom: 4 }}>
+                    {fieldErrors.referenceNumber}
+                  </Text>
+                ) : (
+                  <Text style={{ color: colors.textMuted, fontSize: fs(10), marginTop: 2, marginBottom: 4 }}>
+                    Transaction reference number from your receipt for verification.
+                  </Text>
+                )}
+              </View>
 
               {/* ── Sender Information (E-Wallet) ── */}
               {selectedPayment === "gcash" && (
