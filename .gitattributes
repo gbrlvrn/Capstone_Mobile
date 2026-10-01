@@ -1,0 +1,10 @@
+# .gitattributes
+# Exclude web and backend when archiving or packaging project
+
+Isangdiwa_Web/** export-ignore
+CapstoneMobile/backend/** export-ignore
+CapstoneMobile/dev-scripts/** export-ignore
+*.md export-ignore
+.git/** export-ignore
+.idea/** export-ignore
+.vscode/** export-ignore

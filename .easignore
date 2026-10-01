@@ -1,0 +1,33 @@
+# .easignore at Git Root
+# Exclude everything outside CapstoneMobile, and exclude non-client mobile files.
+
+# Exclude web project completely
+Isangdiwa_Web/
+.git/
+.idea/
+.vscode/
+*.md
+
+# Exclude backend and build artifacts in CapstoneMobile
+CapstoneMobile/backend/
+CapstoneMobile/dev-scripts/
+CapstoneMobile/node_modules/
+CapstoneMobile/.expo/
+CapstoneMobile/dist/
+CapstoneMobile/web-build/
+CapstoneMobile/expo-env.d.ts
+CapstoneMobile/ios/
+CapstoneMobile/android/
+CapstoneMobile/*.jks
+CapstoneMobile/*.p8
+CapstoneMobile/*.p12
+CapstoneMobile/*.key
+CapstoneMobile/*.pem
+CapstoneMobile/*.mobileprovision
+CapstoneMobile/dist-cert.p12
+CapstoneMobile/.env*
+CapstoneMobile/.idea/
+CapstoneMobile/.vscode/
+CapstoneMobile/npm-debug.*
+CapstoneMobile/yarn-debug.*
+CapstoneMobile/yarn-error.*
