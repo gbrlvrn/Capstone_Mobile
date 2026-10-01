@@ -1,6 +1,7 @@
-import { API_CONFIG } from "./config";
+import { API_CONFIG, GEMINI_CONFIG } from "./config";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
+
 
 const TOKEN_KEY = "@faithly_token";
 // SecureStore keys must be alphanumeric + underscore/hyphen only
@@ -1048,7 +1049,7 @@ export function getDonations(page = 1, limit = 50, category = "") {
  * @param {string} base64 - raw base64 or data-URI of the image
  * @param {string} mimeType - image MIME type (default "image/jpeg")
  * @param {string} paymentMethod - "gcash", "bank", etc. for per-method validation
- * @returns {{ valid: boolean, provider: string|null, confidence: string, reason: string }}
+ * @returns {{ valid: boolean, provider: string|null, paymentMethod: string|null, amount: number|null, referenceNumber: string|null, senderName: string|null, confidence: string, reason: string, autoFilled: boolean }}
  */
 export async function verifyReceiptImage(base64, mimeType = "image/jpeg", paymentMethod = "") {
   try {
@@ -1057,65 +1058,181 @@ export async function verifyReceiptImage(base64, mimeType = "image/jpeg", paymen
       return {
         valid: true,
         provider: "Receipt",
+        paymentMethod: paymentMethod || "gcash",
+        amount: null,
+        referenceNumber: null,
+        senderName: null,
         confidence: "low",
         fallback: true,
         reason: "Receipt accepted for manual review.",
+        autoFilled: false,
       };
     }
+
+    const rawBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
     const formattedImage = base64.startsWith("data:")
       ? base64
-      : `data:${mimeType};base64,${base64}`;
+      : `data:${mimeType};base64,${rawBase64}`;
 
-    let res;
-    try {
-      res = await webPost("/loans/validate-receipt", {
-        image: formattedImage,
-        paymentMethod,
-      }, true);
-    } catch {
+    // 1. Try backend verification endpoint first
+    let res = null;
+    const endpoints = [
+      "/donations/verify-receipt",
+      "/donations/validate-receipt",
+      "/loans/validate-receipt"
+    ];
+
+    for (const ep of endpoints) {
       try {
-        res = await webPost("/donations/validate-receipt", {
+        res = await request("POST", ep, {
+          base64: rawBase64,
           image: formattedImage,
+          mimeType,
           paymentMethod,
         }, true);
-      } catch {
-        res = await request("POST", "/donations/validate-receipt", {
-          image: formattedImage,
-          paymentMethod,
-        }, true);
+        if (res && (typeof res.valid !== "undefined" || typeof res.isReceipt !== "undefined")) {
+          break;
+        }
+      } catch (_) {
+        // try next endpoint
       }
     }
 
-    if (res && (typeof res.isReceipt !== "undefined" || typeof res.valid !== "undefined")) {
-      const isValid = Boolean(res.isReceipt ?? res.valid);
-      let confidenceLevel = "low";
-      if (typeof res.confidence === "number") {
-        confidenceLevel = res.confidence >= 0.7 ? "high" : res.confidence >= 0.4 ? "medium" : "low";
-      } else if (typeof res.confidence === "string") {
-        confidenceLevel = res.confidence;
-      } else if (isValid) {
-        confidenceLevel = "high";
+    // If backend gave a full parse with amount or referenceNumber, return it immediately
+    if (res && (typeof res.valid !== "undefined" || typeof res.isReceipt !== "undefined")) {
+      const isValid = Boolean(res.valid ?? res.isReceipt);
+      if (isValid && (res.amount || res.referenceNumber)) {
+        return {
+          valid: true,
+          provider: res.provider || "Payment Receipt",
+          paymentMethod: res.paymentMethod || (paymentMethod === "bank" ? "bank" : "gcash"),
+          amount: res.amount ? Number(res.amount) : null,
+          referenceNumber: res.referenceNumber ? String(res.referenceNumber) : null,
+          senderName: res.senderName || null,
+          confidence: res.confidence || "high",
+          reason: res.reason || "Valid payment receipt detected.",
+          fallback: Boolean(res.fallback),
+          autoFilled: true,
+        };
       }
+    }
 
+    // 2. Direct Gemini Vision Analysis (Guaranteed AI Auto-Fill on any device/network)
+    if (GEMINI_CONFIG?.API_KEY) {
+      try {
+        const prompt = `You are a strict, expert AI receipt parser for a church giving mobile application in the Philippines.
+Analyze this uploaded payment image (GCash, Maya, Maribank, Bank Transfer like BDO, BPI, UnionBank, Metrobank, Landbank, RCBC, etc.).
+
+Task 1: Determine if the image is a completed, legitimate transaction receipt.
+REJECT (valid: false) if:
+- Selfies, random photos, food, scenery, objects, pets, memes, chat conversations, IDs
+- Screens of e-wallet home screens, balance screens, or blank forms
+- Physical paper receipts, ATM slips, or non-Philippine receipts
+
+Task 2: If valid (valid: true), extract:
+1. "provider": string (e.g. "GCash", "Maya", "BDO", "BPI", "UnionBank", etc.)
+2. "paymentMethod": "gcash" if GCash, Maya, or any e-wallet; "bank" if any bank transfer.
+3. "amount": numeric float/int of the total amount sent/donated (e.g. 500 or 1500.50). MUST be a number without currency signs or commas.
+4. "referenceNumber": string of the transaction reference/Ref number (digits/letters without spaces, e.g. "10029381928").
+5. "senderName": string of sender's name if visible, or null.
+6. "receiverName": string of receiver's name or number if visible, or null.
+7. "reason": short summary (e.g. "Valid GCash Send Money receipt").
+
+Respond ONLY with raw JSON in this exact structure:
+{"valid":true,"provider":"GCash","paymentMethod":"gcash","amount":500,"referenceNumber":"10029381928","senderName":"Juan Dela Cruz","confidence":"high","reason":"Valid GCash receipt"}
+or if not a valid receipt:
+{"valid":false,"provider":null,"paymentMethod":null,"amount":null,"referenceNumber":null,"senderName":null,"confidence":"high","reason":"Please upload a clear screenshot of your payment receipt."}`;
+
+        const models = [GEMINI_CONFIG.PRIMARY_MODEL, ...(GEMINI_CONFIG.FALLBACK_MODELS || [])];
+        for (const model of models) {
+          try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_CONFIG.API_KEY}`;
+            const reqBody = {
+              contents: [
+                {
+                  parts: [
+                    { text: prompt },
+                    {
+                      inlineData: {
+                        mimeType: mimeType || "image/jpeg",
+                        data: rawBase64,
+                      },
+                    },
+                  ],
+                },
+              ],
+              generationConfig: {
+                temperature: 0.1,
+                maxOutputTokens: 1024,
+              },
+            };
+
+            const geminiRes = await fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(reqBody),
+            });
+
+            if (geminiRes.ok) {
+              const data = await geminiRes.json();
+              const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (text) {
+                const cleaned = text.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
+                const parsed = JSON.parse(cleaned);
+                const isValid = Boolean(parsed.valid);
+                return {
+                  valid: isValid,
+                  provider: isValid ? (parsed.provider || "Payment Receipt") : null,
+                  paymentMethod: isValid ? (parsed.paymentMethod || (paymentMethod === "bank" ? "bank" : "gcash")) : null,
+                  amount: isValid && parsed.amount ? Number(parsed.amount) : null,
+                  referenceNumber: isValid && parsed.referenceNumber ? String(parsed.referenceNumber) : null,
+                  senderName: isValid ? (parsed.senderName || null) : null,
+                  confidence: parsed.confidence || (isValid ? "high" : "low"),
+                  reason: parsed.reason || (isValid ? "Valid payment receipt detected." : "The image does not appear to be a valid payment receipt."),
+                  autoFilled: Boolean(isValid && (parsed.amount || parsed.referenceNumber)),
+                };
+              }
+            }
+          } catch (modelErr) {
+            console.log(`[Gemini Vision ${model}] error:`, modelErr.message || modelErr);
+          }
+        }
+      } catch (geminiOuterErr) {
+        console.log("[Gemini Vision outer error]:", geminiOuterErr.message || geminiOuterErr);
+      }
+    }
+
+    // 3. Fallback to basic backend verdict if Gemini was unavailable
+    if (res && (typeof res.valid !== "undefined" || typeof res.isReceipt !== "undefined")) {
+      const isValid = Boolean(res.valid ?? res.isReceipt);
       return {
         valid: isValid,
         provider: res.provider || (isValid ? "Payment Receipt" : null),
-        confidence: confidenceLevel,
-        fallback: Boolean(res.fallback),
-        reason: res.reason || (isValid
-          ? "Valid payment receipt detected."
-          : "The image does not appear to be a valid payment receipt."),
+        paymentMethod: paymentMethod || "gcash",
+        amount: null,
+        referenceNumber: null,
+        senderName: null,
+        confidence: "medium",
+        fallback: false,
+        reason: res.reason || (isValid ? "Valid receipt detected." : "Invalid receipt."),
+        autoFilled: false,
       };
     }
   } catch (e) {
-    console.log("Receipt verification request failed:", e.message || e);
+    console.log("Receipt verification failed:", e.message || e);
   }
+
   return {
     valid: true,
     provider: "Receipt",
+    paymentMethod: paymentMethod || "gcash",
+    amount: null,
+    referenceNumber: null,
+    senderName: null,
     confidence: "low",
     fallback: true,
     reason: "Validation service unavailable. Image accepted for manual review.",
+    autoFilled: false,
   };
 }
 

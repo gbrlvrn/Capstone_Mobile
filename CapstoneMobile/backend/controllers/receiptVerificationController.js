@@ -18,7 +18,8 @@ export async function verifyReceipt(req, res) {
   try {
     const { base64, mimeType = "image/jpeg", paymentMethod = "" } = req.body;
 
-    if (!base64 || typeof base64 !== "string" || base64.trim().length < 100) {
+    const inputImage = req.body.base64 || req.body.image || "";
+    if (!inputImage || typeof inputImage !== "string" || inputImage.trim().length < 100) {
       return res.status(400).json({
         valid: false,
         provider: null,
@@ -38,100 +39,80 @@ export async function verifyReceipt(req, res) {
     }
 
     // Strip data URI prefix if present so we send raw base64 to Gemini
-    const rawBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
+    const rawBase64 = inputImage.replace(/^data:image\/\w+;base64,/, "");
 
     // Build strict prompt based on payment method
     const method = (paymentMethod || "").toLowerCase();
     const isEwallet = method === "gcash" || method === "maya" || method === "e-wallet" || method === "ewallet";
     const isBank = method === "bank" || method === "bank_transfer" || method === "bank transfer";
 
+    const commonExtraction = `
+If valid (valid: true), accurately extract:
+1. "provider": e.g. "GCash", "Maya", "BDO", "BPI", "UnionBank", etc.
+2. "paymentMethod": "gcash" for e-wallets, "bank" for bank transfers.
+3. "amount": total amount transferred/paid as a numeric float/int (e.g. 500 or 1500.50). MUST be a pure number without currency symbol or commas.
+4. "referenceNumber": reference number or transaction number (digits/letters without spaces, e.g. "10029381928").
+5. "senderName": sender name if clearly visible, or null.
+6. "reason": concise summary.`;
+
     let prompt;
     if (isEwallet) {
-      prompt = `You are a STRICT e-wallet receipt validator for a mobile app in the Philippines.
+      prompt = `You are a STRICT e-wallet receipt validator and parser for a church giving mobile app in the Philippines.
 
-Task: Determine if the image is a REAL, completed transaction receipt from a Philippine e-wallet app.
+Task: Determine if the image is a REAL, completed transaction receipt from a Philippine e-wallet app (GCash, Maya, Maribank).
 
-ONLY accept receipts from these e-wallet providers:
-- **GCash** — Must show: GCash logo/branding (blue/green theme), "Send Money" / "Pay Bills" / "Cash In" / "Express Send" label, transaction reference number, sender & receiver names/numbers, amount with peso sign (₱), date & time stamp.
-- **Maya (PayMaya)** — Must show: Maya logo/branding (green), "Send Money" / "Pay" labels, transaction reference number, sender & receiver details, amount, date & time.
-- **Maribank** — Must show: Maribank branding, transaction confirmation screen, reference number, amount, date & time.
-
-STRICTLY REJECT — return valid: false for ALL of the following:
-- Bank transfer confirmations or online banking screenshots (BDO, BPI, Metrobank, etc.) — these are NOT e-wallet receipts
-- Selfies, portraits, photos of people, scenery, food, objects, pets, furniture, vehicles
-- Memes, social media screenshots, chat conversations, games
-- Non-receipt documents (IDs, certificates, letters, invoices, forms)
-- Blank or solid-color images
-- Screenshots of e-wallet HOME screens, balance screens, or anything that is NOT a completed transaction
+STRICTLY REJECT (valid: false):
+- Bank transfer confirmations (BDO, BPI, etc.)
+- Selfies, portraits, photos of people, scenery, food, pets, memes, chat screenshots, IDs
+- E-wallet HOME screens, balance screens, or blank forms
 - Physical paper receipts or ATM slips
-- Receipts from non-Philippine providers
-- Heavily edited or fabricated receipts
 
-The image MUST show a completed e-wallet transaction with at minimum: (a) e-wallet branding/logo, (b) transaction amount, (c) reference/transaction number.
+The image MUST show a completed e-wallet transaction with at minimum branding/logo, amount, and reference number.
+${commonExtraction}
 
 Output Format: Respond ONLY with raw JSON:
-{"valid": true, "provider": "GCash", "confidence": "high", "reason": "Valid GCash Send Money receipt with reference number and amount visible."}
+{"valid": true, "provider": "GCash", "paymentMethod": "gcash", "amount": 500, "referenceNumber": "10029381928", "senderName": "Juan Dela Cruz", "confidence": "high", "reason": "Valid GCash Send Money receipt."}
 or
-{"valid": false, "provider": null, "confidence": "high", "reason": "This is not an e-wallet receipt. Please upload a screenshot of your completed GCash, Maya, or Maribank transaction."}`;
+{"valid": false, "provider": null, "paymentMethod": null, "amount": null, "referenceNumber": null, "senderName": null, "confidence": "high", "reason": "This is not an e-wallet receipt. Please upload a screenshot of your completed GCash or Maya transaction."}`;
     } else if (isBank) {
-      prompt = `You are a STRICT bank transfer receipt validator for a mobile app in the Philippines.
+      prompt = `You are a STRICT bank transfer receipt validator and parser for a church giving mobile app in the Philippines.
 
-Task: Determine if the image is a REAL, completed bank transfer confirmation from a Philippine bank's online/mobile banking app.
+Task: Determine if the image is a REAL, completed bank transfer confirmation from a Philippine bank (BDO, BPI, UnionBank, Metrobank, Landbank, PNB, RCBC, etc.).
 
-ONLY accept receipts from recognized Philippine banks:
-- **BDO** — BDO Online/Mobile Banking transfer confirmation, "Fund Transfer" / "Send Money" labels
-- **BPI** — BPI Online/Mobile app transfer confirmation, "Transfer" / "Send Money" labels
-- **UnionBank** — UnionBank Online transfer receipt
-- **Metrobank** — Metrobank app transfer confirmation
-- **Landbank** — Landbank iAccess/Mobile Banking transfer confirmation
-- **PNB** — PNB Digital Banking transfer confirmation
-- **RCBC, Security Bank, Chinabank, EastWest, PSBank, AUB, CTBC** or any other recognized Philippine bank
-
-Each must show: bank logo/branding, "Fund Transfer" / "Send Money" / "Transfer" labels, reference/transaction number, amount, date & time.
-
-STRICTLY REJECT — return valid: false for ALL of the following:
-- E-wallet receipts (GCash, Maya, Maribank) — these are NOT bank transfer receipts
-- Selfies, portraits, photos of people, scenery, food, objects, pets, furniture, vehicles
-- Memes, social media screenshots, chat conversations, games
-- Non-receipt documents (IDs, certificates, letters, invoices, forms)
-- Blank or solid-color images
-- Screenshots of banking HOME screens, balance screens, or dashboards that are NOT a completed transfer
+STRICTLY REJECT (valid: false):
+- E-wallet receipts (GCash, Maya, Maribank)
+- Selfies, portraits, scenery, food, objects, pets, memes, chat conversations, IDs
+- Banking HOME screens, balance screens, or dashboards
 - Physical paper receipts or ATM slips
-- Receipts from non-Philippine providers
-- Heavily edited or fabricated receipts
 
-The image MUST show a completed bank transfer with at minimum: (a) bank branding/logo, (b) transfer amount, (c) reference/transaction number.
+The image MUST show a completed bank transfer with bank branding/logo, amount, and reference/transaction number.
+${commonExtraction}
 
 Output Format: Respond ONLY with raw JSON:
-{"valid": true, "provider": "BDO", "confidence": "high", "reason": "Valid BDO Online Banking fund transfer confirmation detected."}
+{"valid": true, "provider": "BDO", "paymentMethod": "bank", "amount": 1000, "referenceNumber": "0012938491", "senderName": "Juan Dela Cruz", "confidence": "high", "reason": "Valid BDO transfer confirmation detected."}
 or
-{"valid": false, "provider": null, "confidence": "high", "reason": "This is not a bank transfer receipt. Please upload a screenshot of your completed bank transfer from your banking app."}`;
+{"valid": false, "provider": null, "paymentMethod": null, "amount": null, "referenceNumber": null, "senderName": null, "confidence": "high", "reason": "This is not a bank transfer receipt. Please upload a screenshot of your completed bank transfer."}`;
     } else {
-      prompt = `You are a STRICT payment receipt validator for a mobile app in the Philippines.
+      prompt = `You are a STRICT payment receipt validator and parser for a church giving mobile app in the Philippines.
 
 Task: Determine if the image is a REAL, completed transaction receipt from a Philippine e-wallet or bank app.
+Accept: GCash, Maya, Maribank, BDO, BPI, UnionBank, Metrobank, Landbank, PNB, RCBC, etc.
 
-ONLY accept receipts from:
-- E-wallets: GCash, Maya/PayMaya, Maribank
-- Banks: BDO, BPI, UnionBank, Metrobank, Landbank, PNB, RCBC, Security Bank, Chinabank, EastWest, PSBank, or any recognized Philippine bank
+STRICTLY REJECT (valid: false):
+- Random photos (selfies, scenery, food, pets, memes, chat conversations, IDs)
+- Home screens, balance screens, or blank forms
+- Physical paper receipts or ATM slips
 
-Each must show: provider branding/logo, transaction amount, reference/transaction number, date & time.
-
-STRICTLY REJECT:
-- Random photos (selfies, scenery, food, objects, pets, memes, games, social media)
-- Non-receipt documents (IDs, certificates, letters)
-- Blank images, home screens, balance screens, dashboards
-- Physical receipts or ATM slips
-- Receipts from non-Philippine providers
-- Fabricated or heavily edited receipts
+The image MUST show a completed payment with provider logo, amount, and reference number.
+${commonExtraction}
 
 Output Format: Respond ONLY with raw JSON:
-{"valid": true, "provider": "GCash", "confidence": "high", "reason": "Valid GCash receipt detected."}
+{"valid": true, "provider": "GCash", "paymentMethod": "gcash", "amount": 500, "referenceNumber": "10029381928", "senderName": "Juan Dela Cruz", "confidence": "high", "reason": "Valid payment receipt detected."}
 or
-{"valid": false, "provider": null, "confidence": "high", "reason": "This is not a valid payment receipt. Please upload a screenshot of your completed transaction."}`;
+{"valid": false, "provider": null, "paymentMethod": null, "amount": null, "referenceNumber": null, "senderName": null, "confidence": "high", "reason": "This is not a valid payment receipt. Please upload a screenshot of your completed transaction."}`;
     }
 
-    const modelSlugs = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
+    const modelSlugs = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"];
     let result = null;
     let lastError = null;
 
@@ -168,6 +149,10 @@ or
       return res.json({
         valid: isValid,
         provider: isValid ? (parsed.provider || "Payment Receipt") : null,
+        paymentMethod: isValid ? (parsed.paymentMethod || (isBank ? "bank" : "gcash")) : null,
+        amount: isValid && parsed.amount ? Number(parsed.amount) : null,
+        referenceNumber: isValid && parsed.referenceNumber ? String(parsed.referenceNumber) : null,
+        senderName: isValid ? (parsed.senderName || null) : null,
         confidence: parsed.confidence || (isValid ? "high" : "low"),
         reason: parsed.reason || (isValid
           ? "Valid payment receipt detected."

@@ -183,6 +183,138 @@ export default function DonationsScreen({ navigation, route }) {
   const [userFullName, setUserFullName] = useState("");
   const [userPhone, setUserPhone] = useState("");
   const [userBranch, setUserBranch] = useState(""); // user's default branch from profile
+  const [autoFilledInfo, setAutoFilledInfo] = useState(null); // { amount, method, referenceNumber, provider }
+
+  const handleReceiptSelected = async (asset) => {
+    if (!asset) return;
+    let base64 = asset.base64;
+    if (!base64 && asset.uri) {
+      try {
+        base64 = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: "base64",
+        });
+      } catch (fsErr) {
+        console.log("Could not read donation photo as base64 fallback:", fsErr);
+      }
+    }
+    setProofImage({ uri: asset.uri, base64: base64 || "" });
+    setFormError("");
+    setAutoFilledInfo(null);
+
+    if (base64) {
+      setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
+      try {
+        const verdict = await verifyReceiptImage(base64, "image/jpeg", selectedPayment);
+        setReceiptVerification({ ...verdict, verifying: false });
+
+        if (verdict.valid) {
+          let filledCount = 0;
+
+          // 1. Auto-fill Amount
+          if (verdict.amount && Number(verdict.amount) > 0) {
+            const num = Number(verdict.amount);
+            const formatted = String(num).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+            setDonationAmount(formatted);
+            if (QUICK_AMOUNTS.includes(num)) {
+              setSelectedAmount(num);
+            } else {
+              setSelectedAmount(null);
+            }
+            filledCount++;
+          }
+
+          // 2. Auto-switch Payment Method
+          if (verdict.paymentMethod === "gcash" || verdict.paymentMethod === "bank") {
+            setSelectedPayment(verdict.paymentMethod);
+            if (verdict.paymentMethod === "gcash") {
+              setSubMethod(verdict.provider === "Maya" ? "Maya" : "GCash");
+            } else {
+              setSubMethod(verdict.provider || "BDO");
+            }
+            filledCount++;
+          }
+
+          // 3. Auto-fill Reference / Account Number
+          if (verdict.referenceNumber) {
+            setAccountNumber(String(verdict.referenceNumber));
+            setIsAnotherAccount(true);
+            filledCount++;
+          }
+
+          // 4. Auto-fill Sender Name if available
+          if (verdict.senderName && !accountName) {
+            setAccountName(verdict.senderName);
+            setIsAnotherAccount(true);
+            filledCount++;
+          }
+
+          if (filledCount > 0) {
+            setAutoFilledInfo({
+              amount: verdict.amount,
+              method: verdict.paymentMethod,
+              referenceNumber: verdict.referenceNumber,
+              provider: verdict.provider || "Receipt",
+            });
+            try {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (_) {}
+          }
+        } else {
+          setFormError(verdict.reason || "This doesn't appear to be a valid payment receipt.");
+        }
+      } catch (err) {
+        console.log("Error in receipt verification:", err);
+        setReceiptVerification({
+          valid: true,
+          verifying: false,
+          provider: "Receipt",
+          fallback: true,
+          reason: "Receipt uploaded (pending manual admin verification).",
+        });
+      }
+    }
+  };
+
+  const handleCameraCapture = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        setFormError("Camera permission is required to take a photo of your receipt.");
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        quality: 0.8,
+        allowsEditing: false,
+        base64: true,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        await handleReceiptSelected(result.assets[0]);
+      }
+    } catch (err) {
+      console.log("Error launching camera:", err);
+    }
+  };
+
+  const handleGalleryPick = async () => {
+    try {
+      const perm = await ImagePicker.getMediaLibraryPermissionsAsync();
+      if (!perm.granted && perm.canAskAgain) {
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        quality: 0.8,
+        allowsEditing: false,
+        mediaTypes: ["images"],
+        base64: true,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        await handleReceiptSelected(result.assets[0]);
+      }
+    } catch (err) {
+      console.log("Error launching gallery:", err);
+    }
+  };
+
 
   // Fetch branches on mount
   useEffect(() => {
@@ -1062,7 +1194,12 @@ export default function DonationsScreen({ navigation, route }) {
 
         {/* Make a Donation Form */}
         <View style={[styles.donationForm, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-          <Text style={[styles.formTitle, { color: colors.textDark }]}>Make a Donation</Text>
+          <View style={styles.formHeaderRow}>
+            <Text style={[styles.formTitle, { color: colors.textDark }]}>Make a Donation</Text>
+            <Text style={[styles.formSubtitle, { color: colors.textMuted }]}>
+              Upload receipt first to auto-fill or enter details manually
+            </Text>
+          </View>
 
           {formError ? (
             <View style={styles.errorBox}>
@@ -1070,6 +1207,118 @@ export default function DonationsScreen({ navigation, route }) {
               <Text style={styles.errorText}>{formError}</Text>
             </View>
           ) : null}
+
+          {/* Proof of Payment Upload with AI Auto-Fill */}
+          {paymentApprovalMethod === "manual" && selectedPayment !== "cash" && (
+            <View style={styles.proofSection}>
+              <View style={styles.proofHeaderRow}>
+                <Text style={[styles.inputLabel, { color: colors.textDark, marginBottom: 0 }]}>
+                  Upload Proof of Payment <Text style={{ color: "#E74C3C" }}>*</Text>
+                </Text>
+                <View style={styles.aiBadge}>
+                  <Text style={styles.aiBadgeText}>✨ AI Auto-Fill</Text>
+                </View>
+              </View>
+
+              {proofImage ? (
+                <View style={styles.proofPreviewContainer}>
+                  <Image source={{ uri: proofImage.uri }} style={styles.proofPreview} resizeMode="cover" />
+                  <TouchableOpacity
+                    style={styles.proofRemoveBtn}
+                    onPress={() => {
+                      setProofImage(null);
+                      setReceiptVerification(null);
+                      setAutoFilledInfo(null);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.proofRemoveText}>✕</Text>
+                  </TouchableOpacity>
+
+                  {receiptVerification?.verifying ? (
+                    <View style={[styles.proofAttachedBadge, { backgroundColor: "rgba(245,166,35,0.95)" }]}>
+                      <ActivityIndicator size="small" color="#fff" style={{ marginRight: 6 }} />
+                      <Text style={styles.proofAttachedText}>✨ AI analyzing receipt & auto-filling...</Text>
+                    </View>
+                  ) : receiptVerification?.valid ? (
+                    <View style={[styles.proofAttachedBadge, { backgroundColor: "rgba(52,199,89,0.95)" }]}>
+                      <Text style={styles.proofAttachedText}>✓ Verified {receiptVerification.provider || "Receipt"}</Text>
+                    </View>
+                  ) : receiptVerification && !receiptVerification.valid ? (
+                    <View style={[styles.proofAttachedBadge, { backgroundColor: "rgba(231,76,60,0.95)" }]}>
+                      <Text style={styles.proofAttachedText}>✕ Invalid Receipt</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.proofAttachedBadge}>
+                      <Text style={styles.proofAttachedText}>✓ Attached</Text>
+                    </View>
+                  )}
+
+                  {receiptVerification && !receiptVerification.verifying && !receiptVerification.valid && (
+                    <View style={styles.proofErrorBanner}>
+                      <Text style={styles.proofErrorBannerText}>{receiptVerification.reason}</Text>
+                    </View>
+                  )}
+
+                  {autoFilledInfo && (
+                    <View style={[styles.autoFillSuccessPill, { backgroundColor: isDark ? "rgba(59,130,246,0.18)" : "#EFF6FF", borderColor: isDark ? "rgba(59,130,246,0.3)" : "#BFDBFE" }]}>
+                      <Text style={[styles.autoFillSuccessText, { color: isDark ? "#60A5FA" : "#1D4ED8" }]}>
+                        ✨ AI Auto-filled: ₱{autoFilledInfo.amount ? Number(autoFilledInfo.amount).toLocaleString() : donationAmount} • {autoFilledInfo.provider || "Receipt"}{autoFilledInfo.referenceNumber ? ` • Ref: ${autoFilledInfo.referenceNumber}` : ""}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <View style={[styles.proofUploadBox, { borderColor: isDark ? "rgba(59,130,246,0.35)" : "#93C5FD", backgroundColor: isDark ? "rgba(59,130,246,0.03)" : "#F8FAFC" }]}>
+                  <View style={styles.cloudIconWrapper}>
+                    <Text style={styles.cloudIconText}>☁️</Text>
+                  </View>
+                  <Text style={[styles.proofUploadTitle, { color: colors.textDark }]}>
+                    Upload your receipt or take a photo
+                  </Text>
+                  <Text style={[styles.proofUploadHighlight, { color: "#2563EB" }]}>
+                    Instant auto-fill for Amount, Method, and Reference Number
+                  </Text>
+                  <Text style={[styles.proofUploadHint, { color: colors.textMuted }]}>
+                    Supports PNG, JPG, JPEG, WEBP (up to 5MB)
+                  </Text>
+                  <View style={styles.proofBtnRow}>
+                    <TouchableOpacity
+                      style={styles.proofBtn}
+                      activeOpacity={0.7}
+                      onPress={handleCameraCapture}
+                    >
+                      <View style={styles.proofBtnInner}>
+                        <Image source={ICONS.camera} style={styles.proofBtnIcon} resizeMode="contain" />
+                        <Text style={styles.proofBtnText}>Camera</Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.proofBtn}
+                      activeOpacity={0.7}
+                      onPress={handleGalleryPick}
+                    >
+                      <View style={styles.proofBtnInner}>
+                        <Image source={ICONS.document} style={styles.proofBtnIcon} resizeMode="contain" />
+                        <Text style={styles.proofBtnText}>Gallery</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {fieldErrors.proof && paymentApprovalMethod === "manual" && selectedPayment !== "cash" && (
+                <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: 4, marginBottom: 8 }}>{fieldErrors.proof}</Text>
+              )}
+            </View>
+          )}
+
+          {/* ── DONATION DETAILS Section Header ── */}
+          <View style={styles.detailsHeaderRow}>
+            <Text style={[styles.detailsSectionTitle, { color: colors.textDark }]}>DONATION DETAILS</Text>
+            <Text style={[styles.detailsSectionSubtitle, { color: colors.textMuted }]}>All fields remain editable</Text>
+          </View>
+
 
           {/* Donation Amount */}
           <Text style={[styles.inputLabel, { color: colors.textDark }]}>Donation Amount</Text>
@@ -1492,8 +1741,28 @@ export default function DonationsScreen({ navigation, route }) {
                   </View>
                 )}
               </View>
+
+              {/* How to give in 3 simple steps */}
+              <View style={[styles.howToGiveCard, { backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#F0F7FF', borderColor: isDark ? 'rgba(59,130,246,0.2)' : '#DBEAFE' }]}>
+                <View style={styles.howToGiveHeader}>
+                  <Text style={styles.howToGiveInfoIcon}>ℹ️</Text>
+                  <Text style={[styles.howToGiveTitle, { color: colors.textDark }]}>How to give in 3 simple steps</Text>
+                </View>
+                <View style={styles.howToGiveSteps}>
+                  <Text style={[styles.howToGiveStepText, { color: colors.textMuted }]}>
+                    <Text style={{ fontWeight: '700', color: colors.textDark }}>1.</Text> Transfer using the official QR code or account details above.
+                  </Text>
+                  <Text style={[styles.howToGiveStepText, { color: colors.textMuted }]}>
+                    <Text style={{ fontWeight: '700', color: colors.textDark }}>2.</Text> Save or take a screenshot of your transaction receipt.
+                  </Text>
+                  <Text style={[styles.howToGiveStepText, { color: colors.textMuted }]}>
+                    <Text style={{ fontWeight: '700', color: colors.textDark }}>3.</Text> Upload the receipt above to auto-fill your donation form.
+                  </Text>
+                </View>
+              </View>
             </View>
           )}
+
 
           {/* Sub-method & Account details for Manual Approval */}
           {paymentApprovalMethod === "manual" && selectedPayment !== "cash" && (
@@ -1742,159 +2011,7 @@ export default function DonationsScreen({ navigation, route }) {
             </View>
           )}
 
-          {/* Payment Gateway Static Views (Deprecated/Hidden for new flow) */}
-          {paymentApprovalMethod === "manual" && selectedPayment !== "cash" && (
-            <View style={[styles.gatewayBox, { marginTop: 12 }]}>
-              <Text style={styles.gatewayNote}>Please save your receipt or deposit slip and upload it below for verification.</Text>
-            </View>
-          )}
 
-          {/* Proof of Payment Upload */}
-          {paymentApprovalMethod === "manual" && selectedPayment !== "cash" && (
-            <View>
-              <Text style={[styles.inputLabel, { color: colors.textDark }]}>Proof of Payment *</Text>
-              {proofImage ? (
-                <View style={styles.proofPreviewContainer}>
-                  <Image source={{ uri: proofImage.uri }} style={styles.proofPreview} resizeMode="cover" />
-                  <TouchableOpacity
-                    style={styles.proofRemoveBtn}
-                    onPress={() => { setProofImage(null); setReceiptVerification(null); }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.proofRemoveText}>✕</Text>
-                  </TouchableOpacity>
-                  {receiptVerification?.verifying ? (
-                    <View style={[styles.proofAttachedBadge, { backgroundColor: "rgba(245,166,35,0.92)" }]}>
-                      <ActivityIndicator size="small" color="#fff" style={{ marginRight: 6 }} />
-                      <Text style={styles.proofAttachedText}>Verifying receipt...</Text>
-                    </View>
-                  ) : receiptVerification?.valid ? (
-                    <View style={[styles.proofAttachedBadge, { backgroundColor: "rgba(52,199,89,0.92)" }]}>
-                      <Text style={styles.proofAttachedText}>✓ Verified {receiptVerification.provider || "Receipt"}</Text>
-                    </View>
-                  ) : receiptVerification && !receiptVerification.valid ? (
-                    <View style={[styles.proofAttachedBadge, { backgroundColor: "rgba(231,76,60,0.92)" }]}>
-                      <Text style={styles.proofAttachedText}>✕ Invalid Receipt</Text>
-                    </View>
-                  ) : (
-                    <View style={styles.proofAttachedBadge}>
-                      <Text style={styles.proofAttachedText}>✓ Attached</Text>
-                    </View>
-                  )}
-                  {receiptVerification && !receiptVerification.verifying && !receiptVerification.valid && (
-                    <View style={{ position: "absolute", bottom: 32, left: 8, right: 8 }}>
-                      <Text style={{ color: "#fff", fontSize: 11, textAlign: "center", fontWeight: "600" }}>{receiptVerification.reason}</Text>
-                    </View>
-                  )}
-                </View>
-              ) : (
-                <View style={[styles.proofUploadBox, { borderColor: colors.cardBorder }]}>
-                  <Image source={ICONS.camera} style={styles.proofUploadIconImg} resizeMode="contain" />
-                  <Text style={[styles.proofUploadTitle, { color: colors.textDark }]}>Upload Payment Screenshot</Text>
-                  <Text style={[styles.proofUploadHint, { color: colors.textMuted }]}>Take a photo or choose from gallery</Text>
-                  <View style={styles.proofBtnRow}>
-                    <TouchableOpacity
-                      style={styles.proofBtn}
-                      activeOpacity={0.7}
-                      onPress={async () => {
-                        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-                        if (status !== "granted") {
-                          setFormError("Camera permission is required to take a photo.");
-                          return;
-                        }
-                        const result = await ImagePicker.launchCameraAsync({
-                          quality: 0.8,
-                          allowsEditing: false,
-                          base64: true,
-                        });
-                        if (!result.canceled && result.assets?.[0]) {
-                          const asset = result.assets[0];
-                          let base64 = asset.base64;
-                          if (!base64 && asset.uri) {
-                            try {
-                              base64 = await FileSystem.readAsStringAsync(asset.uri, {
-                                encoding: "base64",
-                              });
-                            } catch (fsErr) {
-                              console.log("Could not read donation photo as base64 fallback:", fsErr);
-                            }
-                          }
-                          setProofImage({ uri: asset.uri, base64: base64 || "" });
-                          setFormError("");
-                          // Auto-verify receipt via Gemini Vision
-                          if (base64) {
-                            setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
-                            verifyReceiptImage(base64, "image/jpeg", selectedPayment).then(verdict => {
-                              setReceiptVerification({ ...verdict, verifying: false });
-                              if (!verdict.valid) setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");
-                            }).catch(() => {
-                              setReceiptVerification({ valid: true, verifying: false, provider: "Receipt", fallback: true, reason: "Receipt uploaded (pending manual admin verification)." });
-                            });
-                          }
-                        }
-                      }}
-                    >
-                      <View style={styles.proofBtnInner}>
-                        <Image source={ICONS.camera} style={styles.proofBtnIcon} resizeMode="contain" />
-                        <Text style={styles.proofBtnText}>Camera</Text>
-                      </View>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.proofBtn}
-                      activeOpacity={0.7}
-                      onPress={async () => {
-                        try {
-                          const perm = await ImagePicker.getMediaLibraryPermissionsAsync();
-                          if (!perm.granted && perm.canAskAgain) {
-                            await ImagePicker.requestMediaLibraryPermissionsAsync();
-                          }
-                        } catch (_) {}
-                        const result = await ImagePicker.launchImageLibraryAsync({
-                          quality: 0.8,
-                          allowsEditing: false,
-                          mediaTypes: ["images"],
-                          base64: true,
-                        });
-                        if (!result.canceled && result.assets?.[0]) {
-                          const asset = result.assets[0];
-                          let base64 = asset.base64;
-                          if (!base64 && asset.uri) {
-                            try {
-                              base64 = await FileSystem.readAsStringAsync(asset.uri, {
-                                encoding: "base64",
-                              });
-                            } catch (fsErr) {
-                              console.log("Could not read donation receipt as base64 fallback:", fsErr);
-                            }
-                          }
-                          setProofImage({ uri: asset.uri, base64: base64 || "" });
-                          setFormError("");
-                          // Auto-verify receipt via Gemini Vision
-                          if (base64) {
-                            setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
-                            verifyReceiptImage(base64, "image/jpeg", selectedPayment).then(verdict => {
-                              setReceiptVerification({ ...verdict, verifying: false });
-                              if (!verdict.valid) setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");
-                            }).catch(() => {
-                              setReceiptVerification({ valid: true, verifying: false, provider: "Receipt", fallback: true, reason: "Receipt uploaded (pending manual admin verification)." });
-                            });
-                          }
-                        }
-                      }}
-                    >
-                      <View style={styles.proofBtnInner}>
-                        <Image source={ICONS.document} style={styles.proofBtnIcon} resizeMode="contain" />
-                        <Text style={styles.proofBtnText}>Gallery</Text>
-                      </View>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-            </View>
-          )}
-          {fieldErrors.proof && paymentApprovalMethod === "manual" && selectedPayment !== "cash" && (
-            <Text style={{ color: "#E74C3C", fontSize: fs(12), fontWeight: "600", marginTop: 4, marginBottom: 4 }}>{fieldErrors.proof}</Text>
-          )}
 
           {/* Recurring Checkbox */}
           <TouchableOpacity
@@ -3356,33 +3473,75 @@ const getStyles = (C) => StyleSheet.create({
   donateBtnIcon: { width: s(20), height: s(20), tintColor: "#FFF" },
   donateBtnText: { fontSize: 15.5, fontWeight: "700", color: "#FFF" },
 
-  // Proof of Payment
+  // Proof of Payment & AI Auto-Fill
+  formSubtitle: {
+    fontSize: fs(12.5),
+    color: C.textMuted,
+    marginTop: s(2),
+    lineHeight: fs(17),
+  },
+  proofSection: {
+    marginBottom: s(16),
+  },
+  proofHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: s(8),
+  },
+  aiBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(46,107,240,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(46,107,240,0.3)",
+    paddingHorizontal: s(10),
+    paddingVertical: s(4),
+    borderRadius: 999,
+  },
+  aiBadgeText: {
+    fontSize: fs(11),
+    fontWeight: "700",
+    color: "#1D4ED8",
+    letterSpacing: 0.3,
+  },
   proofUploadBox: {
-    borderWidth: 2,
-    borderColor: "#D1D5DB",
+    borderWidth: 1.5,
     borderStyle: "dashed",
     borderRadius: s(14),
-    padding: s(24),
+    padding: s(20),
     alignItems: "center",
-    marginBottom: 18,
-    backgroundColor: "rgba(0,0,0,0.015)",
+    marginBottom: s(8),
   },
-  proofUploadIconImg: {
-    width: 32,
-    height: 32,
-    tintColor: C.textMuted,
-    marginBottom: s(10),
+  cloudIconWrapper: {
+    width: s(46),
+    height: s(46),
+    borderRadius: s(23),
+    backgroundColor: "rgba(59,130,246,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: s(8),
+  },
+  cloudIconText: {
+    fontSize: fs(22),
   },
   proofUploadTitle: {
-    fontSize: fs(14),
+    fontSize: fs(13.5),
     fontWeight: "700",
-    color: C.textDark,
+    marginBottom: s(3),
+    textAlign: "center",
+  },
+  proofUploadHighlight: {
+    fontSize: fs(12),
+    fontWeight: "700",
+    textAlign: "center",
     marginBottom: s(4),
+    paddingHorizontal: s(8),
   },
   proofUploadHint: {
-    fontSize: fs(12),
-    color: C.textMuted,
-    marginBottom: s(14),
+    fontSize: fs(11),
+    marginBottom: s(12),
+    textAlign: "center",
   },
   proofBtnRow: {
     flexDirection: "row",
@@ -3391,7 +3550,7 @@ const getStyles = (C) => StyleSheet.create({
   proofBtn: {
     backgroundColor: C.blueLight,
     paddingHorizontal: s(16),
-    paddingVertical: s(10),
+    paddingVertical: s(9),
     borderRadius: s(10),
     borderWidth: 1,
     borderColor: C.blue,
@@ -3413,7 +3572,7 @@ const getStyles = (C) => StyleSheet.create({
   },
   proofPreviewContainer: {
     position: "relative",
-    marginBottom: 18,
+    marginBottom: s(10),
     borderRadius: s(14),
     overflow: "hidden",
     borderWidth: 1,
@@ -3431,9 +3590,10 @@ const getStyles = (C) => StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: s(14),
-    backgroundColor: "rgba(0,0,0,0.6)",
+    backgroundColor: "rgba(0,0,0,0.65)",
     alignItems: "center",
     justifyContent: "center",
+    zIndex: 10,
   },
   proofRemoveText: {
     color: "#FFF",
@@ -3444,7 +3604,7 @@ const getStyles = (C) => StyleSheet.create({
     position: "absolute",
     bottom: 8,
     left: 8,
-    backgroundColor: "rgba(52,199,89,0.9)",
+    backgroundColor: "rgba(52,199,89,0.92)",
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: s(8),
@@ -3455,6 +3615,80 @@ const getStyles = (C) => StyleSheet.create({
     fontSize: fs(11),
     fontWeight: "700",
     color: "#FFF",
+  },
+  proofErrorBanner: {
+    position: "absolute",
+    bottom: 34,
+    left: 8,
+    right: 8,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: s(6),
+  },
+  proofErrorBannerText: {
+    color: "#FFF",
+    fontSize: fs(11),
+    textAlign: "center",
+    fontWeight: "600",
+  },
+  autoFillSuccessPill: {
+    marginTop: s(8),
+    paddingHorizontal: s(12),
+    paddingVertical: s(8),
+    borderRadius: s(8),
+    borderWidth: 1,
+  },
+  autoFillSuccessText: {
+    fontSize: fs(11.5),
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  detailsHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: s(6),
+    marginBottom: s(12),
+    paddingBottom: s(6),
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0,0,0,0.06)",
+  },
+  detailsSectionTitle: {
+    fontSize: fs(12),
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+  detailsSectionSubtitle: {
+    fontSize: fs(11.5),
+    fontStyle: "italic",
+  },
+  howToGiveCard: {
+    marginTop: s(12),
+    borderRadius: s(12),
+    borderWidth: 1,
+    padding: s(12),
+  },
+  howToGiveHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: s(6),
+    gap: s(6),
+  },
+  howToGiveInfoIcon: {
+    fontSize: fs(14),
+  },
+  howToGiveTitle: {
+    fontSize: fs(13),
+    fontWeight: "700",
+  },
+  howToGiveSteps: {
+    gap: s(4),
+    paddingLeft: s(4),
+  },
+  howToGiveStepText: {
+    fontSize: fs(11.5),
+    lineHeight: fs(16),
   },
 
   // Donation History

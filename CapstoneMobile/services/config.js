@@ -97,4 +97,11 @@ export const API_CONFIG = {
   },
 };
 
+export const GEMINI_CONFIG = {
+  API_KEY: "AIzaSyDZ7j0NX1sTtS-HQuD7PpmUSPIkB-2-8vE",
+  PRIMARY_MODEL: "gemini-2.5-flash",
+  FALLBACK_MODELS: ["gemini-flash-latest", "gemini-2.5-flash-lite"],
+};
+
 export const DEV_MODE = __DEV__;
+

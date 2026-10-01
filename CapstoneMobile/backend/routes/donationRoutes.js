@@ -7,6 +7,7 @@ const router = express.Router();
 
 // Receipt verification (must be before general /donations POST)
 router.post("/donations/verify-receipt", authMiddleware, verifyReceipt);
+router.post("/donations/validate-receipt", authMiddleware, verifyReceipt);
 
 // Acknowledged donations endpoint (requires auth) — matches web's /donations/acknowledged
 router.get("/donations/acknowledged", authMiddleware, getAcknowledgedDonations);
