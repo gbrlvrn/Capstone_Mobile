@@ -1,0 +1,42 @@
+# .easignore - Files excluded from EAS Build upload
+# Only client mobile code is needed by EAS Build.
+
+# Dependencies
+node_modules/
+
+# Backend (deployed separately on Render, not needed for mobile app)
+backend/
+dev-scripts/
+
+# Expo & Web builds
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native folders (EAS manages native project generation)
+/ios
+/android
+
+# Certificates & Keys
+*.jks
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+dist-cert.p12
+
+# Environment variables
+.env*
+
+# IDE & OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+npm-debug.*
+yarn-debug.*
+yarn-error.*
