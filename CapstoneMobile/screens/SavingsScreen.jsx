@@ -450,7 +450,7 @@ export default function SavingsScreen({ navigation, route }) {
   useEffect(() => {
     const handleDeepLink = (event) => {
       if (event.url && event.url.includes("puac://payment/success?type=savings")) {
-        setSuccessModalOpen(true);
+        showAlert("Success", "Savings payment received successfully!");
         loadSavingsData();
       } else if (event.url && event.url.includes("puac://payment/cancel")) {
         setFormError("Payment was canceled.");

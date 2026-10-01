@@ -25,7 +25,7 @@ import FloatingNavBar from "../components/FloatingNavBar";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { getPublicSettings, getVerificationStatus, createLoan, getLoans, submitLoanPayment, getMyLoanPayments, cancelLoan, getLoanSchedule, verifyIdImage, verifyReceiptImage, verifyDocumentImage, getSavingsData } from "../services/AuthService";
+import { getPublicSettings, getVerificationStatus, createLoan, getLoans, submitLoanPayment, getMyLoanPayments, cancelLoan, getLoanSchedule, verifyIdImage, verifyReceiptImage, verifyDocumentImage, getSavingsData, acceptLoan, updateLoanStatus } from "../services/AuthService";
 import { addNotification } from "./NotificationsScreen";
 import LoanProgressCircle from "../components/LoanProgressCircle";
 import EmptyState from "../components/EmptyState";

@@ -520,10 +520,8 @@ export default function HomeScreen({ navigation, route }) {
   );
 
   // Check for Unread Notifications & Load Recent Activity
-  useFocusEffect(
-    useCallback(() => {
-      const checkUnreadAndActivity = async () => {
-        if (!userEmail) return;
+  const checkUnreadAndActivity = useCallback(async () => {
+    if (!userEmail) return;
         
         try {
           const fetchedAnns = await getAnnouncements();
@@ -722,9 +720,12 @@ export default function HomeScreen({ navigation, route }) {
             setRecentActivity([]);
           }
         }
-      };
+  }, [userEmail, C]);
+
+  useFocusEffect(
+    useCallback(() => {
       checkUnreadAndActivity();
-    }, [userEmail])
+    }, [checkUnreadAndActivity])
   );
 
   // Load live stats from API (not just local cache)

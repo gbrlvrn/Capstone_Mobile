@@ -920,6 +920,19 @@ export function respondToLoanTerms(loanId, accepted) {
   return webPut(`/loans/${loanId}/respond-terms`, { accepted }, true);
 }
 
+export function acceptLoan(loanId) {
+  return respondToLoanTerms(loanId, true);
+}
+
+export function updateLoanStatus(loanId, status, note = "") {
+  if (status === "Rejected" || status === "Declined") {
+    return respondToLoanTerms(loanId, false);
+  } else if (status === "Active" || status === "Approved" || status === "Accepted") {
+    return respondToLoanTerms(loanId, true);
+  }
+  return webPut(`/loans/${loanId}/status`, { status, note }, true);
+}
+
 export async function verifyIdImage(base64, mimeType = "image/jpeg") {
   try {
     const rawBase64 = base64.replace(/^data:image\/\w+;base64,/, "");
