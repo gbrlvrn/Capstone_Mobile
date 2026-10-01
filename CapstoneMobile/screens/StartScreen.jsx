@@ -23,7 +23,6 @@ const LOGO = require('../assets/puac_logo.png');
 
 export default function StartScreen({ navigation }) {
   const { colors } = useTheme();
-  const styles = useMemo(() => getStyles(), []);
 
   const [fontsLoaded] = useFonts({
     Raleway_300Light,
@@ -32,6 +31,8 @@ export default function StartScreen({ navigation }) {
     Raleway_700Bold,
     Raleway_800ExtraBold,
   });
+
+  const styles = useMemo(() => getStyles(fontsLoaded), [fontsLoaded]);
 
   const logoScale   = useRef(new Animated.Value(0.7)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
@@ -126,7 +127,7 @@ export default function StartScreen({ navigation }) {
   );
 }
 
-const getStyles = () => StyleSheet.create({
+const getStyles = (fontsLoaded = false) => StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#0D1F45',
@@ -194,7 +195,7 @@ const getStyles = () => StyleSheet.create({
   },
   taglineText: {
     fontSize: fs(10),
-    fontFamily: 'Raleway_500Medium',
+    ...(fontsLoaded ? { fontFamily: 'Raleway_500Medium' } : { fontWeight: '600' }),
     color: '#F0C040',
     letterSpacing: 2.5,
     textTransform: 'uppercase',
@@ -208,15 +209,13 @@ const getStyles = () => StyleSheet.create({
   },
   wordmarkWhite: {
     fontSize: fs(52),
-    fontWeight: '800',
-    fontFamily: 'Raleway_700Bold',
+    ...(fontsLoaded ? { fontFamily: 'Raleway_700Bold' } : { fontWeight: '800' }),
     color: '#FFFFFF',
     letterSpacing: -1,
   },
   wordmarkGold: {
     fontSize: fs(52),
-    fontWeight: '800',
-    fontFamily: 'Raleway_700Bold',
+    ...(fontsLoaded ? { fontFamily: 'Raleway_700Bold' } : { fontWeight: '800' }),
     color: '#D4A843',
     letterSpacing: -1,
   },
@@ -235,7 +234,7 @@ const getStyles = () => StyleSheet.create({
   },
   heroOrg: {
     fontSize: fs(13),
-    fontFamily: 'Raleway_400Regular',
+    ...(fontsLoaded ? { fontFamily: 'Raleway_400Regular' } : { fontWeight: '500' }),
     color: 'rgba(255,255,255,0.75)',
     letterSpacing: 0.4,
   },

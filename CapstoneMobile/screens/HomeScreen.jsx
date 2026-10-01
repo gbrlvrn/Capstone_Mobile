@@ -25,7 +25,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useTheme } from "../components/ThemeContext";
 import OfflineBanner from "../components/OfflineBanner";
 import { API_CONFIG } from "../services/config";
-import { fmtDateMonthDay, fmtDateShort, fmtDayMonth, safeFmtNum } from "../services/dateUtils";
+import { fmtDateMonthDay, fmtDateShort, fmtDayMonth, safeFmtNum, parseDateSafe } from "../services/dateUtils";
 
 const getImageUrl = (url) => {
   if (!url) return null;
@@ -248,6 +248,7 @@ export default function HomeScreen({ navigation, route }) {
   const donorScrollPaused = useRef(false);
   const donorContentWidth = useRef(0);
   const donorViewWidth = useRef(0);
+  const lastStatsFetchRef = useRef(0);
 
   const displayAttendanceCount = useMemo(() => {
     const now = new Date();
@@ -729,8 +730,14 @@ export default function HomeScreen({ navigation, route }) {
   // Load live stats from API (not just local cache)
   useFocusEffect(
     useCallback(() => {
-      const loadStats = async () => {
+      const loadStats = async (force = false) => {
         if (!userEmail) return;
+        // Throttle rapid re-focus fetches (mirroring SWR's 30s deduping on Web)
+        const now = Date.now();
+        if (!force && now - lastStatsFetchRef.current < 25000) {
+          return;
+        }
+        lastStatsFetchRef.current = now;
         try {
           // Fetch ALL data from backend in parallel
           const [loansResult, donationResult, savingsResult, attendanceResult] = await Promise.allSettled([
@@ -741,38 +748,70 @@ export default function HomeScreen({ navigation, route }) {
           ]);
 
           // ── Process Loans (from API, not just cache) ──────────────
-          if (loansResult.status === "fulfilled") {
-            const serverLoans = loansResult.value?.loans || [];
-            const active = serverLoans.filter(l => l.status?.toLowerCase() === "active");
-            setActiveLoans(active.length);
+          const resolveUpcomingLoan = (loanList) => {
+            if (!Array.isArray(loanList)) return { count: 0, balance: 0, nearestDateStr: "" };
+
+            const active = loanList.filter(l => {
+              const st = (l.status || "").toLowerCase().trim();
+              if (!["active", "approved", "member_accepted", "disbursed"].includes(st)) return false;
+              const rem = parseFloat(l.remainingBalance?.toString().replace(/[^0-9.-]+/g, "")) || 0;
+              if (l.remainingBalance != null && rem <= 0) return false;
+              if (l.termMonths && l.paidMonths >= l.termMonths) return false;
+              return true;
+            });
 
             let balance = 0;
-            let nearest = "";
+            let nearestDate = null;
+            let nearestDateStr = "";
+
             active.forEach(l => {
-              balance += parseFloat(l.remainingBalance?.toString().replace(/[^0-9.-]+/g, "")) || 0;
-              if (l.nextPayment && (!nearest || l.nextPayment < nearest)) {
-                nearest = l.nextPayment;
+              const rem = parseFloat(l.remainingBalance?.toString().replace(/[^0-9.-]+/g, "")) || 0;
+              balance += rem;
+
+              // Check server fields: nextPaymentDate, nextDueDate, dueDate, nextPayment
+              let rawDue = l.nextPaymentDate || l.nextDueDate || l.dueDate || l.nextPayment;
+              let d = parseDateSafe(rawDue);
+              // Fallback calculation: baseDate + (paidMonths + 1) months
+              if (!d) {
+                const baseDateStr = l.disbursementDate || l.disbursedDate || l.approvedDate || l.createdAt || l.appliedDate || l.dateApplied;
+                const base = parseDateSafe(baseDateStr);
+                if (base) {
+                  const due = new Date(base);
+                  due.setMonth(base.getMonth() + ((l.paidMonths || 0) + 1));
+                  d = due;
+                }
+              }
+
+              if (d) {
+                if (!nearestDate || d.getTime() < nearestDate.getTime()) {
+                  nearestDate = d;
+                  nearestDateStr = fmtDateShort(d);
+                }
               }
             });
+
+            return { count: active.length, balance, nearestDateStr };
+          };
+
+          if (loansResult.status === "fulfilled") {
+            const val = loansResult.value;
+            const serverLoans = Array.isArray(val) ? val : (val?.loans || val?.data || []);
+            const { count, balance, nearestDateStr } = resolveUpcomingLoan(serverLoans);
+            setActiveLoans(count);
             setRemainingBalance(balance);
-            setNextPaymentDate(nearest);
+            setNextPaymentDate(nearestDateStr);
             // Cache for offline use
             await AsyncStorage.setItem(`faithly_loans_${userEmail}`, JSON.stringify(serverLoans));
           } else {
             // Fallback to cache if API fails
             const savedLoans = await AsyncStorage.getItem(`faithly_loans_${userEmail}`);
             if (savedLoans) {
-              const loans = JSON.parse(savedLoans);
-              const active = loans.filter(l => l.status?.toLowerCase() === "active");
-              setActiveLoans(active.length);
-              let balance = 0;
-              let nearest = "";
-              active.forEach(l => {
-                balance += parseFloat(l.remainingBalance?.toString().replace(/[^0-9.-]+/g, "")) || 0;
-                if (l.nextPayment && (!nearest || l.nextPayment < nearest)) nearest = l.nextPayment;
-              });
+              const parsed = JSON.parse(savedLoans);
+              const loans = Array.isArray(parsed) ? parsed : (parsed?.loans || parsed?.data || []);
+              const { count, balance, nearestDateStr } = resolveUpcomingLoan(loans);
+              setActiveLoans(count);
               setRemainingBalance(balance);
-              setNextPaymentDate(nearest);
+              setNextPaymentDate(nearestDateStr);
             } else {
               setActiveLoans(0);
               setRemainingBalance(0);
@@ -823,20 +862,26 @@ export default function HomeScreen({ navigation, route }) {
             }
           }
 
-          // ── Process Savings (use goals' savedAmount, not transactions) ──
+          // ── Process Savings (matches Web backend aggregated stats) ──
           if (savingsResult.status === "fulfilled") {
             const sv = savingsResult.value;
-            // stats.totalSaved is the definitive total from the backend
-            // Fallback: sum each goal's savedAmount
+            // stats.totalSavings is the definitive total from the backend (matches Web)
             let total = 0;
-            if (sv?.stats?.totalSaved != null) {
-              total = sv.stats.totalSaved;
+            const backendTotalSavings = sv?.stats?.totalSavings ?? sv?.stats?.totalSaved;
+            if (backendTotalSavings != null) {
+              total = parseFloat(backendTotalSavings) || 0;
             } else {
               const goals = sv?.goals || [];
               goals.forEach(g => { total += parseFloat(g.amountSaved || g.savedAmount || 0); });
             }
             setTotalSavings(total);
             await AsyncStorage.setItem(`faithly_savings_total_${userEmail}`, String(total));
+            if (sv?.stats) {
+              await AsyncStorage.setItem(`faithly_savings_stats_${userEmail}`, JSON.stringify(sv.stats));
+            }
+            if (Array.isArray(sv?.savings) && sv.savings.length > 0) {
+              await AsyncStorage.setItem(`faithly_savings_${userEmail}`, JSON.stringify(sv.savings));
+            }
           } else {
             console.log("Failed to load savings from server, using cache", savingsResult.reason);
             const savedTotal = await AsyncStorage.getItem(`faithly_savings_total_${userEmail}`);
@@ -844,12 +889,15 @@ export default function HomeScreen({ navigation, route }) {
               setTotalSavings(parseFloat(savedTotal) || 0);
             }
           }
+
+          // Refresh recent activity feed with latest data
+          checkUnreadAndActivity();
         } catch (e) {
           console.log("Stats load error:", e);
         }
       };
       loadStats();
-    }, [userEmail])
+    }, [userEmail, checkUnreadAndActivity])
   );
 
   // Fetch acknowledged donations for donor wall
@@ -1189,16 +1237,11 @@ export default function HomeScreen({ navigation, route }) {
                   <View style={styles.loanHubFooter}>
                     <Text style={styles.loanHubFooterText} numberOfLines={1}>
                       Next Payment Due: <Text style={{ fontWeight: "700", color: "#FFF" }}>
-                        {(() => {
-                          if (!nextPaymentDate) return "No upcoming payments";
-                          const d = new Date(nextPaymentDate);
-                          if (isNaN(d.getTime())) return nextPaymentDate; // Fallback to raw string if invalid
-                          return fmtDateShort(d);
-                        })()}
+                        {nextPaymentDate || "No upcoming payments"}
                       </Text>
-                      {nextPaymentDate && (
-                        <Text style={{ fontSize: fs(13), color: "rgba(255,255,255,0.7)" }}> | Status: <Text style={{ color: "#FFF", fontWeight: "700" }}>Pending</Text></Text>
-                      )}
+                      {nextPaymentDate ? (
+                        <Text style={{ fontSize: fs(13), color: "rgba(255,255,255,0.7)" }}> | Status: <Text style={{ color: "#FFF", fontWeight: "700" }}>Active</Text></Text>
+                      ) : null}
                     </Text>
                   </View>
                 </TouchableOpacity>

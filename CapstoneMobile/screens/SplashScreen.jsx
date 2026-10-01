@@ -103,6 +103,7 @@ export default function SplashScreen({ navigation }) {
         }
       } catch (err) {
         console.log("Session check error:", err);
+        try { await AsyncStorage.removeItem(SESSION_KEY); } catch {}
       }
 
       // No valid session → StartScreen

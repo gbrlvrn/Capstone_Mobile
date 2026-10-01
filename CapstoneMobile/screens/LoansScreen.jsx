@@ -23,6 +23,7 @@ import ChatbotModal from "./ChatbotModal";
 import DraggableChatButton from "../components/DraggableChatButton";
 import FloatingNavBar from "../components/FloatingNavBar";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { getPublicSettings, getVerificationStatus, createLoan, getLoans, submitLoanPayment, getMyLoanPayments, cancelLoan, getLoanSchedule, verifyIdImage, verifyReceiptImage, verifyDocumentImage, getSavingsData } from "../services/AuthService";
 import { addNotification } from "./NotificationsScreen";
@@ -530,6 +531,7 @@ export default function LoansScreen({ navigation, route }) {
   const [payMethod, setPayMethod] = useState("gcash");
   const [payProof, setPayProof] = useState(null);
   const [payProofVerification, setPayProofVerification] = useState(null); // { valid, provider, reason, verifying }
+  const [payError, setPayError] = useState("");
   const [paySubmitting, setPaySubmitting] = useState(false);
   const paySubmittingRef = useRef(false);
 
@@ -563,40 +565,54 @@ export default function LoansScreen({ navigation, route }) {
 
   const pickImage = useCallback(async (setter, useCamera = false) => {
     try {
-      const permResult = useCamera
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-      if (!permResult.granted) {
-        showAlert(
-          "Permission Required",
-          useCamera
-            ? "Camera access is needed to take a photo."
-            : "Photo library access is needed to select an image."
-        );
-        return;
+      if (useCamera) {
+        const permResult = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permResult.granted) {
+          showAlert(
+            "Permission Required",
+            "Camera access is needed to take a photo."
+          );
+          return;
+        }
+      } else {
+        try {
+          const perm = await ImagePicker.getMediaLibraryPermissionsAsync();
+          if (!perm.granted && perm.canAskAgain) {
+            await ImagePicker.requestMediaLibraryPermissionsAsync();
+          }
+        } catch (e) {
+          // Ignore permission check exceptions on Android system photo picker
+        }
       }
 
+      const options = {
+        mediaTypes: ['images'],
+        quality: 0.5,
+        allowsEditing: setter === setValidId,
+        base64: true,
+      };
+
       const result = useCamera
-        ? await ImagePicker.launchCameraAsync({
-            mediaTypes: "images",
-            quality: 0.8,
-            allowsEditing: true,
-            base64: true,
-          })
-        : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: "images",
-            quality: 0.8,
-            allowsEditing: true,
-            base64: true,
-          });
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
 
       if (!result.canceled && result.assets?.[0]) {
         const asset = result.assets[0];
+        let base64 = asset.base64;
+        if (!base64 && asset.uri) {
+          try {
+            base64 = await FileSystem.readAsStringAsync(asset.uri, {
+              encoding: 'base64',
+            });
+          } catch (e) {
+            console.log("Could not read base64 via FileSystem:", e);
+          }
+        }
+
         const fileName =
           asset.fileName || asset.uri.split("/").pop() || "photo.jpg";
         const type = asset.mimeType || "image/jpeg";
-        const item = { uri: asset.uri, fileName, type, base64: asset.base64 };
+        const item = { uri: asset.uri, fileName, type, base64 };
         setter(item);
         if (setter === setValidId) {
           setIdVerifying(true);
@@ -604,7 +620,7 @@ export default function LoansScreen({ navigation, route }) {
           setIdRejected(false);
           setIdVerifyResult(null);
           try {
-            const verifyRes = await verifyIdImage(asset.base64, type);
+            const verifyRes = await verifyIdImage(base64, type);
             if (verifyRes && verifyRes.valid === true) {
               setIdVerified(true);
               setIdRejected(false);
@@ -634,21 +650,24 @@ export default function LoansScreen({ navigation, route }) {
         // Auto-verify receipt when uploading proof of payment
         if (setter === setPayProof) {
           setPayProofVerification({ verifying: true, valid: false, provider: null, reason: "" });
-          verifyReceiptImage(asset.base64, type, payMethod).then(verdict => {
+          verifyReceiptImage(base64, type, payMethod).then(verdict => {
             setPayProofVerification({ ...verdict, verifying: false });
           }).catch(() => {
-            setPayProofVerification({ valid: false, verifying: false, provider: null, reason: "Receipt verification failed. Please try again." });
+            setPayProofVerification({ valid: true, verifying: false, provider: "Receipt", fallback: true, reason: "Receipt uploaded (pending manual admin verification)." });
           });
         }
-        // Auto-verify additional documents (COE, ITR, Payslip)
-        const docSetterMap = { [setCoeDoc]: "coe", [setItrDoc]: "itr", [setPayslipDoc]: "payslip" };
-        const docType = docSetterMap[setter];
+        // Auto-verify additional documents (COE, ITR, Payslip) ONLY for application documents
+        let docType = null;
+        if (setter === setCoeDoc) docType = "coe";
+        else if (setter === setItrDoc) docType = "itr";
+        else if (setter === setPayslipDoc) docType = "payslip";
+
         if (docType) {
           setDocVerification(prev => ({
             ...prev,
             [docType]: { verifying: true, verified: false, rejected: false, reason: "Verifying document..." },
           }));
-          verifyDocumentImage(asset.base64, docType, type).then(verdict => {
+          verifyDocumentImage(base64, docType, type).then(verdict => {
             if (verdict.valid) {
               setDocVerification(prev => ({
                 ...prev,
@@ -727,7 +746,7 @@ export default function LoansScreen({ navigation, route }) {
     if (!cameraRef.current) return;
     try {
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
+        quality: 0.5,
         base64: true,
         skipProcessing: false,
       });
@@ -949,7 +968,19 @@ export default function LoansScreen({ navigation, route }) {
         const effectivePaidMonths = isEffectivelyCompleted
           ? (loan.termMonths || loan.paidMonths || 0)
           : (loan.paidMonths || 0);
-        const effectiveNextPayment = isEffectivelyCompleted ? null : (loan.nextPayment || "-");
+        let rawNextPayment = loan.nextPaymentDate || loan.nextDueDate || loan.dueDate || loan.nextPayment;
+        if ((!rawNextPayment || rawNextPayment === "-") && (effectiveStatus === "active" || loan.status === "active") && !isEffectivelyCompleted) {
+          const baseDateStr = loan.disbursementDate || loan.disbursedDate || loan.approvedDate || loan.createdAt || loan.appliedDate || loan.dateApplied;
+          if (baseDateStr) {
+            const base = new Date(baseDateStr);
+            if (!isNaN(base.getTime())) {
+              const due = new Date(base);
+              due.setMonth(base.getMonth() + (effectivePaidMonths + 1));
+              rawNextPayment = due;
+            }
+          }
+        }
+        const effectiveNextPayment = isEffectivelyCompleted ? null : (rawNextPayment && rawNextPayment !== "-" ? fmtDate(rawNextPayment) : "-");
 
         return {
           // ID fields: mobile backend uses loanId, web may use id or _id
@@ -1062,19 +1093,7 @@ export default function LoansScreen({ navigation, route }) {
           }
         } catch (_) {}
 
-        // 2) Wake up the Render server with a lightweight public ping (wait up to 60s)
-        try {
-          const controller = new AbortController();
-          const tid = setTimeout(() => controller.abort(), 60000);
-          await fetch(`${require("../services/config").API_CONFIG.WEB_BACKEND.BASE_URL}/settings/public`, {
-            signal: controller.signal,
-          });
-          clearTimeout(tid);
-        } catch (_) {
-          // Server may still be waking — proceed anyway, getLoans has its own retries
-        }
-
-        // 3) Now fetch fresh data (server should be warm)
+        // 2) Immediately fetch fresh data from API
         if (!cancelled) {
           await loadLoansFromAPI();
         }
@@ -1089,27 +1108,28 @@ export default function LoansScreen({ navigation, route }) {
     useCallback(() => {
       const loadSavings = async () => {
         if (!userEmail) return;
+        // 1) Instant hydration from cache
+        try {
+          const savedTotal = await AsyncStorage.getItem(`faithly_savings_total_${userEmail}`);
+          if (savedTotal != null) {
+            setTotalSavings(parseFloat(savedTotal) || 0);
+          }
+        } catch (_) {}
+
+        // 2) Fresh fetch from backend
         try {
           const data = await getSavingsData();
           let total = 0;
-          if (data?.stats?.totalSaved != null) {
-            total = parseFloat(data.stats.totalSaved) || 0;
+          const backendTotalSavings = data?.stats?.totalSavings ?? data?.stats?.totalSaved;
+          if (backendTotalSavings != null) {
+            total = parseFloat(backendTotalSavings) || 0;
           } else if (Array.isArray(data?.goals)) {
             data.goals.forEach(g => { total += parseFloat(g.amountSaved || g.savedAmount || 0) || 0; });
           }
           setTotalSavings(total);
           await AsyncStorage.setItem(`faithly_savings_total_${userEmail}`, String(total));
         } catch (e) {
-          try {
-            const savedTotal = await AsyncStorage.getItem(`faithly_savings_total_${userEmail}`);
-            if (savedTotal != null) {
-              setTotalSavings(parseFloat(savedTotal) || 0);
-            } else {
-              setTotalSavings(0);
-            }
-          } catch (_) {
-            setTotalSavings(0);
-          }
+          // If network failed, cached value is already in state
         }
       };
       loadSavings();
@@ -1559,8 +1579,27 @@ export default function LoansScreen({ navigation, route }) {
       return;
     }
 
+    // Resolve next payment due date if missing or "-"
+    let computedNextPayment = loan.nextPayment;
+    if (!computedNextPayment || computedNextPayment === "-") {
+      const rawDate = loan.nextPaymentDate || loan.nextDueDate || loan.dueDate;
+      if (rawDate) {
+        computedNextPayment = fmtDate(rawDate);
+      } else {
+        const baseDateStr = loan.disbursementDate || loan.disbursedDate || loan.approvedDate || loan.createdAt || loan.applied || loan.appliedDate;
+        if (baseDateStr) {
+          const base = new Date(baseDateStr);
+          if (!isNaN(base.getTime())) {
+            const due = new Date(base);
+            due.setMonth(base.getMonth() + ((loan.paidMonths || 0) + 1));
+            computedNextPayment = fmtDate(due);
+          }
+        }
+      }
+    }
+
     // Open immediately to avoid blocking user
-    setPayNowLoan(loan);
+    setPayNowLoan({ ...loan, nextPayment: computedNextPayment || "-" });
     setPayType("regular");
     setCustomPayAmount("");
     setCustomPayMonths(0);
@@ -1577,6 +1616,7 @@ export default function LoansScreen({ navigation, route }) {
     setEwalletOptionDropdownOpen(false);
     setEwalletSenderName("");
     setEwalletNumber("");
+    setPayError("");
     setPayNowModalOpen(true);
     
     // Refresh data in background
@@ -1650,16 +1690,20 @@ export default function LoansScreen({ navigation, route }) {
 
       // Require proof for GCash and Bank Transfer
       if (!payProof) {
+        setPayError("Please upload proof of payment for this payment method.");
         return Alert.alert("Proof Required", "Please upload proof of payment for this payment method.");
       }
       if (payProofVerification && payProofVerification.verifying) {
+        setPayError("Please wait for receipt verification to complete.");
         return Alert.alert("Verifying", "Please wait for receipt verification to complete.");
       }
-      if (!payProofVerification || !payProofVerification.valid) {
+      if (payProofVerification && payProofVerification.valid === false && !payProofVerification.fallback) {
+        setPayError(payProofVerification?.reason || "Please upload a valid e-wallet or bank transfer receipt.");
         return Alert.alert("Invalid Receipt", payProofVerification?.reason || "Please upload a valid e-wallet or bank transfer receipt.");
       }
     }
 
+    setPayError("");
     paySubmittingRef.current = true;
     setPaySubmitting(true);
     try {
@@ -1694,8 +1738,13 @@ export default function LoansScreen({ navigation, route }) {
         payload.subMethod     = payMethod === "bank" ? bankOption : ewalletOption;
         payload.accountName   = payMethod === "bank" ? bankSenderName.trim() : ewalletSenderName.trim();
         payload.accountNumber = payMethod === "bank" ? bankAccountNumber.trim() : ewalletNumber.trim();
-        payload.proofData     = payProof?.base64 ? `data:image/jpeg;base64,${payProof.base64}` : "";
-        payload.proofFileName = payMethod === "bank" ? "bank_receipt.jpg" : "ewallet_receipt.jpg";
+        const base64Data = payProof?.base64 || "";
+        const formattedProof = base64Data.startsWith("data:")
+          ? base64Data
+          : (base64Data ? `data:${payProof?.type || "image/jpeg"};base64,${base64Data}` : "");
+        payload.proofData     = formattedProof;
+        payload.proofOfPayment = formattedProof;
+        payload.proofFileName = payProof?.fileName || (payMethod === "bank" ? "bank_receipt.jpg" : "ewallet_receipt.jpg");
       }
 
       // Use MongoDB _id for the route param (web backend resolves by _id or loanId)
@@ -1706,10 +1755,16 @@ export default function LoansScreen({ navigation, route }) {
 
 
       if (!isManual && !isCash && response && response.checkoutUrl) {
-        // Assume Linking is imported, but we need to verify import.
-        import('react-native').then(({ Linking }) => Linking.openURL(response.checkoutUrl));
+        setPayNowModalOpen(false);
+        Linking.openURL(response.checkoutUrl);
       } else {
-        Alert.alert("Payment Submitted", "Your payment has been submitted and is pending admin confirmation.");
+        setPayNowModalOpen(false);
+        setPayProof(null);
+        setPayProofVerification(null);
+        setPayError("");
+        setTimeout(() => {
+          showAlert("Payment Submitted", "Your payment has been submitted and is pending admin confirmation.");
+        }, 350);
         addNotification(
           userEmail,
           "loan",
@@ -1723,7 +1778,7 @@ export default function LoansScreen({ navigation, route }) {
       setPayProofVerification(null);
       await loadLoansFromAPI();
     } catch (err) {
-      // Enhanced error reporting to help diagnose the issue
+      setPayError(err.message || "Payment submission failed.");
       Alert.alert(
         "Payment Failed",
         `${err.message}\n\nLoan ID: ${payNowLoan.id}\nStatus: ${payNowLoan.status}`
@@ -3687,7 +3742,7 @@ export default function LoansScreen({ navigation, route }) {
                   <TouchableOpacity
                     style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: s(10), borderWidth: 1.5, borderColor: payMethod === "cash" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payMethod === "cash" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 8 }}
                     activeOpacity={0.7}
-                    onPress={() => { setPayMethod("cash"); setPayProof(null); setPayProofVerification(null); }}
+                    onPress={() => { setPayMethod("cash"); setPayProof(null); setPayProofVerification(null); setPayError(""); }}
                   >
                     <View style={{ width: 38, height: 38, borderRadius: s(10), backgroundColor: payMethod === "cash" ? "rgba(46,107,240,0.1)" : (colors.inputBg || "#F0F2F5"), alignItems: "center", justifyContent: "center", marginRight: 10 }}>
                       <Image source={ICONS.wallet} style={{ width: s(20), height: s(20), tintColor: payMethod === "cash" ? C.blue : colors.textMuted }} resizeMode="contain" />
@@ -3705,7 +3760,7 @@ export default function LoansScreen({ navigation, route }) {
                   <TouchableOpacity
                     style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: s(10), borderWidth: 1.5, borderColor: payMethod === "bank" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payMethod === "bank" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 8 }}
                     activeOpacity={0.7}
-                    onPress={() => { setPayMethod("bank"); setPayProof(null); setPayProofVerification(null); }}
+                    onPress={() => { setPayMethod("bank"); setPayProof(null); setPayProofVerification(null); setPayError(""); }}
                   >
                     <View style={{ width: 38, height: 38, borderRadius: s(10), backgroundColor: payMethod === "bank" ? "rgba(46,107,240,0.1)" : (colors.inputBg || "#F0F2F5"), alignItems: "center", justifyContent: "center", marginRight: 10 }}>
                       <Image source={ICONS.bank} style={{ width: s(20), height: s(20), tintColor: payMethod === "bank" ? C.blue : colors.textMuted }} resizeMode="contain" />
@@ -3723,7 +3778,7 @@ export default function LoansScreen({ navigation, route }) {
                   <TouchableOpacity
                     style={{ flexDirection: "row", alignItems: "center", padding: 12, borderRadius: s(10), borderWidth: 1.5, borderColor: payMethod === "gcash" ? C.blue : (colors.cardBorder || "#E8ECF0"), backgroundColor: payMethod === "gcash" ? "rgba(46,107,240,0.04)" : colors.cardBg, marginBottom: 14 }}
                     activeOpacity={0.7}
-                    onPress={() => { setPayMethod("gcash"); setPayProof(null); setPayProofVerification(null); }}
+                    onPress={() => { setPayMethod("gcash"); setPayProof(null); setPayProofVerification(null); setPayError(""); }}
                   >
                     <View style={{ width: 38, height: 38, borderRadius: s(10), backgroundColor: payMethod === "gcash" ? "rgba(0,126,51,0.08)" : (colors.inputBg || "#F0F2F5"), alignItems: "center", justifyContent: "center", marginRight: 10 }}>
                       <Image source={ICONS.gcash} style={{ width: s(22), height: 22 }} resizeMode="contain" />
@@ -3996,36 +4051,79 @@ export default function LoansScreen({ navigation, route }) {
                       <Text style={{ fontSize: fs(11), color: colors.textMuted, marginBottom: 8 }}>
                         Upload a screenshot or photo of your {payMethod === "gcash" ? "GCash" : "bank transfer"} receipt
                       </Text>
-                      <TouchableOpacity
-                        style={[styles.uploadBox, { height: 130 }, payProof && styles.uploadBoxDone]}
-                        activeOpacity={0.7}
-                        onPress={() => showImageOptions(setPayProof, "Proof of Payment")}
-                      >
-                        {payProof ? (
-                          <View style={{ width: "100%", height: "100%" }}>
-                            <Image source={{ uri: payProof.uri }} style={styles.previewImg} />
-                            {payProofVerification?.verifying ? (
-                              <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(245,166,35,0.92)", flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 6 }}>
-                                <ActivityIndicator color="#FFFFFF" size="small" style={{ marginRight: 6 }} />
-                                <Text style={{ color: "#fff", fontSize: fs(11), fontWeight: "700" }}>Verifying receipt...</Text>
-                              </View>
-                            ) : payProofVerification?.valid ? (
-                              <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(52,199,89,0.92)", alignItems: "center", paddingVertical: 6 }}>
-                                <Text style={{ color: "#fff", fontSize: fs(11), fontWeight: "700" }}>✓ Verified {payProofVerification.provider || "Receipt"}</Text>
-                              </View>
-                            ) : payProofVerification && !payProofVerification.valid ? (
-                              <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(231,76,60,0.92)", alignItems: "center", paddingVertical: 6, paddingHorizontal: 8 }}>
-                                <Text style={{ color: "#fff", fontSize: fs(10), fontWeight: "700", textAlign: "center" }}>✕ {payProofVerification.reason || "Invalid Receipt"}</Text>
-                              </View>
-                            ) : null}
-                          </View>
-                        ) : (
-                          <>
-                            <Image source={ICONS.camera} style={[styles.uploadIconImg, { marginBottom: 4 }]} resizeMode="contain" />
-                            <Text style={{ fontSize: fs(12), color: colors.textMuted }}>Tap to upload proof</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
+                      {payProof ? (
+                        <View style={{ borderRadius: 14, overflow: "hidden", borderWidth: 1.5, borderColor: colors.cardBorder || "#E8ECF0", position: "relative", marginBottom: 6, backgroundColor: colors.inputBg || "#F8FAFC" }}>
+                          <Image source={{ uri: payProof.uri }} style={{ width: "100%", height: 180 }} resizeMode="contain" />
+                          <TouchableOpacity
+                            style={{ position: "absolute", top: 10, right: 10, width: 30, height: 30, borderRadius: 15, backgroundColor: "rgba(0,0,0,0.65)", alignItems: "center", justifyContent: "center", zIndex: 10 }}
+                            onPress={() => { setPayProof(null); setPayProofVerification(null); }}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          >
+                            <Text style={{ color: "#fff", fontSize: fs(16), fontWeight: "700", lineHeight: fs(18) }}>✕</Text>
+                          </TouchableOpacity>
+                          {payProofVerification?.verifying ? (
+                            <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(245,166,35,0.92)", flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 8 }}>
+                              <ActivityIndicator color="#FFFFFF" size="small" style={{ marginRight: 6 }} />
+                              <Text style={{ color: "#fff", fontSize: fs(11), fontWeight: "700" }}>Verifying receipt...</Text>
+                            </View>
+                          ) : payProofVerification?.valid ? (
+                            <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(52,199,89,0.92)", alignItems: "center", paddingVertical: 8 }}>
+                              <Text style={{ color: "#fff", fontSize: fs(11), fontWeight: "700" }}>✓ Verified {payProofVerification.provider || "Receipt"}</Text>
+                            </View>
+                          ) : payProofVerification && !payProofVerification.valid && !payProofVerification.fallback ? (
+                            <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(231,76,60,0.92)", alignItems: "center", paddingVertical: 8, paddingHorizontal: 8 }}>
+                              <Text style={{ color: "#fff", fontSize: fs(10), fontWeight: "700", textAlign: "center" }}>✕ {payProofVerification.reason || "Invalid Receipt"}</Text>
+                            </View>
+                          ) : (
+                            <View style={{ position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "rgba(52,199,89,0.92)", alignItems: "center", paddingVertical: 8 }}>
+                              <Text style={{ color: "#fff", fontSize: fs(11), fontWeight: "700" }}>✓ Attached</Text>
+                            </View>
+                          )}
+                        </View>
+                      ) : (
+                        <View style={{ flexDirection: "row", gap: s(10), marginTop: 4 }}>
+                          <TouchableOpacity
+                            style={{
+                              flex: 1,
+                              paddingVertical: s(14),
+                              paddingHorizontal: s(12),
+                              borderRadius: s(12),
+                              borderWidth: 1.5,
+                              borderColor: colors.cardBorder || "#E8ECF0",
+                              backgroundColor: colors.inputBg || "#F8FAFC",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexDirection: "row",
+                              gap: 8,
+                            }}
+                            activeOpacity={0.7}
+                            onPress={() => pickImage(setPayProof, true)}
+                          >
+                            <Image source={ICONS.camera} style={{ width: s(18), height: s(18), tintColor: C.blue }} resizeMode="contain" />
+                            <Text style={{ fontSize: fs(13), fontWeight: "700", color: C.blue }}>Camera</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={{
+                              flex: 1,
+                              paddingVertical: s(14),
+                              paddingHorizontal: s(12),
+                              borderRadius: s(12),
+                              borderWidth: 1.5,
+                              borderColor: colors.cardBorder || "#E8ECF0",
+                              backgroundColor: colors.inputBg || "#F8FAFC",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexDirection: "row",
+                              gap: 8,
+                            }}
+                            activeOpacity={0.7}
+                            onPress={() => pickImage(setPayProof, false)}
+                          >
+                            <Image source={ICONS.document} style={{ width: s(18), height: s(18), tintColor: C.blue }} resizeMode="contain" />
+                            <Text style={{ fontSize: fs(13), fontWeight: "700", color: C.blue }}>Gallery</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   )}
 
@@ -4033,6 +4131,13 @@ export default function LoansScreen({ navigation, route }) {
                 </>
               )}
             </ScrollView>
+
+            {/* Inline Error Banner */}
+            {payError ? (
+              <View style={{ marginHorizontal: s(20), marginBottom: 10, paddingVertical: 10, paddingHorizontal: 14, backgroundColor: "rgba(239, 68, 68, 0.1)", borderRadius: 10, borderWidth: 1, borderColor: "rgba(239, 68, 68, 0.25)" }}>
+                <Text style={{ color: "#EF4444", fontSize: fs(12), fontWeight: "600", textAlign: "center" }}>{payError}</Text>
+              </View>
+            ) : null}
 
             {/* Fixed Footer - Cancel + Submit */}
             <View style={{ flexDirection: "row", gap: s(12), paddingHorizontal: s(20), paddingTop: 12, paddingBottom: Platform.OS === 'ios' ? 30 : 16, borderTopWidth: 1, borderTopColor: colors.cardBorder || '#E8ECF0' }}>

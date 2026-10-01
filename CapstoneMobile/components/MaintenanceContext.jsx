@@ -147,13 +147,14 @@ export function MaintenanceProvider({ children }) {
       {children}
 
       {/* Full-Screen Maintenance Overlay */}
-      <Modal
-        visible={isMaintenanceMode}
-        transparent={false}
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => {}}
-      >
+      {isMaintenanceMode && (
+        <Modal
+          visible={isMaintenanceMode}
+          transparent={false}
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => {}}
+        >
         <View style={[styles.overlay, { backgroundColor: colors.bg }]}>
           {/* Decorative top gradient bar */}
           <View style={styles.topBar}>
@@ -233,6 +234,7 @@ export function MaintenanceProvider({ children }) {
           </View>
         </View>
       </Modal>
+      )}
     </MaintenanceContext.Provider>
   );
 }

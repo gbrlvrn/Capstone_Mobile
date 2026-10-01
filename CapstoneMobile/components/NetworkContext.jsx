@@ -109,8 +109,26 @@ export function NetworkProvider({ children }) {
     const checkConnectivity = async () => {
       try {
         const state = await Network.getNetworkStateAsync();
-        const online =
-          state.isConnected === true && state.isInternetReachable !== false;
+        let online = state.isConnected === true;
+
+        // If isConnected is true but isInternetReachable is false, verify before flagging offline.
+        // Android's NET_CAPABILITY_VALIDATED or iOS network listeners often report false reachability
+        // due to DNS latency, captive portal delays, or cellular routing, even on stable connections.
+        if (online && state.isInternetReachable === false) {
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 2500);
+            const pingRes = await fetch("https://clients3.google.com/generate_204", {
+              method: "GET",
+              signal: controller.signal,
+            });
+            clearTimeout(timer);
+            online = pingRes.status === 204 || pingRes.ok;
+          } catch {
+            // Ping failed or timed out — confirm offline
+            online = false;
+          }
+        }
 
         if (mounted) {
           setIsOnline((prev) => {

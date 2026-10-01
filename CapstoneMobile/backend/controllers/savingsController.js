@@ -285,3 +285,31 @@ export async function createSavingsWithdrawal(req, res) {
     return res.status(500).json({ success: false, message: "Failed to process withdrawal." });
   }
 }
+
+/**
+ * DELETE /api/savings/goals/:id — Delete a savings goal
+ */
+export async function deleteSavingsGoal(req, res) {
+  try {
+    const email = req.user.email;
+    const { id } = req.params;
+
+    let query = { email: email.toLowerCase() };
+    if (mongoose.isValidObjectId(id)) {
+      query._id = id;
+    } else {
+      query.name = id;
+    }
+
+    const goal = await SavingsGoal.findOneAndDelete(query);
+    if (!goal) {
+      return res.status(404).json({ message: "Savings goal not found." });
+    }
+
+    return res.json({ message: "Savings goal removed successfully." });
+  } catch (err) {
+    console.error("DELETE GOAL ERROR:", err);
+    return res.status(500).json({ message: "Failed to delete savings goal." });
+  }
+}
+

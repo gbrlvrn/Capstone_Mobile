@@ -37,7 +37,7 @@ function getDevIP() {
 
 // Set to true ONLY for local testing APKs (same WiFi as dev machine).
 // Must be FALSE for any public release / capstone defense APK.
-const USE_LOCAL_FOR_PRODUCTION = true;
+const USE_LOCAL_FOR_PRODUCTION = false;
 const LOCAL_IP = "192.168.1.5"; // Hardcoded fallback for local-only APK builds
 const PRODUCTION_URL = "https://api.puacfaithly.com/api";
 

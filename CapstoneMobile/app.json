@@ -49,7 +49,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.puac.app",
-      "buildNumber": "11",
+      "buildNumber": "14",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "This app needs access to your photos to upload your ID and selfie.",
         "NSCameraUsageDescription": "This app needs access to your camera to take a selfie.",
@@ -57,6 +57,14 @@
           "NSAllowsArbitraryLoads": false,
           "NSExceptionDomains": {
             "faithly-server.onrender.com": {
+              "NSExceptionAllowsInsecureHTTPLoads": false,
+              "NSIncludesSubdomains": true
+            },
+            "api.puacfaithly.com": {
+              "NSExceptionAllowsInsecureHTTPLoads": false,
+              "NSIncludesSubdomains": true
+            },
+            "puacfaithly.com": {
               "NSExceptionAllowsInsecureHTTPLoads": false,
               "NSIncludesSubdomains": true
             }
@@ -67,6 +75,8 @@
     },
     "android": {
       "package": "com.puac.app",
+      "versionCode": 14,
+      "usesCleartextTraffic": true,
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyDdTRSOkcAhr5ckQyQdfB7u_h9C5-Y4IMI"

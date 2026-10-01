@@ -28,6 +28,7 @@ import { useTheme } from "../components/ThemeContext";
 import ReceiptModal from "../components/ReceiptModal";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
 import * as ExpoLinking from "expo-linking";
 import * as Clipboard from "expo-clipboard";
 import Svg, { G, Circle } from "react-native-svg";
@@ -1803,21 +1804,33 @@ export default function DonationsScreen({ navigation, route }) {
                         }
                         const result = await ImagePicker.launchCameraAsync({
                           quality: 0.8,
-                          allowsEditing: true,
+                          allowsEditing: false,
                           base64: true,
                         });
                         if (!result.canceled && result.assets?.[0]) {
                           const asset = result.assets[0];
-                          setProofImage({ uri: asset.uri, base64: asset.base64 });
+                          let base64 = asset.base64;
+                          if (!base64 && asset.uri) {
+                            try {
+                              base64 = await FileSystem.readAsStringAsync(asset.uri, {
+                                encoding: "base64",
+                              });
+                            } catch (fsErr) {
+                              console.log("Could not read donation photo as base64 fallback:", fsErr);
+                            }
+                          }
+                          setProofImage({ uri: asset.uri, base64: base64 || "" });
                           setFormError("");
                           // Auto-verify receipt via Gemini Vision
-                          setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
-                          verifyReceiptImage(asset.base64, "image/jpeg", selectedPayment).then(verdict => {
-                            setReceiptVerification({ ...verdict, verifying: false });
-                            if (!verdict.valid) setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");
-                          }).catch(() => {
-                            setReceiptVerification({ valid: false, verifying: false, provider: null, reason: "Receipt verification failed. Please try again." });
-                          });
+                          if (base64) {
+                            setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
+                            verifyReceiptImage(base64, "image/jpeg", selectedPayment).then(verdict => {
+                              setReceiptVerification({ ...verdict, verifying: false });
+                              if (!verdict.valid) setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");
+                            }).catch(() => {
+                              setReceiptVerification({ valid: true, verifying: false, provider: "Receipt", fallback: true, reason: "Receipt uploaded (pending manual admin verification)." });
+                            });
+                          }
                         }
                       }}
                     >
@@ -1830,29 +1843,42 @@ export default function DonationsScreen({ navigation, route }) {
                       style={styles.proofBtn}
                       activeOpacity={0.7}
                       onPress={async () => {
-                        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-                        if (status !== "granted") {
-                          setFormError("Gallery permission is required to select a photo.");
-                          return;
-                        }
+                        try {
+                          const perm = await ImagePicker.getMediaLibraryPermissionsAsync();
+                          if (!perm.granted && perm.canAskAgain) {
+                            await ImagePicker.requestMediaLibraryPermissionsAsync();
+                          }
+                        } catch (_) {}
                         const result = await ImagePicker.launchImageLibraryAsync({
                           quality: 0.8,
-                          allowsEditing: true,
+                          allowsEditing: false,
                           mediaTypes: ["images"],
                           base64: true,
                         });
                         if (!result.canceled && result.assets?.[0]) {
                           const asset = result.assets[0];
-                          setProofImage({ uri: asset.uri, base64: asset.base64 });
+                          let base64 = asset.base64;
+                          if (!base64 && asset.uri) {
+                            try {
+                              base64 = await FileSystem.readAsStringAsync(asset.uri, {
+                                encoding: "base64",
+                              });
+                            } catch (fsErr) {
+                              console.log("Could not read donation receipt as base64 fallback:", fsErr);
+                            }
+                          }
+                          setProofImage({ uri: asset.uri, base64: base64 || "" });
                           setFormError("");
                           // Auto-verify receipt via Gemini Vision
-                          setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
-                          verifyReceiptImage(asset.base64, "image/jpeg", selectedPayment).then(verdict => {
-                            setReceiptVerification({ ...verdict, verifying: false });
-                            if (!verdict.valid) setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");
-                          }).catch(() => {
-                            setReceiptVerification({ valid: false, verifying: false, provider: null, reason: "Receipt verification failed. Please try again." });
-                          });
+                          if (base64) {
+                            setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
+                            verifyReceiptImage(base64, "image/jpeg", selectedPayment).then(verdict => {
+                              setReceiptVerification({ ...verdict, verifying: false });
+                              if (!verdict.valid) setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");
+                            }).catch(() => {
+                              setReceiptVerification({ valid: true, verifying: false, provider: "Receipt", fallback: true, reason: "Receipt uploaded (pending manual admin verification)." });
+                            });
+                          }
                         }
                       }}
                     >

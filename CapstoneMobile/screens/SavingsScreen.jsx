@@ -25,8 +25,11 @@ import { useTheme } from "../components/ThemeContext";
 import { useAlert } from "../components/AlertContext";
 import { useFocusEffect } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
 import * as ExpoLinking from "expo-linking";
-import { getPublicSettings, getVerificationStatus, createSavingsDeposit, createSavingsTransfer, getSavingsData, createSavingsWithdrawal, createSavingsGoal, verifyReceiptImage } from "../services/AuthService";
+import { getPublicSettings, getVerificationStatus, createSavingsDeposit, createSavingsTransfer, getSavingsData, createSavingsWithdrawal, createSavingsGoal, deleteSavingsGoal, verifyReceiptImage } from "../services/AuthService";
+import { addNotification } from "./NotificationsScreen";
+import SmoothModalCard from "../components/SmoothModalCard";
 import EmptyState from "../components/EmptyState";
 import OfflineBanner from "../components/OfflineBanner";
 import { fmtDateSlash, fmtDateTime } from "../services/dateUtils";
@@ -140,6 +143,7 @@ export default function SavingsScreen({ navigation, route }) {
   const [deposits, setDeposits] = useState([]);
   const [goals, setGoals] = useState([]);
   const [totalSavings, setTotalSavings] = useState(0);
+  const [serverStats, setServerStats] = useState(null);
 
   // --- MODALS ---
   const [depositModalOpen, setDepositModalOpen] = useState(false);
@@ -270,13 +274,43 @@ export default function SavingsScreen({ navigation, route }) {
   // Load savings data " fetch from backend API, fall back to local cache
   const loadSavingsData = useCallback(async () => {
     if (!userEmail) return;
+
+    // 1) Fast cache hydration if state is empty so UI renders instantly
+    if (deposits.length === 0) {
+      try {
+        const cachedStats = await AsyncStorage.getItem(`faithly_savings_stats_${userEmail}`);
+        if (cachedStats) {
+          const parsedStats = JSON.parse(cachedStats);
+          setServerStats(parsedStats);
+          const tSavings = parsedStats?.totalSavings ?? parsedStats?.totalSaved;
+          if (tSavings != null) setTotalSavings(parseFloat(tSavings) || 0);
+        }
+        const savedDeposits = await AsyncStorage.getItem(`faithly_savings_${userEmail}`);
+        const savedGoals = await AsyncStorage.getItem(`faithly_savings_goals_${userEmail}`);
+        if (savedDeposits) setDeposits(JSON.parse(savedDeposits));
+        if (savedGoals) {
+          const parsedG = JSON.parse(savedGoals);
+          setGoals(parsedG.map(g => ({
+            id: g._id || g.id,
+            name: g.name,
+            target: g.targetAmount || g.target,
+            amountSaved: g.savedAmount || g.amountSaved || 0,
+            createdAt: g.createdAt || new Date().toISOString(),
+            status: g.status,
+          })));
+        }
+      } catch (_) {}
+    }
+
+    // 2) Fetch fresh live data from backend API
     try {
-      // Fetch fresh data from backend (reflects admin confirmations)
       const response = await getSavingsData();
       const serverDeposits = response?.savings || [];
       const serverGoals = response?.goals || [];
+      const backendStats = response?.stats || {};
 
-      // Cache to AsyncStorage for offline access
+      setServerStats(backendStats);
+      await AsyncStorage.setItem(`faithly_savings_stats_${userEmail}`, JSON.stringify(backendStats));
       await AsyncStorage.setItem(`faithly_savings_${userEmail}`, JSON.stringify(serverDeposits));
       await AsyncStorage.setItem(`faithly_savings_goals_${userEmail}`, JSON.stringify(serverGoals));
 
@@ -293,24 +327,33 @@ export default function SavingsScreen({ navigation, route }) {
       }));
       setGoals(mappedGoals);
 
-      // Only count confirmed deposits OR pending gateway deposits toward total savings
-      let total = 0;
-      serverDeposits.forEach(d => {
-        const status = (d.status || "").toLowerCase();
-        const isConfirmed = status === 'confirmed';
-        const isGatewayPending = paymentApprovalMethod === 'gateway' && 
-                                 status === 'pending' && 
-                                 d.paymongoSessionId;
+      // Use backend aggregated total savings (identical to Web app)
+      const backendTotalSavings = backendStats.totalSavings ?? backendStats.totalSaved;
+      if (backendTotalSavings != null) {
+        const parsedTotal = parseFloat(backendTotalSavings) || 0;
+        setTotalSavings(parsedTotal);
+        await AsyncStorage.setItem(`faithly_savings_total_${userEmail}`, String(parsedTotal));
+      } else {
+        // Fallback: calculate from deposits
+        let total = 0;
+        serverDeposits.forEach(d => {
+          const status = (d.status || "").toLowerCase();
+          const isConfirmed = status === 'confirmed';
+          const isGatewayPending = paymentApprovalMethod === 'gateway' && 
+                                   status === 'pending' && 
+                                   d.paymongoSessionId;
 
-        if (isConfirmed || isGatewayPending) {
-          if (d.type === "withdrawal") {
-            total -= parseFloat(d.amount) || 0;
-          } else {
-            total += parseFloat(d.amount) || 0;
+          if (isConfirmed || isGatewayPending) {
+            if (d.type === "withdrawal") {
+              total -= parseFloat(d.amount) || 0;
+            } else {
+              total += parseFloat(d.amount) || 0;
+            }
           }
-        }
-      });
-      setTotalSavings(total);
+        });
+        setTotalSavings(total);
+        await AsyncStorage.setItem(`faithly_savings_total_${userEmail}`, String(total));
+      }
     } catch (e) {
       if (e.message === 'Invalid or expired token') {
         console.log('Token expired " redirecting to login');
@@ -320,6 +363,13 @@ export default function SavingsScreen({ navigation, route }) {
       console.log("Failed to load savings from server, using cache", e);
       // Fall back to local cache if API fails (offline mode)
       try {
+        const cachedStats = await AsyncStorage.getItem(`faithly_savings_stats_${userEmail}`);
+        if (cachedStats) {
+          const parsedStats = JSON.parse(cachedStats);
+          setServerStats(parsedStats);
+          const tSavings = parsedStats?.totalSavings ?? parsedStats?.totalSaved;
+          if (tSavings != null) setTotalSavings(parseFloat(tSavings) || 0);
+        }
         const savedDeposits = await AsyncStorage.getItem(`faithly_savings_${userEmail}`);
         const savedGoals = await AsyncStorage.getItem(`faithly_savings_goals_${userEmail}`);
         const parsedDeposits = savedDeposits ? JSON.parse(savedDeposits) : [];
@@ -337,28 +387,30 @@ export default function SavingsScreen({ navigation, route }) {
         setDeposits(parsedDeposits);
         setGoals(mappedCachedGoals);
 
-        let total = 0;
-        parsedDeposits.forEach(d => {
-          const status = (d.status || "").toLowerCase();
-          const isConfirmed = status === 'confirmed';
-          const isGatewayPending = paymentApprovalMethod === 'gateway' && 
-                                   status === 'pending' && 
-                                   d.paymongoSessionId;
+        if (!cachedStats) {
+          let total = 0;
+          parsedDeposits.forEach(d => {
+            const status = (d.status || "").toLowerCase();
+            const isConfirmed = status === 'confirmed';
+            const isGatewayPending = paymentApprovalMethod === 'gateway' && 
+                                     status === 'pending' && 
+                                     d.paymongoSessionId;
 
-          if (isConfirmed || isGatewayPending) {
-            if (d.type === "withdrawal") {
-              total -= parseFloat(d.amount) || 0;
-            } else {
-              total += parseFloat(d.amount) || 0;
+            if (isConfirmed || isGatewayPending) {
+              if (d.type === "withdrawal") {
+                total -= parseFloat(d.amount) || 0;
+              } else {
+                total += parseFloat(d.amount) || 0;
+              }
             }
-          }
-        });
-        setTotalSavings(total);
+          });
+          setTotalSavings(total);
+        }
       } catch (cacheErr) {
         console.log("Cache load also failed:", cacheErr);
       }
     }
-  }, [userEmail, paymentApprovalMethod]);
+  }, [userEmail, paymentApprovalMethod, deposits.length]);
 
   useFocusEffect(
     useCallback(() => {
@@ -499,6 +551,70 @@ export default function SavingsScreen({ navigation, route }) {
       }
     });
   }, [activeTab, indicatorPosition, tabAnimations, TAB_ITEMS, TAB_WIDTH]);
+
+  // Pick proof of deposit image (Camera or Gallery)
+  const pickProofImage = async (useCamera) => {
+    try {
+      if (useCamera) {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== "granted") {
+          showAlert("Permission Required", "Camera access is needed to take a photo of your receipt.");
+          return;
+        }
+      } else {
+        try {
+          const perm = await ImagePicker.getMediaLibraryPermissionsAsync();
+          if (!perm.granted && perm.canAskAgain) {
+            await ImagePicker.requestMediaLibraryPermissionsAsync();
+          }
+        } catch (_) {}
+      }
+
+      const options = {
+        mediaTypes: ["images"],
+        quality: 0.8,
+        allowsEditing: false, // Avoids Android UCrop crashes and base64 drops
+        base64: true,
+      };
+
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
+
+      if (!result.canceled && result.assets?.[0]) {
+        const asset = result.assets[0];
+        let base64 = asset.base64;
+        if (!base64 && asset.uri) {
+          try {
+            base64 = await FileSystem.readAsStringAsync(asset.uri, {
+              encoding: "base64",
+            });
+          } catch (fsErr) {
+            console.log("Could not read proof image as base64 fallback:", fsErr);
+          }
+        }
+
+        setProofImage({ uri: asset.uri, base64: base64 || "" });
+        setFormError("");
+
+        // Auto-verify receipt via Gemini Vision
+        if (base64) {
+          setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
+          verifyReceiptImage(base64, "image/jpeg", selectedPayment).then(verdict => {
+            setReceiptVerification({ ...verdict, verifying: false });
+            if (!verdict.valid) {
+              setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");
+            }
+          }).catch(() => {
+            setReceiptVerification({ valid: true, verifying: false, provider: "Receipt", fallback: true, reason: "Receipt uploaded (pending manual admin verification)." });
+          });
+        }
+      }
+    } catch (err) {
+      console.log("Proof pick error:", err);
+      showAlert("Upload Error", "Failed to select image. Please try again.");
+    }
+  };
 
   // Handle deposit submission
   const handleAddDeposit = async () => {
@@ -786,21 +902,42 @@ export default function SavingsScreen({ navigation, route }) {
       return;
     }
 
+    setSubmitting(true);
     try {
       const response = await createSavingsGoal({
         name: resolvedGoalName,
         targetAmount: target
       });
 
-      showAlert("Success", "Savings goal created successfully!");
+      // 1. Immediately close the Add Goal modal and reset inputs
+      setGoalModalOpen(false);
       setGoalName("");
       setCustomGoalName("");
       setGoalTarget("");
-      setGoalModalOpen(false);
-      loadSavingsData(); // refresh from backend
+
+      // 2. Refresh savings data from backend
+      loadSavingsData();
+
+      // 3. Trigger notification in the background
+      if (userEmail) {
+        addNotification(
+          userEmail,
+          "transaction",
+          "Savings Goal Added",
+          `Your savings goal "${resolvedGoalName}" with target ₱${_safeFmtNum(target)} has been successfully created.`,
+          "goal-added"
+        ).catch((err) => console.log("Failed to add notification:", err));
+      }
+
+      // 4. Show success alert after modal dismissal transition completes
+      setTimeout(() => {
+        showAlert("Success", "Savings goal created successfully!");
+      }, 350);
     } catch (e) {
       console.log("Failed to create goal:", e);
       setFormError(e.message || "Failed to create savings goal.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -815,51 +952,82 @@ export default function SavingsScreen({ navigation, route }) {
           text: "Remove",
           style: "destructive",
           onPress: async () => {
-            const updatedGoals = goals.filter(g => g.id !== goalId);
+            const goalToRemove = goals.find((g) => g.id === goalId);
+            const goalTitle = goalToRemove?.name || "Savings Goal";
+            const updatedGoals = goals.filter((g) => g.id !== goalId);
             setGoals(updatedGoals);
+
             try {
               await AsyncStorage.setItem(`faithly_savings_goals_${userEmail}`, JSON.stringify(updatedGoals));
             } catch (e) {
-              console.log("Failed to delete goal:", e);
+              console.log("Failed to update cached goals:", e);
             }
-          }
-        }
+
+            try {
+              if (goalId) {
+                await deleteSavingsGoal(goalId);
+              }
+            } catch (e) {
+              console.log("Failed to delete goal on backend:", e);
+            }
+
+            // Trigger notification after removing savings goal (Green success)
+            if (userEmail) {
+              addNotification(
+                userEmail,
+                "transaction",
+                "Savings Goal Removed",
+                `The savings goal "${goalTitle}" has been successfully removed.`,
+                "goal-removed"
+              ).catch((err) => console.log("Failed to add notification:", err));
+            }
+
+            // Small delay to allow the prompt alert to finish closing before showing the success alert
+            setTimeout(() => {
+              showAlert("Goal Removed", `"${goalTitle}" has been removed from your savings goals.`);
+            }, 300);
+          },
+        },
       ]
     );
   };
 
   const currentMonthNum = new Date().getMonth() + 1;
   const currentYearNum = new Date().getFullYear();
-  let thisMonthTotalToDisplay = 0;
-  let totalSavingsToDisplay = 0;
+  let thisMonthTotalToDisplay = serverStats?.thisMonth != null ? parseFloat(serverStats.thisMonth) || 0 : 0;
+  let totalSavingsToDisplay = (serverStats?.totalSavings != null || totalSavings > 0)
+    ? (parseFloat(serverStats?.totalSavings ?? totalSavings) || 0)
+    : 0;
 
-  deposits.forEach(d => {
-    // Only count strictly confirmed deposits toward total savings to match the web app database
-    const isEffectivelyConfirmed = d.status === "confirmed";
-
-    if (isEffectivelyConfirmed) {
-      if (d.type === "withdrawal") {
-        totalSavingsToDisplay -= parseFloat(d.amount) || 0;
-      } else {
-        totalSavingsToDisplay += parseFloat(d.amount) || 0;
-      }
-    }
-
-    try {
-      // Handle both ISO date strings from backend and legacy MM/DD/YYYY
-      const dateStr = d.date || d.createdAt || "";
-      const parsed = new Date(dateStr);
-      if (!isNaN(parsed.getTime())) {
-        if ((parsed.getMonth() + 1) === currentMonthNum && parsed.getFullYear() === currentYearNum) {
-          if (isEffectivelyConfirmed && d.type !== "withdrawal") {
-            thisMonthTotalToDisplay += parseFloat(d.amount) || 0;
+  if (thisMonthTotalToDisplay === 0) {
+    deposits.forEach(d => {
+      const isEffectivelyConfirmed = d.status === "confirmed";
+      try {
+        const dateStr = d.date || d.createdAt || "";
+        const parsed = new Date(dateStr);
+        if (!isNaN(parsed.getTime())) {
+          if ((parsed.getMonth() + 1) === currentMonthNum && parsed.getFullYear() === currentYearNum) {
+            if (isEffectivelyConfirmed && d.type !== "withdrawal") {
+              thisMonthTotalToDisplay += parseFloat(d.amount) || 0;
+            }
           }
         }
+      } catch (_) {}
+    });
+  }
+
+  if (totalSavingsToDisplay === 0 && deposits.length > 0 && !serverStats?.totalSavings) {
+    deposits.forEach(d => {
+      const isEffectivelyConfirmed = d.status === "confirmed";
+      if (isEffectivelyConfirmed) {
+        if (d.type === "withdrawal") {
+          totalSavingsToDisplay -= parseFloat(d.amount) || 0;
+        } else {
+          totalSavingsToDisplay += parseFloat(d.amount) || 0;
+        }
       }
-    } catch {
-      // skip malformed dates
-    }
-  });
+    });
+  }
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const currentMonthName = monthNames[currentMonthNum - 1];
 
@@ -937,7 +1105,7 @@ export default function SavingsScreen({ navigation, route }) {
           onRequestClose={() => { setShowTutorial(false); AsyncStorage.setItem(`faithly_savings_tutorial_${userEmail}`, "1").catch(() => {}); }}
         >
           <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", paddingHorizontal: 24 }}>
-            <View style={{ width: "100%", maxWidth: 380, backgroundColor: colors.cardBg, borderRadius: 24, padding: 28, shadowColor: "#000", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 10 }}>
+            <SmoothModalCard visible={showTutorial} style={{ width: "100%", maxWidth: 380, backgroundColor: colors.cardBg, borderRadius: 24, padding: 28, shadowColor: "#000", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 10 }}>
               {/* Step Indicators */}
               <View style={{ flexDirection: "row", justifyContent: "center", gap: 8, marginBottom: 24 }}>
                 {[0, 1, 2, 3].map(i => (
@@ -1012,7 +1180,7 @@ export default function SavingsScreen({ navigation, route }) {
                   </TouchableOpacity>
                 )}
               </View>
-            </View>
+            </SmoothModalCard>
           </View>
         </Modal>
 
@@ -1024,7 +1192,7 @@ export default function SavingsScreen({ navigation, route }) {
           onRequestClose={() => setShowSavingsGuide(false)}
         >
           <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", alignItems: "center", paddingHorizontal: 24 }}>
-            <View style={{ width: "100%", maxWidth: 380, backgroundColor: colors.cardBg, borderRadius: 24, padding: 24, shadowColor: "#000", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 10, maxHeight: "80%" }}>
+            <SmoothModalCard visible={showSavingsGuide} style={{ width: "100%", maxWidth: 380, backgroundColor: colors.cardBg, borderRadius: 24, padding: 24, shadowColor: "#000", shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 10, maxHeight: "80%" }}>
               <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
                   <Text style={{ fontSize: 20, fontWeight: "800", color: colors.textDark }}>Savings Guide</Text>
@@ -1093,7 +1261,7 @@ export default function SavingsScreen({ navigation, route }) {
               >
                 <Text style={{ fontSize: 15, fontWeight: "700", color: "#FFFFFF" }}>Got It</Text>
               </TouchableOpacity>
-            </View>
+            </SmoothModalCard>
           </View>
         </Modal>
 
@@ -1285,7 +1453,7 @@ export default function SavingsScreen({ navigation, route }) {
       {/* ── Deposit Success Modal ── */}
       <Modal visible={!!successDeposit} transparent animationType="fade" onRequestClose={() => setSuccessDeposit(null)}>
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", alignItems: "center", padding: 24 }}>
-          <View style={{ backgroundColor: "#fff", borderRadius: s(24), padding: 32, alignItems: "center", width: "100%", maxWidth: 360, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 24, elevation: 12 }}>
+          <SmoothModalCard visible={!!successDeposit} style={{ backgroundColor: "#fff", borderRadius: s(24), padding: 32, alignItems: "center", width: "100%", maxWidth: 360, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 24, elevation: 12 }}>
             {/* Green check circle */}
             <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "#E8FAF0", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
               <View style={{ width: s(52), height: s(52), borderRadius: 26, backgroundColor: "#34C759", alignItems: "center", justifyContent: "center" }}>
@@ -1316,14 +1484,14 @@ export default function SavingsScreen({ navigation, route }) {
             >
               <Text style={{ color: "#fff", fontWeight: "800", fontSize: fs(15), textAlign: "center" }}>Done</Text>
             </TouchableOpacity>
-          </View>
+          </SmoothModalCard>
         </View>
       </Modal>
 
       {/* ── Transfer Success Modal ── */}
       <Modal visible={!!successTransfer} transparent animationType="fade" onRequestClose={() => setSuccessTransfer(null)}>
         <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", alignItems: "center", padding: 24 }}>
-          <View style={{ backgroundColor: colors.cardBg || "#fff", borderRadius: s(24), padding: 32, alignItems: "center", width: "100%", maxWidth: 360, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 24, elevation: 12 }}>
+          <SmoothModalCard visible={!!successTransfer} style={{ backgroundColor: colors.cardBg || "#fff", borderRadius: s(24), padding: 32, alignItems: "center", width: "100%", maxWidth: 360, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 24, elevation: 12 }}>
             {/* Blue transfer circle */}
             <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "rgba(13,31,69,0.08)", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
               <View style={{ width: s(52), height: s(52), borderRadius: 26, backgroundColor: colors.blue || "#0D1F45", alignItems: "center", justifyContent: "center" }}>
@@ -1370,7 +1538,7 @@ export default function SavingsScreen({ navigation, route }) {
             >
               <Text style={{ color: "#fff", fontWeight: "800", fontSize: fs(15) }}>Done</Text>
             </TouchableOpacity>
-          </View>
+          </SmoothModalCard>
         </View>
       </Modal>
 
@@ -1497,7 +1665,7 @@ export default function SavingsScreen({ navigation, route }) {
       {/* Sign Out Confirmation Modal */}
       <Modal visible={showSignOutConfirm} transparent animationType="fade" onRequestClose={() => setShowSignOutConfirm(false)}>
         <View style={styles.confirmOverlay}>
-          <View style={[styles.confirmDialog, { backgroundColor: colors.cardBg }]}>
+          <SmoothModalCard visible={showSignOutConfirm} style={[styles.confirmDialog, { backgroundColor: colors.cardBg }]}>
             <View style={styles.confirmIconContainer}>
               <Image source={ICONS.signout} style={styles.confirmIcon} resizeMode="contain" />
             </View>
@@ -1513,7 +1681,7 @@ export default function SavingsScreen({ navigation, route }) {
                 <Text style={styles.confirmBtnSignOutText}>Sign Out</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </SmoothModalCard>
         </View>
       </Modal>
 
@@ -1521,7 +1689,7 @@ export default function SavingsScreen({ navigation, route }) {
       <Modal visible={depositModalOpen} transparent animationType="fade" onRequestClose={() => setDepositModalOpen(false)}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <View style={styles.modalOverlay}>
-            <View style={[styles.modalBox, { backgroundColor: colors.cardBg, padding: 0 }]}>
+            <SmoothModalCard visible={depositModalOpen} style={[styles.modalBox, { backgroundColor: colors.cardBg, padding: 0 }]}>
               
               <View style={{ padding: s(24), paddingBottom: 0 }}>
                 <View style={[styles.modalHeaderRow, { marginBottom: 20 }]}>
@@ -1776,26 +1944,48 @@ export default function SavingsScreen({ navigation, route }) {
                           )}
                         </View>
                       ) : (
-                        <TouchableOpacity style={styles.uploadDashedBox} activeOpacity={0.7} onPress={async () => {
-                          const result = await ImagePicker.launchImageLibraryAsync({ quality: 0.8, allowsEditing: true, mediaTypes: "images", base64: true });
-                          if (!result.canceled && result.assets?.[0]?.base64) {
-                            const asset = result.assets[0];
-                            setProofImage({ uri: asset.uri, base64: asset.base64 }); setFormError("");
-                            // Auto-verify receipt via Gemini Vision
-                            setReceiptVerification({ verifying: true, valid: false, provider: null, reason: "" });
-                            verifyReceiptImage(asset.base64, "image/jpeg", selectedPayment).then(verdict => {
-                              setReceiptVerification({ ...verdict, verifying: false });
-                              if (!verdict.valid) {
-                                setFormError(verdict.reason || "This doesn't appear to be a valid receipt.");
-                              }
-                            }).catch(() => {
-                              setReceiptVerification({ valid: false, verifying: false, provider: null, reason: "Receipt verification failed. Please try again." });
-                            });
-                          }
-                        }}>
-                          <Image source={ICONS.document} style={styles.uploadDashedIcon} resizeMode="contain" />
-                          <Text style={styles.uploadDashedText}>Click to upload screenshot or receipt</Text>
-                        </TouchableOpacity>
+                        <View style={{ flexDirection: "row", gap: s(10), marginTop: 4 }}>
+                          <TouchableOpacity
+                            style={{
+                              flex: 1,
+                              paddingVertical: s(14),
+                              paddingHorizontal: s(12),
+                              borderRadius: s(12),
+                              borderWidth: 1.5,
+                              borderColor: colors.cardBorder || "#E8ECF0",
+                              backgroundColor: colors.inputBg || "#F8FAFC",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexDirection: "row",
+                              gap: 8,
+                            }}
+                            activeOpacity={0.7}
+                            onPress={() => pickProofImage(true)}
+                          >
+                            <Image source={ICONS.camera} style={{ width: s(18), height: s(18), tintColor: C.blue }} resizeMode="contain" />
+                            <Text style={{ fontSize: fs(13), fontWeight: "700", color: C.blue }}>Camera</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={{
+                              flex: 1,
+                              paddingVertical: s(14),
+                              paddingHorizontal: s(12),
+                              borderRadius: s(12),
+                              borderWidth: 1.5,
+                              borderColor: colors.cardBorder || "#E8ECF0",
+                              backgroundColor: colors.inputBg || "#F8FAFC",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexDirection: "row",
+                              gap: 8,
+                            }}
+                            activeOpacity={0.7}
+                            onPress={() => pickProofImage(false)}
+                          >
+                            <Image source={ICONS.document} style={{ width: s(18), height: s(18), tintColor: C.blue }} resizeMode="contain" />
+                            <Text style={{ fontSize: fs(13), fontWeight: "700", color: C.blue }}>Gallery</Text>
+                          </TouchableOpacity>
+                        </View>
                       )}
                     </View>
                   )}
@@ -1813,7 +2003,7 @@ export default function SavingsScreen({ navigation, route }) {
                  </TouchableOpacity>
               </View>
 
-            </View>
+            </SmoothModalCard>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -1822,7 +2012,7 @@ export default function SavingsScreen({ navigation, route }) {
       <Modal visible={withdrawModalOpen} transparent animationType="fade" onRequestClose={() => setWithdrawModalOpen(false)}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <View style={styles.modalOverlay}>
-            <View style={[styles.modalBox, { backgroundColor: colors.cardBg, padding: 0 }]}>
+            <SmoothModalCard visible={withdrawModalOpen} style={[styles.modalBox, { backgroundColor: colors.cardBg, padding: 0 }]}>
               
               <View style={{ padding: s(24), paddingBottom: 0 }}>
                 <View style={[styles.modalHeaderRow, { marginBottom: 20 }]}>
@@ -1998,7 +2188,7 @@ export default function SavingsScreen({ navigation, route }) {
                  </TouchableOpacity>
               </View>
 
-            </View>
+            </SmoothModalCard>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -2007,7 +2197,7 @@ export default function SavingsScreen({ navigation, route }) {
       <Modal visible={transferModalOpen} transparent animationType="fade" onRequestClose={() => setTransferModalOpen(false)}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <View style={styles.modalOverlay}>
-            <View style={[styles.modalBox, { backgroundColor: colors.cardBg, padding: 0 }]}>
+            <SmoothModalCard visible={transferModalOpen} style={[styles.modalBox, { backgroundColor: colors.cardBg, padding: 0 }]}>
               
               <View style={{ padding: s(24), paddingBottom: 0 }}>
                 <View style={[styles.modalHeaderRow, { marginBottom: 20 }]}>
@@ -2164,7 +2354,7 @@ export default function SavingsScreen({ navigation, route }) {
                  </TouchableOpacity>
               </View>
 
-            </View>
+            </SmoothModalCard>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -2173,7 +2363,7 @@ export default function SavingsScreen({ navigation, route }) {
       <Modal visible={goalModalOpen} transparent animationType="fade" onRequestClose={() => setGoalModalOpen(false)}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <View style={styles.modalOverlay}>
-            <View style={[styles.modalBox, { backgroundColor: colors.cardBg }]}>
+            <SmoothModalCard visible={goalModalOpen} style={[styles.modalBox, { backgroundColor: colors.cardBg }]}>
               <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }} contentContainerStyle={styles.modalContent}>
               <Text style={[styles.modalTitle, { color: colors.textDark }]}>New Savings Goal</Text>
               <Text style={[styles.modalSubtext, { color: colors.textMuted }]}>
@@ -2270,12 +2460,21 @@ export default function SavingsScreen({ navigation, route }) {
                   >
                     <Text style={[styles.modalBtnCancelText, { color: colors.textDark }]}>Cancel</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.modalBtnSubmit} activeOpacity={0.85} onPress={handleAddGoal}>
-                    <Text style={styles.modalBtnSubmitText}>Create Goal</Text>
+                  <TouchableOpacity
+                    style={[styles.modalBtnSubmit, submitting && { opacity: 0.7 }]}
+                    activeOpacity={0.85}
+                    onPress={handleAddGoal}
+                    disabled={submitting}
+                  >
+                    {submitting ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Text style={styles.modalBtnSubmitText}>Create Goal</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
               </View>
-            </View>
+            </SmoothModalCard>
           </View>
         </KeyboardAvoidingView>
       </Modal>

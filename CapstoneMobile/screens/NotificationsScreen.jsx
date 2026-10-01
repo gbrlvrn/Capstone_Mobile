@@ -36,6 +36,7 @@ const ICONS = {
   bell: require("../assets/icons/bell.png"),
   wallet: require("../assets/icons/wallet.png"),
   attendance: require("../assets/icons/attendance.png"),
+  check: require("../assets/icons/check-circle.png"),
   logo: require("../assets/puac_logo.png"),
 };
 
@@ -162,17 +163,60 @@ function formatTime(dateStr) {
   return fmtDateMonthDay(d);
 }
 
-// Legacy helper — kept for backward compatibility with addNotification calls from other screens
-export const addNotification = async (userEmail, category, title, message) => {
+// Helper for OS push & local notification feeds
+export const addNotification = async (userEmail, category, title, message, subType = null) => {
   if (!userEmail) return;
+  const cleanMail = userEmail.toLowerCase().trim();
+
+  // Set proper accent color for push notifications
+  let notifColor = "#0D1F45";
+  const titleLower = (title || "").toLowerCase();
+  const typeLower = (subType || "").toLowerCase();
+  if (
+    typeLower.includes("added") || titleLower.includes("added") || titleLower.includes("created") ||
+    typeLower.includes("removed") || titleLower.includes("removed") || titleLower.includes("deleted")
+  ) {
+    notifColor = "#10B981"; // Emerald green for success
+  }
+
   try {
     // Trigger OS-level local push notification
-    await Notifications.scheduleNotificationAsync({
-      content: { title, body: message, data: { category } },
-      trigger: null,
-    }).catch(() => {});
+    if (Notifications && Notifications.scheduleNotificationAsync) {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body: message,
+          color: notifColor,
+          data: { category, subType, screen: "Savings" },
+        },
+        trigger: null,
+      }).catch(() => {});
+    }
   } catch (e) {
     console.log("Local push failed:", e);
+  }
+
+  try {
+    const key = `faithly_notifications_${cleanMail}`;
+    const raw = await AsyncStorage.getItem(key);
+    const existing = raw ? JSON.parse(raw) : [];
+    const prefix = subType
+      ? `savings-${subType}`
+      : (category === "loan" ? "loan" : (category === "announcement" ? "announcement" : "savings"));
+    const newEntry = {
+      id: `${prefix}-local-${Date.now()}`,
+      category: category || "transaction",
+      subType: subType || "",
+      title,
+      message,
+      time: "Just now",
+      read: false,
+      isLocal: true,
+      raw: { createdAt: new Date().toISOString() },
+    };
+    await AsyncStorage.setItem(key, JSON.stringify([newEntry, ...(Array.isArray(existing) ? existing.slice(0, 49) : [])]));
+  } catch (e) {
+    console.log("Saving local notification failed:", e);
   }
 };
 
@@ -216,12 +260,39 @@ export default function NotificationsScreen({ navigation, route }) {
         getReadNotificationIds(),
       ]);
       const mapped = mapFeedItems(feed, readIds);
-      setNotifications(mapped);
+
+      // Merge local notifications (e.g. goal removed, client actions)
+      let localItems = [];
+      try {
+        const cleanMail = userEmail ? userEmail.toLowerCase().trim() : "";
+        if (cleanMail) {
+          const key = `faithly_notifications_${cleanMail}`;
+          const raw = await AsyncStorage.getItem(key);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            const readSet = new Set(readIds || []);
+            localItems = (Array.isArray(parsed) ? parsed : [])
+              .filter(item => item && item.isLocal)
+              .map(item => ({
+                ...item,
+                read: readSet.has(item.id) || item.read,
+              }));
+          }
+        }
+      } catch {}
+
+      const combined = [...localItems, ...mapped];
+      combined.sort((a, b) => {
+        const da = a.raw?.updatedAt || a.raw?.createdAt || a.raw?.date || 0;
+        const db = b.raw?.updatedAt || b.raw?.createdAt || b.raw?.date || 0;
+        return new Date(db) - new Date(da);
+      });
+      setNotifications(combined);
     } catch (e) {
       console.error("Failed to load notifications:", e.message);
       // Fallback: load from AsyncStorage cache
       try {
-        const key = `faithly_notifications_${userEmail}`;
+        const key = `faithly_notifications_${userEmail.toLowerCase().trim()}`;
         const savedData = await AsyncStorage.getItem(key);
         if (savedData) setNotifications(JSON.parse(savedData));
       } catch {}
@@ -265,6 +336,20 @@ export default function NotificationsScreen({ navigation, route }) {
     if (notif.read) return;
     // Optimistic update
     setNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
+    if (notif.isLocal) {
+      try {
+        const cleanMail = userEmail ? userEmail.toLowerCase().trim() : "";
+        if (cleanMail) {
+          const key = `faithly_notifications_${cleanMail}`;
+          const raw = await AsyncStorage.getItem(key);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            const updated = (Array.isArray(parsed) ? parsed : []).map(item => item.id === notif.id ? { ...item, read: true } : item);
+            await AsyncStorage.setItem(key, JSON.stringify(updated));
+          }
+        }
+      } catch {}
+    }
     // Persist to server
     await markNotificationsRead([notif.id]);
   };
@@ -284,27 +369,74 @@ export default function NotificationsScreen({ navigation, route }) {
     return null;
   };
 
-    const handleMarkAllRead = async () => {
+  const handleMarkAllRead = async () => {
     const unreadIds = notifications.filter(n => !n.read).map(n => n.id);
     if (unreadIds.length === 0) return;
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    try {
+      const cleanMail = userEmail ? userEmail.toLowerCase().trim() : "";
+      if (cleanMail) {
+        const key = `faithly_notifications_${cleanMail}`;
+        const raw = await AsyncStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const updated = (Array.isArray(parsed) ? parsed : []).map(item => ({ ...item, read: true }));
+          await AsyncStorage.setItem(key, JSON.stringify(updated));
+        }
+      }
+    } catch {}
     await markNotificationsRead(unreadIds);
   };
 
-  const getIconForCategory = (category, notifId) => {
+  const getIconForCategory = (category, notifId, notif = null) => {
+    const titleLower = (notif?.title || "").toLowerCase();
+    const idLower = (notifId || "").toLowerCase();
+    const subTypeLower = (notif?.subType || "").toLowerCase();
+
+    // 1. Goal Added Notification -> Green for Success (#10B981)
+    if (
+      subTypeLower === "goal-added" ||
+      idLower.includes("goal-added") ||
+      (titleLower.includes("goal") && (titleLower.includes("added") || titleLower.includes("created")))
+    ) {
+      return {
+        icon: ICONS.wallet,
+        color: "#10B981", // Green for success
+        bg: "rgba(16, 185, 129, 0.12)",
+        badgeText: "Goal Added",
+      };
+    }
+
+    // 2. Goal Removed Notification -> Green for Success (#10B981) with Check Icon!
+    if (
+      subTypeLower === "goal-removed" ||
+      idLower.includes("goal-removed") ||
+      (titleLower.includes("goal") && (titleLower.includes("removed") || titleLower.includes("deleted")))
+    ) {
+      return {
+        icon: ICONS.check,
+        color: "#10B981", // Green for success
+        bg: "rgba(16, 185, 129, 0.12)",
+        badgeText: "Goal Removed",
+      };
+    }
+
     // Attendance gets its own calendar/attendance icon to distinguish from savings
-    if (notifId?.startsWith("attendance")) {
-      return { icon: ICONS.attendance, color: C.blue, bg: C.blueLight };
+    if (idLower.startsWith("attendance")) {
+      return { icon: ICONS.attendance, color: C.blue, bg: C.blueLight, badgeText: "Attendance" };
+    }
+    if (idLower.startsWith("savings")) {
+      return { icon: ICONS.wallet, color: C.blue, bg: C.blueLight, badgeText: "Savings" };
     }
     switch (category) {
       case "transaction":
-        return { icon: ICONS.heart, color: C.green, bg: C.greenLight };
+        return { icon: ICONS.heart, color: C.green, bg: C.greenLight, badgeText: "Transaction" };
       case "announcement":
-        return { icon: ICONS.branches, color: C.purple, bg: C.purpleLight };
+        return { icon: ICONS.branches, color: C.purple, bg: C.purpleLight, badgeText: "Announcement" };
       case "loan":
-        return { icon: ICONS.loans, color: C.blue, bg: C.blueLight };
+        return { icon: ICONS.loans, color: C.blue, bg: C.blueLight, badgeText: "Loan" };
       default:
-        return { icon: ICONS.bell, color: C.orange, bg: C.orangeLight };
+        return { icon: ICONS.bell, color: C.orange, bg: C.orangeLight, badgeText: "Notification" };
     }
   };
 
@@ -421,7 +553,7 @@ export default function NotificationsScreen({ navigation, route }) {
           </View>
         ) : (
           filteredNotifications.map((notif, idx) => {
-            const iconData = getIconForCategory(notif.category, notif.id);
+            const iconData = getIconForCategory(notif.category, notif.id, notif);
             return (
               <TouchableOpacity
                 key={notif.id || idx}
@@ -429,7 +561,7 @@ export default function NotificationsScreen({ navigation, route }) {
                 style={[
                   styles.notifCard,
                   { backgroundColor: colors.cardBg },
-                  !notif.read && styles.notifCardUnread,
+                  !notif.read && [styles.notifCardUnread, { borderLeftColor: iconData.color }],
                 ]}
                 onPress={() => handleOpenNotification(notif)}
               >
@@ -446,11 +578,36 @@ export default function NotificationsScreen({ navigation, route }) {
                   />
                 </View>
                 <View style={styles.notifContent}>
-                  <Text style={[styles.notifTitle, { color: colors.textDark }]}>{notif.title}</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+                    <Text style={[styles.notifTitle, { color: colors.textDark, flex: 1, marginRight: 6 }]}>
+                      {notif.title}
+                    </Text>
+                    {iconData.badgeText && (
+                      <View
+                        style={{
+                          paddingHorizontal: 8,
+                          paddingVertical: 2,
+                          borderRadius: 6,
+                          backgroundColor: iconData.bg,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: fs(10),
+                            fontWeight: "700",
+                            color: iconData.color,
+                            letterSpacing: 0.2,
+                          }}
+                        >
+                          {iconData.badgeText}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={[styles.notifMessage, { color: colors.textMuted }]}>{notif.message}</Text>
                   <Text style={styles.notifTime}>{notif.time}</Text>
                 </View>
-                {!notif.read && <View style={styles.unreadDot} />}
+                {!notif.read && <View style={[styles.unreadDot, { backgroundColor: iconData.color }]} />}
               </TouchableOpacity>
             );
           })
@@ -501,19 +658,19 @@ export default function NotificationsScreen({ navigation, route }) {
                   paddingVertical: 5,
                   paddingHorizontal: 12,
                   borderRadius: 10,
-                  backgroundColor: getIconForCategory(selectedNotif?.category, selectedNotif?.id).bg,
+                  backgroundColor: getIconForCategory(selectedNotif?.category, selectedNotif?.id, selectedNotif).bg,
                 }}
               >
                 <Text
                   style={{
                     fontSize: 11,
                     fontWeight: "800",
-                    color: getIconForCategory(selectedNotif?.category, selectedNotif?.id).color,
+                    color: getIconForCategory(selectedNotif?.category, selectedNotif?.id, selectedNotif).color,
                     letterSpacing: 0.5,
                     textTransform: "uppercase",
                   }}
                 >
-                  {selectedNotif?.category || "Notification"}
+                  {getIconForCategory(selectedNotif?.category, selectedNotif?.id, selectedNotif).badgeText || selectedNotif?.category || "Notification"}
                 </Text>
               </View>
 

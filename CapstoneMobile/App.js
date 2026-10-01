@@ -97,14 +97,20 @@ export default function App() {
   const responseListener = useRef();
 
   useEffect(() => {
-    registerForPushNotifications();
+    try {
+      registerForPushNotifications();
+    } catch {}
 
     // Listen for notification taps (deep linking)
-    if (Notifications) {
-      responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
-        const data = response.notification.request.content.data || {};
-        navigateFromNotification(data);
-      });
+    if (Notifications && typeof Notifications.addNotificationResponseReceivedListener === 'function') {
+      try {
+        responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
+          const data = response.notification.request.content.data || {};
+          navigateFromNotification(data);
+        });
+      } catch (e) {
+        console.log('Failed to add notification response listener:', e);
+      }
     }
 
     // ── Auto-logout on token expiry (401 from any API call) ──────────
